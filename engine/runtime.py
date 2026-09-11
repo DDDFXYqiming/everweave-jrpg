@@ -10,10 +10,16 @@ from .schema import InvalidPatch
 from .content import scalar, path
 from .scene import cells_for, solid_at, paint, validate_space
 from . import catalog as C
+from .normalization import item_local_id
+from .diagnostics import issue, category_for
 
 
 class RuleError(InvalidPatch):
-    pass
+    def __init__(self, message=None, **kwargs):
+        if 'category' not in kwargs and 'issues' not in kwargs:
+            category=category_for(message)
+            kwargs['category']='gameplay' if category=='format' else category
+        super().__init__(message,**kwargs)
 
 
 def install(region, spec=None):
@@ -75,9 +81,7 @@ class Runtime:
 
     def item_id(self, key):
         if key in self.s['items']: return key
-        candidate = self.region['id'] + ':' + key
-        if candidate in self.s['items']: return candidate
-        matches = [k for k in self.s['items'] if k.startswith(self.region['id']+':') and k.endswith(':'+key)]
+        matches = [k for k,item in self.s['items'].items() if item_local_id(item,self.region['id'])==key]
         if len(matches) == 1: return matches[0]
         raise RuleError('undefined/ambiguous item: ' + key)
 
@@ -287,26 +291,33 @@ def check_references(region, items):
         if 'id' not in e: continue
         objects.update((e['id'], e.get('local_id', e['id']), e['id'].removeprefix(region['id']+':')))
     sprites = region.get('visuals', {}).get('sprites', {})
-    known_items = set(items) | {k.removeprefix(region['id']+':') for k in items}
-    known_items.update(k.rsplit(':',1)[-1] for k in items if k.startswith(region['id']+':'))
-    def walk(node):
+    errors=[]
+    def bad(location,message,value=None):
+        errors.append(issue(location,message,category='reference',value=value,expected='one unambiguous declared identity'))
+    def check_item(key,location):
+        if key in items:return
+        matches=[name for name,item in items.items() if item_local_id(item,region['id'])==key]
+        if len(matches)!=1:bad(location,'undefined item reference' if not matches else 'ambiguous item reference',key)
+    def walk(node,location):
         if isinstance(node, list):
-            for v in node: walk(v)
+            for index,v in enumerate(node): walk(v,f'{location}[{index}]')
         elif isinstance(node, dict):
             name = node.get('get', node.get('path', ''))
-            if name.startswith('objects.') and name.split('.')[1] not in objects: raise RuleError('undefined object path '+name)
+            field='get' if 'get' in node else 'path'
+            if name.startswith('objects.') and name.split('.')[1] not in objects: bad(location+'.'+field,'undefined object path',name)
             if name.startswith('vars.') and name.split('.')[1] not in region.get('runtime',{}).get('vars',region.get('program',{}).get('vars',{})):
-                raise RuleError('declare variable before use: '+name)
+                bad(location+'.'+field,'declare variable before use',name)
             if node.get('op') in ('move', 'sprite', 'solid', 'remove') or 'label' in node or 'on' in node:
-                if node.get('target', 'player') not in objects: raise RuleError('undefined action target')
-            if 'item' in node and node['item'] not in known_items: raise RuleError('undefined item expression')
-            if node.get('op') == 'item' and node['id'] not in known_items: raise RuleError('undefined item effect')
-            if node.get('op') == 'sprite' and node['value'] not in sprites: raise RuleError('undefined sprite effect')
-            if 'surface' in node and node['surface'] not in sprites: raise RuleError('undefined surface')
-            for value in node.values(): walk(value)
-    walk(region.get('program', {}))
+                if node.get('target', 'player') not in objects: bad(location+'.target','undefined action target',node.get('target'))
+            if 'item' in node:check_item(node['item'],location+'.item')
+            if node.get('op') == 'item':check_item(node['id'],location+'.id')
+            if node.get('op') == 'sprite' and node['value'] not in sprites: bad(location+'.value','undefined sprite effect',node['value'])
+            if 'surface' in node and node['surface'] not in sprites: bad(location+'.surface','undefined surface',node['surface'])
+            for key,value in node.items(): walk(value,location+'.'+key)
+    walk(region.get('program', {}),'region.program')
     for item in items.values():
-        if item.get('origin') == region['id']: walk(item.get('use', {}))
+        if item.get('origin') == region['id']: walk(item.get('use', {}),f'items[{item["id"]}].use')
+    if errors:raise RuleError(issues=errors)
 
 
 def design_record(plan):

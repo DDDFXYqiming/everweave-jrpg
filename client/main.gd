@@ -68,6 +68,9 @@ var modal_overlay: Control
 var modal_stack: VBoxContainer
 var battle_canvas
 var pause_button: Button
+var retry_failed_button: Button
+var failure_list: VBoxContainer
+var failure_signature: String = ""
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -370,10 +373,12 @@ func _build_game() -> void:
 	director_label = _label(side, "", 13, MINT)
 	frontier_label = _label(side, "", 13, MUTED)
 	error_label = _label(side, "", 13, Color("e7a69d"))
+	failure_list = VBoxContainer.new()
+	side.add_child(failure_list)
 	var controls := HBoxContainer.new()
 	side.add_child(controls)
 	pause_button = _button(controls, "暂停导演", _toggle_pause)
-	_button(controls, "重试", func() -> void: _post("/retry", {}))
+	retry_failed_button = _button(controls, "重试失败项", func() -> void: _post("/retry", {}))
 	_label(side, "最近的回声", 17, GOLD)
 	journal_label = _label(side, "", 13, MUTED)
 	var footer := HBoxContainer.new()
@@ -623,13 +628,18 @@ func _render() -> void:
 	if mode == "not_configured": mode_text = "尚未配置导演"
 	if mode == "live_llm": mode_text += " · 思考 " + str(d.get("reasoning_effort", "low"))
 	director_label.text = mode_text + "\n" + (str(d.busy) if not str(d.get("busy", "")).is_empty() else ("导演已暂停" if bool(d.get("paused", false)) else "等待重要事件 · 不按帧调用"))
-	director_label.text += "\n请求 %d / %d · 已接受 %d\n输入 %d / 输出 %d tokens" % [int(d.get("calls", 0)), int(d.get("max_calls", 60)), int(d.get("accepted", 0)), int(d.get("input_tokens", 0)), int(d.get("output_tokens", 0))]
+	var failed_tasks: Array = d.get("failed_tasks", [])
+	director_label.text += "\n请求 %d / %d · 其中修复 %d" % [int(d.get("calls", 0)), int(d.get("max_calls", 60)), int(d.get("repair_calls", 0))]
+	director_label.text += "\n已应用 %d · 过期 %d · 失败任务 %d" % [int(d.get("accepted", 0)), int(d.get("stale", 0)), failed_tasks.size()]
+	director_label.text += "\n在途 %d · 本地纠正 %d 处\n输入 %d / 输出 %d tokens" % [int(d.get("active_requests", 0)), int(d.get("normalization_count", 0)), int(d.get("input_tokens", 0)), int(d.get("output_tokens", 0))]
 	director_label.text += "\n提前两层 · 已准备 %d / %d 区域" % [int(d.get("prefetch_ready", 0)), int(d.get("prefetch_total", 0))]
 	lines.clear()
 	for f in state.get("frontier", []):
 		lines.append(("● " if bool(f.ready) else "○ ") + str(f.name))
 	frontier_label.text = "下一片土地\n" + "\n".join(lines)
-	error_label.text = last_action_error if not last_action_error.is_empty() else str(d.get("error", ""))
+	error_label.text = last_action_error if not last_action_error.is_empty() else (str(d.get("error", "")) if failed_tasks.is_empty() else "")
+	retry_failed_button.disabled = failed_tasks.is_empty()
+	_render_failures(failed_tasks)
 	pause_button.text = "继续导演" if bool(d.get("paused", false)) else "暂停导演"
 	var history: Array = state.get("journal", [])
 	lines.clear()
@@ -637,6 +647,29 @@ func _render() -> void:
 		lines.append(str(history[i]).left(110))
 	journal_label.text = "\n\n".join(lines)
 	_render_modal()
+
+func _render_failures(tasks: Array) -> void:
+	var signature: String = JSON.stringify(tasks)
+	if signature == failure_signature: return
+	failure_signature = signature
+	for child in failure_list.get_children():
+		failure_list.remove_child(child)
+		child.queue_free()
+	var categories: Dictionary = {"format":"格式", "reference":"身份与引用", "gameplay":"玩法与地图", "provider":"模型服务", "internal":"引擎处理"}
+	for task in tasks:
+		var row := VBoxContainer.new()
+		failure_list.add_child(row)
+		var kind: String = "地区生成" if str(task.kind) == "region" else "世界变化"
+		_label(row, "%s · %s失败" % [str(task.name), kind], 14, Color("e7a69d"))
+		var details: Array = task.get("issues", [])
+		var reason: String = str(task.get("message", "生成未完成"))
+		if not details.is_empty():
+			var field_path: String = str(details[0].get("path", "$"))
+			reason = (field_path + "\n" if field_path != "$" else "") + str(details[0].get("message", reason))
+			if details.size() > 1: reason += "\n另有 %d 项问题，重试时一并修复。" % (details.size() - 1)
+		var detail_label := _label(row, str(categories.get(str(task.get("category", "format")), "生成")) + " · " + reason.left(260), 12, MUTED)
+		detail_label.tooltip_text = JSON.stringify(details, "  ")
+		_button(row, "重试此任务", _post.bind("/retry", {"target":str(task.target), "kind":str(task.kind)}))
 
 func _clear_modal() -> void:
 	for child in modal_stack.get_children():

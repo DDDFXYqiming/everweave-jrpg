@@ -85,11 +85,11 @@ class World:
   s=self.state; rid=r['id']
   if not s['topology'][rid]['visited']:
    for raw in r['plan'].get('items',[]):
-    i=copy.deepcopy(raw); i['id']=rid+':'+i['id']; i['origin']=rid
+    i=copy.deepcopy(raw); i['local_id']=raw['id']; i['id']=rid+':'+i['id']; i['origin']=rid
     if i.get('sprite') in r.get('visuals',{}).get('sprites',{}):i['icon_visual']=freeze_sprite(r['visuals']['sprites'][i['sprite']],r['visuals']['palette'])
     s['items'][i['id']]=i
    for raw in r['plan'].get('quests',[]):
-    q=copy.deepcopy(raw); q['id']=rid+':'+q['id']; q['target']=rid+':'+q['target'] if q['target'] not in C.BASE_ITEMS else q['target']; q.update(status='active',region=rid,reward=15+r['depth']*5); s['quests'][q['id']]=q
+    q=copy.deepcopy(raw); q['id']=rid+':'+q['id']; q['target']=rid+':'+q['target'] if q['target'] not in C.BASE_ITEMS and ':' not in q['target'] else q['target']; q.update(status='active',region=rid,reward=15+r['depth']*5); s['quests'][q['id']]=q
    record=gameplay.design_record(r['plan']);self.state.setdefault('design_history',[]).append(record);self.state['design_history']=self.state['design_history'][-32:]
    previous=self.state['design_history'][:-1]
    if r.get('program') and any(x.get('logic')==record['logic'] for x in previous):self.note('设计提示：这一地区的交互结构与过去相似，导演将在后续创作中避免重复。')
@@ -104,8 +104,14 @@ class World:
   for child in list(node['children']): removed.extend(self._discard_draft(child))
   self.state['topology'].pop(rid); self.cache.pop(rid,None)
   return removed
+ def validation_context(self,context):
+  current=self.region() or {}
+  return dict(context,validation_items=list(self.state['items'].values()),validation_quests=list(self.state['quests'].values()),validation_props=current.get('props',[]),validation_bindings=current.get('visuals',{}).get('bindings',{}))
  def validate_patch(self,raw,context):
-  p=parse_patch(raw,context['kind'])
+  identities=self.validation_context(context)
+  changes=[]
+  p=parse_patch(raw,context['kind'],identities,changes)
+  p['_corrections']=changes
   if p['kind']=='region' and context.get('refresh') and context.get('existing_destinations'):
    expected={d['id'] for d in context['existing_destinations']}
    actual={d['id'] for d in p['region'].get('destinations',[])}
@@ -133,13 +139,23 @@ class World:
    if node['parent']:links.append(dict(target=node['parent'],direction='back',label='return'))
    preview=build_region(p['region'],rid,C.stable_seed(self.state['setting'],rid),node['depth'],links);preview['plan']=p['region']
    gameplay.definitions(self,preview)
+  if p['kind']=='reaction':
+   # Validate registration, executable references and causal geometry together
+   # on an isolated copy so semantic failures enter the same bounded repair.
+   from .storage import Store
+   preview_store=Store(':memory:')
+   try:
+    preview_store.commit(copy.deepcopy(self.state),[copy.deepcopy(self.region(context['current_region']['id']))])
+    preview=World(preview_store)
+    preview._apply_patch(None,context,_validated=p)
+   finally:preview_store.close()
   return p
  def apply_patch(self,raw,context,source='llm'):
   return gameplay.transaction(self,lambda:self._apply_patch(raw,context,source))
- def _apply_patch(self,raw,context,source='llm'):
+ def _apply_patch(self,raw,context,source='llm',_validated=None):
   s=self.state
   if not s or context['epoch']!=s['epoch'] or context['story_revision']!=s['story_revision']: return False
-  p=self.validate_patch(raw,context)
+  p=self.validate_patch(raw,context) if _validated is None else _validated
   before=copy.deepcopy(s); cache_before=copy.deepcopy(self.cache)
   try:
    if p['kind']=='region':
@@ -158,7 +174,7 @@ class World:
      for n,child in enumerate(node['children']): s['topology'][child]=dict(parent=rid,depth=node['depth']+1,ready=False,visited=False,name='远处的灯火' if n==0 else '尚未命名的道路',children=[])
     exits=[dict(target=ch,direction='forward',label='前往 '+s['topology'][ch]['name']) for ch in node['children']]
     if node['parent']: exits.append(dict(target=node['parent'],direction='back',label='返回 '+s['topology'][node['parent']]['name']))
-    r=build_region(p['region'],rid,C.stable_seed(s['setting'],rid),node['depth'],exits); r.update(plan=p['region'],source=source,pending_lore=p['lore'],pending_threads=p['threads']); node.update(ready=True,name=r['name'],needs_refresh=False)
+    r=build_region(p['region'],rid,C.stable_seed(s['setting'],rid),node['depth'],exits); r.update(plan=p['region'],source=source,pending_lore=p['lore'],pending_threads=p['threads'],normalizations=p['_corrections'][-128:]); node.update(ready=True,name=r['name'],needs_refresh=False)
     if r.get('visuals'):
      if rid=='r0' and 'hero' not in r['visuals']['sprites']:raise InvalidPatch('opening region requires hero sprite')
      if rid=='r0':s['hero_visual']=freeze_sprite(r['visuals']['sprites']['hero'],r['visuals']['palette'])
@@ -187,7 +203,7 @@ class World:
     item_refs={i['id']:prefix+i['id'] for i in re['items']}
     entity_refs={e['id']:prefix+e['id'] for e in re['spawns']}
     for raw_item in re['items']:
-     i=copy.deepcopy(raw_item); i['id']=item_refs[i['id']];i['origin']=rid
+     i=copy.deepcopy(raw_item); i['local_id']=raw_item['id'];i['id']=item_refs[i['id']];i['origin']=rid
      if i['id'] in s['items']: raise InvalidPatch('item already exists')
      item_art=re.get('visuals',r.get('visuals',{}))
      if i.get('sprite') in item_art.get('sprites',{}):i['icon_visual']=freeze_sprite(item_art['sprites'][i['sprite']],item_art['palette'])
@@ -227,6 +243,7 @@ class World:
      occupied.add(pos); occupied.add((pos[0],pos[1]-1)); children.append(target)
      r['entities'].append(dict(id=prefix+'gate_'+spec['id'],kind='exit',name='前往 '+spec['name'],target=target,direction='forward',x=pos[0],y=pos[1],spent=False))
     gameplay.reaction(self,r,re)
+    r['normalizations']=(r.get('normalizations',[])+p['_corrections'])[-128:]
     self._merge_lore(p['lore'],p['threads']); s['director_reaction_pending']=False; r['revision']+=1; self.note('世界回应：'+re['text']); self.persist(r)
   except Exception:
    self.state=before; self.cache=cache_before; raise

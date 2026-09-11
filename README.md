@@ -4,7 +4,7 @@
 
 这不是“让 AI 写好一款游戏后再玩”，也不是带立绘的聊天窗口。你实际在地图里移动、调查、开箱、买卖、装备和回合制战斗；重要选择、发现与胜利会反馈给同一个导演模型，改变正在发生的事及尚未抵达的区域。
 
-**当前状态：Content Runtime v2 源码原型，尚不是完整发行游戏。** 本轮通过 132 项 Python 测试、Godot 原生冒烟检查及 119 次客户端 HTTP 操作；尚未进行本轮真实 DeepSeek 联调和 Windows 人工试玩。完整改造尚未推送至 GitHub，当前交付以源码包/补丁为准。见 [本轮验证记录](docs/REFRACTOR_TEST_REPORT.md)。
+**当前状态：Content Runtime v2 源码原型，尚不是完整发行游戏。** 已接入统一格式纠正、按作用域解析 ID 与引用、完整错误位置和按地区重试，并完成 Windows / Godot 原生测试及真实 DeepSeek 下一地区联调。见 [最新协议与验收记录](docs/PROTOCOL_RELIABILITY.md)；最初的 v2 源码包记录保留在 [历史交付记录](docs/REFRACTOR_TEST_REPORT.md)。
 
 此前 v1 的 Windows、99 项测试与真实 DeepSeek 记录保留在 [引擎验收记录](docs/ENGINE_REVIEW.md) 和 [图形与预生成记录](docs/VISUALS_AND_PREFETCH.md)，不作为 v2 在线生成成功的证据。
 

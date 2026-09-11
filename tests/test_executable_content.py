@@ -180,7 +180,8 @@ class ExecutableTests(unittest.TestCase):
         with self.assertRaises(InvalidPatch):program(p)
     def test_unknown_action_reference_rejected_before_use(self):
         p={'kind':'reaction','reaction':{'text':'错误引用','program':{'actions':[{'id':'missing','label':'操作','target':'not_here','effects':[]}]}}}
-        with self.assertRaises(RuleError):self.w.apply_patch(p,self.w.context(kind='reaction'))
+        with self.assertRaises(InvalidPatch) as caught:self.w.apply_patch(p,self.w.context(kind='reaction'))
+        self.assertTrue(any(e['category']=='reference' and e['path']=='reaction.program.actions[0].target' for e in caught.exception.issues))
     def test_scene_footprints_checked(self):
         p=authored_patch();p['region']['entities'][0].update(at=[27,1],footprint=[3,3])
         w=World(Store(':memory:'));w.start('测试越界')

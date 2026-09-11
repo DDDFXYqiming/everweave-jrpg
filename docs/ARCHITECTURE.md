@@ -1,12 +1,14 @@
 # 运行时约定（Content v2）
 
-当前主协议见 [EXECUTABLE_CONTENT.md](EXECUTABLE_CONTENT.md)。此前测试和截图记录属于 v1 的历史验收；本轮实际验证见 [REFRACTOR_TEST_REPORT.md](REFRACTOR_TEST_REPORT.md)。
+当前主协议见 [EXECUTABLE_CONTENT.md](EXECUTABLE_CONTENT.md)。最新的格式适配、身份解析与失败诊断见 [PROTOCOL_RELIABILITY.md](PROTOCOL_RELIABILITY.md)。最初 v2 源码包的验证保留在 [REFRACTOR_TEST_REPORT.md](REFRACTOR_TEST_REPORT.md)。
 
 ## 数据链
 
 玩家世界设定 → 单模型导演 → `region.scene + program + visuals` → 校验与施工 → Godot 渲染与输入 → 本机规则解释器 → 真实事件 → 导演继续创作。
 
 `engine/schema.py` 保留旧存档语法并接入 `content.py` 的空间与程序语法。`scene.py` 执行模型指定的几何、房间和锚点；只有旧数据继续通过 `pcg.py` 的随机铺图。`runtime.py` 是无宿主脚本权限的有界解释器；`gameplay.py` 将其连接到已有玩家操作、战斗和原子存储。
+
+在严格校验之前，`normalization.py` 维护定义与引用的分作用域映射，纠正有唯一解释的格式差异；`diagnostics.py` 提供带路径、分类、原值和期望的多错误报告。既有身份与自然语言文本不做全局改名。`Director.failed_tasks` 与在途、过期和成功结果分别计数，重试按任务选择。
 
 程序数据使用显式变量、表达式、条件、效果和事件，而非只让模型选择有限任务枚举。模型仍不能随意覆写 player 字典或历史事实；受控效果只能在玩家操作及相应规则执行时改变状态。
 

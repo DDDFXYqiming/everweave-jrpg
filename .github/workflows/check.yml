@@ -45,3 +45,7 @@ jobs:
           cat /tmp/content.log
           grep -q 'GODOT_CONTENT_SMOKE_OK' /tmp/content.log
           ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/content.log
+      - name: Exercise targeted retries and executable gameplay through the native HTTP client
+        env:
+          GODOT_BIN: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
+        run: python3 tools/test_native.py --content --headless

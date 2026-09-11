@@ -94,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
      d.configure(data); w.start(setting); server.seen.clear(); server.remember_configuration()
     elif self.path=='/configure': d.configure(data); server.remember_configuration()
     elif self.path=='/action': w.action(data)
-    elif self.path=='/retry': d.retry()
+    elif self.path=='/retry': d.retry(data.get('target'),data.get('kind'))
     elif self.path=='/pause': d.paused=bool(data.get('paused',True))
     else: self.reply(404,dict(error='Not found')); return
     if request_id:

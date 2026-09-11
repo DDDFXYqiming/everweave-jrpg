@@ -4,112 +4,100 @@ import json
 import math
 import re
 from . import catalog as C
-class InvalidPatch(ValueError): pass
+from .diagnostics import InvalidPatch, issue, checked, as_issues, unique_issues
 
 def obj(v,name,allowed,required=()):
- if not isinstance(v,dict): raise InvalidPatch(f'{name}: expected object')
+ if not isinstance(v,dict): raise InvalidPatch(f'{name}: expected object',value=v,expected='object')
  extra=set(v)-set(allowed); missing=set(required)-set(v)
- if extra or missing: raise InvalidPatch(f'{name}: unknown fields {sorted(extra)}, missing fields {sorted(missing)}')
+ if extra or missing:
+  errors=[issue(str(key),'unknown field',value=v[key],expected='one of '+', '.join(allowed)) for key in sorted(extra)]
+  errors += [issue(str(key),'required field is missing',expected='a defined value') for key in sorted(missing)]
+  raise InvalidPatch(issues=errors)
  return v
 
 def text(v,name,limit=180):
- if not isinstance(v,str) or not v.strip() or len(v)>limit: raise InvalidPatch(f'{name}: expected nonempty string <= {limit}')
+ if not isinstance(v,str) or not v.strip() or len(v)>limit: raise InvalidPatch(f'{name}: expected nonempty string <= {limit}',value=v,expected=f'nonempty string, at most {limit} characters')
  if any(ord(c)<32 and c not in '\n\t' for c in v): raise InvalidPatch('control characters')
  return v.strip()
 
 def ident(v):
- if not isinstance(v,str) or not re.fullmatch('[a-z][a-z0-9_]{0,39}',v): raise InvalidPatch(f'id {str(v)[:80]!r} must be bare lower_snake_case, <=40 characters; remove all region prefixes and colons from NEW IDs')
+ if not isinstance(v,str) or not re.fullmatch('[a-z][a-z0-9_]{0,39}',v): raise InvalidPatch(f'id {str(v)[:80]!r} must be bare lower_snake_case, <=40 characters; remove all region prefixes and colons from NEW IDs',value=v,expected='bare lower_snake_case, at most 40 characters')
  return v
 
 def reference(v):
  v=text(v,'reference',160)
- if not re.fullmatch('[a-z][a-z0-9_:]*',v): raise InvalidPatch('invalid reference')
+ if not re.fullmatch('[a-z][a-z0-9_:]*',v): raise InvalidPatch('invalid reference',category='reference',value=v,expected='a local or exact canonical ID')
  return v
 
 def enum(v,choices,name):
- if not isinstance(v,str) or v not in choices: raise InvalidPatch(f'{name}: must be one of {choices}')
+ if not isinstance(v,str) or v not in choices: raise InvalidPatch(f'{name}: must be one of {choices}',value=v,expected=str(choices))
  return v
 
 def arr(v,name,maximum,minimum=0):
- if not isinstance(v,list) or not minimum<=len(v)<=maximum: raise InvalidPatch(f'{name}: expected {minimum}..{maximum} items')
+ if not isinstance(v,list) or not minimum<=len(v)<=maximum: raise InvalidPatch(f'{name}: expected {minimum}..{maximum} items',value=v,expected=f'array with {minimum}..{maximum} items')
  return v
 
 def number(v,name,lo,hi):
- if isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v): raise InvalidPatch(f'{name}: finite number required')
+ if isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v): raise InvalidPatch(f'{name}: finite number required',value=v,expected='finite number')
  return C.clamp(v,lo,hi)
 
 def dialogue(v):
- return [text(x,'dialogue',280) for x in arr(v,'dialogue',4,1)]
+ return [checked(f'[{index}]',text,x,'dialogue',280) for index,x in enumerate(arr(v,'dialogue',4,1))]
 
 def entity(v):
  e=obj(v,'entity',('id','kind','name','zone','appearance','role','dialogue','choices','monster','tier','move','item_id','sprite','at','solid','state','description','footprint','stats'),('id','kind','name'))
- out=dict(id=ident(e['id']),kind=enum(e['kind'],C.KINDS+('object',),'kind'),name=text(e['name'],'name',48),zone=enum(e.get('zone','center'),C.ZONES,'zone'))
- if 'sprite' in e:out['sprite']=ident(e['sprite'])
+ out=dict(id=checked('id',ident,e['id']),kind=checked('kind',enum,e['kind'],C.KINDS+('object',),'kind'),name=checked('name',text,e['name'],'name',48),zone=checked('zone',enum,e.get('zone','center'),C.ZONES,'zone'))
+ if 'sprite' in e:out['sprite']=checked('sprite',ident,e['sprite'])
  if out['kind']=='npc':
-  out.update(role=enum(e.get('role','wanderer'),C.ROLES,'role'),appearance=number(e.get('appearance',0),'appearance',0,7),dialogue=dialogue(e.get('dialogue',['旅人，你听见钟声了吗？'])),choices=[])
-  for ch in arr(e.get('choices',[]),'choices',3):
-   obj(ch,'choice',('id','text','reply','tag'),('id','text','reply','tag'))
-   out['choices'].append(dict(id=ident(ch['id']),text=text(ch['text'],'choice',65),reply=text(ch['reply'],'reply',300),tag=ident(ch['tag'])))
+  out.update(role=checked('role',enum,e.get('role','wanderer'),C.ROLES,'role'),appearance=checked('appearance',number,e.get('appearance',0),'appearance',0,7),dialogue=checked('dialogue',dialogue,e.get('dialogue',['旅人，你听见钟声了吗？'])),choices=[])
+  for index,ch in enumerate(checked('choices',arr,e.get('choices',[]),'choices',3)):
+   loc=f'choices[{index}]';checked(loc,obj,ch,'choice',('id','text','reply','tag'),('id','text','reply','tag'))
+   out['choices'].append(dict(id=checked(loc+'.id',ident,ch['id']),text=checked(loc+'.text',text,ch['text'],'choice',65),reply=checked(loc+'.reply',text,ch['reply'],'reply',300),tag=checked(loc+'.tag',ident,ch['tag'])))
   if len({c['id'] for c in out['choices']})!=len(out['choices']): raise InvalidPatch('duplicate choice IDs')
- elif out['kind']=='enemy': out.update(monster=enum(e.get('monster','slime'),C.MONSTERS,'monster'),tier=number(e.get('tier',1),'tier',1,3),move=enum(e.get('move','strike'),C.MOVES,'move'))
- elif out['kind']=='chest': out['item_id']=reference(e.get('item_id','potion'))
+ elif out['kind']=='enemy': out.update(monster=checked('monster',enum,e.get('monster','slime'),C.MONSTERS,'monster'),tier=checked('tier',number,e.get('tier',1),'tier',1,3),move=checked('move',enum,e.get('move','strike'),C.MOVES,'move'))
+ elif out['kind']=='chest': out['item_id']=checked('item_id',reference,e.get('item_id','potion'))
  from .content import entity_extensions
  return entity_extensions(e,out)
 
 def item(v):
  i=obj(v,'item',('id','name','description','kind','effect','power','price','use','sprite'),('id','name','kind','effect','power'))
- kind=enum(i['kind'],('consumable','weapon','charm','key','tool'),'item.kind'); effect=enum(i['effect'],C.EFFECTS,'effect')
+ kind=checked('kind',enum,i['kind'],('consumable','weapon','charm','key','tool'),'item.kind'); effect=checked('effect',enum,i['effect'],C.EFFECTS,'effect')
  allowed={'consumable':('heal','restore_mp'),'weapon':('attack','burn','drain'),'charm':('defense',),'key':C.EFFECTS,'tool':C.EFFECTS}
- if effect not in allowed[kind]: raise InvalidPatch('effect incompatible with item kind')
- result=dict(id=ident(i['id']),name=text(i['name'],'item.name',48),description=text(i.get('description','世界刚刚赋予它一个名字。'),'description'),kind=kind,effect=effect,power=number(i['power'],'power',1,50 if kind=='consumable' else 8),price=number(i.get('price',25),'price',5,120),icon={'weapon':'sword','consumable':'potion','charm':'charm','key':'key','tool':'key'}[kind])
+ if effect not in allowed[kind]: raise InvalidPatch('effect incompatible with item kind',path='effect',value=effect,expected=str(allowed[kind]))
+ result=dict(id=checked('id',ident,i['id']),name=checked('name',text,i['name'],'item.name',48),description=checked('description',text,i.get('description','世界刚刚赋予它一个名字。'),'description'),kind=kind,effect=effect,power=checked('power',number,i['power'],'power',1,50 if kind=='consumable' else 8),price=checked('price',number,i.get('price',25),'price',5,120),icon={'weapon':'sword','consumable':'potion','charm':'charm','key':'key','tool':'key'}[kind])
  if 'use' in i:
   from .content import item_use
-  result['use']=item_use(i['use'])
- if 'sprite' in i:result['sprite']=ident(i['sprite'])
+  result['use']=checked('use',item_use,i['use'])
+ if 'sprite' in i:result['sprite']=checked('sprite',ident,i['sprite'])
  return result
 
 def destination(v):
  obj(v,'destination',('id','name','description'),('id','name','description'))
- return dict(id=ident(v['id']),name=text(v['name'],'destination.name',48),description=text(v['description'],'destination.description',300))
+ return dict(id=checked('id',ident,v['id']),name=checked('name',text,v['name'],'destination.name',48),description=checked('description',text,v['description'],'destination.description',300))
 
 def unique_ids(values,name):
  if len({v['id'] for v in values})!=len(values): raise InvalidPatch('duplicate '+name+' IDs')
 
-def parse_patch(raw,expected):
- if isinstance(raw,str):
-  if len(raw.encode())>128000: raise InvalidPatch('response too large')
-  raw=raw.strip()
-  if raw.startswith('```') and raw.endswith('```'): raw=raw.split('\n',1)[-1].rsplit('```',1)[0]
-  try: raw=json.loads(raw,parse_constant=lambda v: (_ for _ in ()).throw(InvalidPatch('nonfinite JSON')))
-  except (ValueError,TypeError) as exc: raise InvalidPatch('invalid JSON') from exc
- raw=copy.deepcopy(raw)
- if isinstance(raw,dict) and raw.get('kind')==expected and expected in ('region','reaction') and 'visuals' in raw:
-  # Some models emit the art block beside its region/reaction. Its destination
-  # is unambiguous only for a single correctly typed envelope. All art still
-  # passes the usual validation below; conflicting copies must be rejected.
-  other='reaction' if expected=='region' else 'region'
-  body=raw.get(expected)
-  if isinstance(body,dict) and other not in raw:
-   if 'visuals' in body and body['visuals']!=raw['visuals']:
-    raise InvalidPatch('conflicting top-level and '+expected+'.visuals')
-   body['visuals']=raw.pop('visuals')
- if isinstance(raw,dict) and isinstance(raw.get('region'),dict):
-  # Harmless envelope differences can be normalized without another paid call.
-  # Region identity is always allocated from the engine's request context.
-  region=raw['region']
-  if 'id' in region:reference(region.pop('id'))
-  for field in ('lore','threads'):
-   if field in region:
-    if field in raw and raw[field]!=region[field]:raise InvalidPatch('conflicting nested and top-level '+field)
-    raw[field]=region.pop(field)
+def parse_patch(raw,expected,context=None,corrections=None):
+ from .normalization import normalize_patch
+ normalized,changes,errors=normalize_patch(raw,expected,context)
+ if corrections is not None:corrections.extend(changes)
+ errors.extend(_independent_errors(normalized,expected))
+ if errors:raise InvalidPatch(issues=unique_issues(errors),corrections=changes)
+ try:return _parse_patch(normalized,expected,context)
+ except InvalidPatch as exc:
+  exc.corrections=changes
+  raise
+
+def _parse_patch(raw,expected,context=None):
  p=obj(raw,'patch',('kind','world_title','region','reaction','lore','threads'),('kind',))
- if p['kind']!=expected: raise InvalidPatch(f'expected kind={expected}')
+ if p['kind']!=expected: raise InvalidPatch(f'expected kind={expected}',path='kind',value=p['kind'],expected=expected)
  out=dict(kind=expected,lore=[],threads=[])
- if 'world_title' in p: out['world_title']=text(p['world_title'],'world title',48)
- for f in arr(p.get('lore',[]),'lore',4):
-  obj(f,'lore',('id','text'),('id','text')); out['lore'].append(dict(id=ident(f['id']),text=text(f['text'],'lore',250)))
- for f in arr(p.get('threads',[]),'threads',3):
-  obj(f,'thread',('id','title','note'),('id','title','note')); out['threads'].append(dict(id=ident(f['id']),title=text(f['title'],'thread',64),note=text(f['note'],'note')))
+ if 'world_title' in p: out['world_title']=checked('world_title',text,p['world_title'],'world title',48)
+ for index,f in enumerate(checked('lore',arr,p.get('lore',[]),'lore',4)):
+  loc=f'lore[{index}]';checked(loc,obj,f,'lore',('id','text'),('id','text')); out['lore'].append(dict(id=checked(loc+'.id',ident,f['id']),text=checked(loc+'.text',text,f['text'],'lore',250)))
+ for index,f in enumerate(checked('threads',arr,p.get('threads',[]),'threads',3)):
+  loc=f'threads[{index}]';checked(loc,obj,f,'thread',('id','title','note'),('id','title','note')); out['threads'].append(dict(id=checked(loc+'.id',ident,f['id']),title=checked(loc+'.title',text,f['title'],'thread',64),note=checked(loc+'.note',text,f['note'],'note')))
  if expected=='region':
   if 'reaction' in p: raise InvalidPatch('region cannot also react')
   r=obj(p.get('region'),'region',('name','biome','layout','weather','rule','description','landmarks','entities','items','quests','destinations','visuals','scene','program'),('name','description','entities'))
@@ -123,15 +111,20 @@ def parse_patch(raw,expected):
    reg['landmarks'].append(landmark)
   ids=[e['id'] for e in reg['entities']]; items=[i['id'] for i in reg['items']]
   if len(ids)!=len(set(ids)) or len(items)!=len(set(items)) or set(items)&set(C.BASE_ITEMS): raise InvalidPatch('duplicate or reserved ID')
-  for e in reg['entities']:
-   if e['kind']=='chest' and e['item_id'] not in set(items)|set(C.BASE_ITEMS): raise InvalidPatch('chest item missing')
-  for q in arr(r.get('quests',[]),'quests',3):
-   obj(q,'quest',('id','name','description','goal','target'),('id','name','goal','target')); goal=enum(q['goal'],('defeat','talk','collect'),'goal'); target=ident(q['target'])
+  known_items={i['id'] for i in (context or {}).get('available_items',[])+(context or {}).get('validation_items',[]) if isinstance(i,dict) and 'id' in i}
+  reference_errors=[]
+  for index,e in enumerate(reg['entities']):
+   if e['kind']=='chest' and e['item_id'] not in set(items)|set(C.BASE_ITEMS)|known_items:
+    reference_errors.append(issue(f'region.entities[{index}].item_id','undefined chest item reference',category='reference',value=e['item_id'],expected='a declared local item or an existing canonical item ID'))
+  for index,q in enumerate(arr(r.get('quests',[]),'quests',3)):
+   checked(f'region.quests[{index}]',obj,q,'quest',('id','name','description','goal','target'),('id','name','goal','target'))
+   goal=checked(f'region.quests[{index}].goal',enum,q['goal'],('defeat','talk','collect'),'goal'); target=checked(f'region.quests[{index}].target',reference,q['target'])
    if goal=='collect': valid=any(e['kind']=='chest' and e['item_id']==target for e in reg['entities'])
    else: valid=any(e['id']==target and e['kind']==('enemy' if goal=='defeat' else 'npc') for e in reg['entities'])
-   if not valid: raise InvalidPatch('quest target is absent or wrong kind')
+   if not valid: reference_errors.append(issue(f'region.quests[{index}].target','quest target is absent or wrong kind',category='reference',value=target,expected='a matching local entity or collectible item'))
    reg['quests'].append(dict(id=ident(q['id']),name=text(q['name'],'quest name',64),description=text(q.get('description',q['name']),'quest description'),goal=goal,target=target))
   if len({q['id'] for q in reg['quests']})!=len(reg['quests']): raise InvalidPatch('duplicate quest IDs')
+  if reference_errors:raise InvalidPatch(issues=reference_errors)
   if 'destinations' in r:
    reg['destinations']=[destination(v) for v in arr(r['destinations'],'destinations',2,1)]
    unique_ids(reg['destinations'],'destination')
@@ -145,8 +138,13 @@ def parse_patch(raw,expected):
     if e['kind'] in ('chest','shrine') and e.get('sprite'):bindings.setdefault('object',e['sprite'])
    if reg['visuals']['scenery']:bindings.setdefault('vegetation',reg['visuals']['scenery'][0])
    if not bindings:reg['visuals'].pop('bindings')
-   for entry in reg['entities']+reg['landmarks']:
-    if entry.get('sprite'):entry['sprite']=resolve_sprite(entry['sprite'],reg['visuals'])
+   sprite_errors=[]
+   for group in ('entities','landmarks','items'):
+    for index,entry in enumerate(reg[group]):
+     if entry.get('sprite'):
+      try:entry['sprite']=checked(f'region.{group}[{index}].sprite',resolve_sprite,entry['sprite'],reg['visuals'])
+      except InvalidPatch as exc:sprite_errors.extend(exc.issues)
+   if sprite_errors:raise InvalidPatch(issues=sprite_errors)
   from .content import scene,program
   if 'scene' in r:reg['scene']=scene(r['scene'])
   if 'program' in r:reg['program']=program(r['program'])
@@ -188,3 +186,39 @@ def parse_patch(raw,expected):
    out['reaction']['object_updates'].append(up)
  else: raise InvalidPatch('unsupported kind')
  return out
+
+def _independent_errors(raw,expected):
+ """Collect independent component failures without executing any content."""
+ if not isinstance(raw,dict) or not isinstance(raw.get(expected),dict):return []
+ from .content import program,scene,state_values,expression,effects,item_use
+ from .visuals import validate_visuals
+ body=raw[expected];errors=[]
+ def probe(path,function,*args):
+  try:function(*args)
+  except InvalidPatch as exc:errors.extend(as_issues(exc,path))
+ for group,validator in (('entities',entity),('spawns',entity),('items',item),('destinations',destination),('locations',destination)):
+  if isinstance(body.get(group),list):
+   for index,value in enumerate(body[group]):probe(f'{expected}.{group}[{index}]',validator,value)
+ if 'scene' in body:probe(expected+'.scene',scene,body['scene'])
+ art=body.get('visuals')
+ if isinstance(art,dict) and isinstance(art.get('sprites'),dict):
+  probe(expected+'.visuals',validate_visuals,art)
+  for key,recipe in art['sprites'].items():
+   specimen=dict(art,style='sprite validation',terrain='grass',palette={k:'#000000' for k in ('ground','path','water','wall','accent','shadow')},sprites={key:recipe},bindings={},scenery=[])
+   probe(expected+'.visuals.sprites.'+key,validate_visuals,specimen)
+ elif 'visuals' in body:probe(expected+'.visuals',validate_visuals,art)
+ spec=body.get('program')
+ if isinstance(spec,dict):
+  if 'vars' in spec:probe(expected+'.program.vars',state_values,spec['vars'])
+  for group in ('actions','hooks','objectives'):
+   if not isinstance(spec.get(group),list):continue
+   for index,value in enumerate(spec[group]):
+    location=f'{expected}.program.{group}[{index}]'
+    probe(location,program,{group:[value]})
+    if not isinstance(value,dict):continue
+    for field in ('when','fail_when'):
+     if field in value:probe(location+'.'+field,expression,value[field])
+    for field in ('effects','reward'):
+     if field in value:probe(location+'.'+field,effects,value[field])
+ elif 'program' in body:probe(expected+'.program',program,spec)
+ return unique_issues(errors)

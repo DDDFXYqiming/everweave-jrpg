@@ -19,22 +19,26 @@ def resolve_sprite(name,visuals):
     if role in visuals['sprites']:return role
     target=visuals.get('bindings',{}).get(role)
     if target in visuals['sprites']:return target
-    raise InvalidPatch('undefined visual sprite '+name)
+    raise InvalidPatch('undefined visual sprite '+name,category='reference',value=name,
+                       expected='a defined sprite or binding: '+', '.join(sorted(visuals.get('sprites',{}))[:24]))
 
 def validate_visuals(value):
     from .schema import InvalidPatch,obj,text,arr,ident,enum
+    from .diagnostics import checked
     obj(value,'visuals',('style','terrain','palette','sprites','scenery','density','bindings'),('style','terrain','palette','sprites'))
+    style=checked('visuals.style',text,value['style'],'visual style',450)
+    terrain=checked('visuals.terrain',enum,value['terrain'],TERRAINS,'terrain')
     palette=obj(value['palette'],'visuals.palette',PALETTE,PALETTE)
     def color(v):
         if isinstance(v,str) and (v in PALETTE or re.fullmatch('#[0-9a-fA-F]{6}',v)):return v
         raise InvalidPatch('visual color must be #RRGGBB or a palette key')
     for key,v in palette.items():
-        if not isinstance(v,str) or not re.fullmatch('#[0-9a-fA-F]{6}',v):raise InvalidPatch('palette colors must be #RRGGBB')
+        if not isinstance(v,str) or not re.fullmatch('#[0-9a-fA-F]{6}',v):raise InvalidPatch('palette colors must be #RRGGBB',path='visuals.palette.'+key,value=v,expected='#RRGGBB')
     sprites=value['sprites']
     if not isinstance(sprites,dict) or not 1<=len(sprites)<=48:raise InvalidPatch('visuals.sprites requires 1..48 recipes')
     location='visuals'
     def integer(n,lo,hi):
-        if type(n) is not int or not lo<=n<=hi:raise InvalidPatch(f'{location}: pixel coordinate must be integer {lo}..{hi}, got {n!r}')
+        if type(n) is not int or not lo<=n<=hi:raise InvalidPatch(f'pixel coordinate must be integer {lo}..{hi}',path=location,value=n,expected=f'integer {lo}..{hi}')
         return n
     result={}
     for key,sprite in sprites.items():
@@ -49,8 +53,8 @@ def validate_visuals(value):
             if op in ('rect','ellipse') and len(command)==6:
                 location=f'visuals.sprites.{key}.layers[{index}].x';x=integer(command[1],0,w-1)
                 location=f'visuals.sprites.{key}.layers[{index}].y';y=integer(command[2],0,h-1)
-                location=f'visuals.sprites.{key}.layers[{index}].width (canvas {w}x{h})';width=integer(command[3],1,w-x)
-                location=f'visuals.sprites.{key}.layers[{index}].height (canvas {w}x{h})';height=integer(command[4],1,h-y)
+                location=f'visuals.sprites.{key}.layers[{index}].width';width=integer(command[3],1,w-x)
+                location=f'visuals.sprites.{key}.layers[{index}].height';height=integer(command[4],1,h-y)
                 layers.append([op,x,y,width,height,color(command[5])])
             elif op=='poly' and len(command)==3:
                 points=[]
@@ -68,7 +72,9 @@ def validate_visuals(value):
             for frame_index,commands in enumerate(arr(sprite['frames'],'frames',8,1)):
                 temp=dict(style='frame',terrain='grass',palette=palette,sprites={'frame':dict(size=[w,h],layers=commands)})
                 try:frames.append(validate_visuals(temp)['sprites']['frame']['layers'])
-                except InvalidPatch as exc:raise InvalidPatch(f'visuals.sprites.{key}.frames[{frame_index}]: {exc}') from None
+                except InvalidPatch as exc:
+                    errors=[dict(entry,path=f'visuals.sprites.{key}.frames[{frame_index}]'+entry['path'].removeprefix('visuals.sprites.frame')) for entry in exc.issues]
+                    raise InvalidPatch(issues=errors) from None
             result[key]['frames']=frames
             location=f'visuals.sprites.{key}.frame_ms'
             result[key]['frame_ms']=integer(sprite.get('frame_ms',180),80,1500)
@@ -78,7 +84,7 @@ def validate_visuals(value):
     if isinstance(density,bool) or not isinstance(density,(int,float)) or not 0<=density<=.12:raise InvalidPatch('scenery density must be 0..0.12')
     bindings=obj(value.get('bindings',{}),'visual bindings',ROLES)
     if any(v not in result for v in bindings.values()):raise InvalidPatch('visual binding references undefined sprite')
-    out=dict(style=text(value['style'],'visual style',80),terrain=enum(value['terrain'],TERRAINS,'terrain'),palette=dict(palette),sprites=result,scenery=scenery,density=density)
+    out=dict(style=style,terrain=terrain,palette=dict(palette),sprites=result,scenery=scenery,density=density)
     if bindings:out['bindings']=dict(bindings)
     return out
 

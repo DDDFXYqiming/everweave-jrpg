@@ -1,6 +1,7 @@
 extends SceneTree
 ## Actual UI/input routing + HTTP actions + authoritative executable content.
 var main
+var phase: String = "startup"
 
 func _initialize() -> void:
 	_run.call_deferred()
@@ -11,16 +12,17 @@ func _idle() -> void:
 	assert(main.last_action_error.is_empty(), main.last_action_error)
 
 func _tap(key: int) -> void:
+	phase = "key " + str(key)
 	while main.move_clock > 0: await process_frame
 	var event := InputEventKey.new()
 	event.keycode = key
 	# Windows accessibility input observed a correct keycode with this scan code.
 	event.physical_keycode = 4194313
 	event.pressed = true
-	Input.parse_input_event(event)
+	root.push_input(event, true)
 	var released := event.duplicate()
 	released.pressed = false
-	Input.parse_input_event(released)
+	root.push_input(released, true)
 	await _idle()
 
 func _button(label: String) -> Button:
@@ -39,12 +41,27 @@ func _capture(name: String) -> void:
 	root.get_texture().get_image().save_png("res://userdata/content-e2e/" + name + ".png")
 
 func _run() -> void:
+	create_timer(30).timeout.connect(func() -> void:
+		push_error("Native content test did not complete during " + phase)
+		quit(1)
+	)
 	main = load("res://client/main.tscn").instantiate()
 	root.add_child(main)
 	while not main.connection_ready: await process_frame
 	assert(main.state.started and main.state.region.name == "回声藏书馆")
 	main.return_button.pressed.emit()
 	await process_frame
+	assert(main.failure_list.get_child_count() == 2)
+	await _capture("failed-task-panel")
+	var other_failure: Dictionary = main.state.director.failed_tasks[1]
+	var first_row: Node = main.failure_list.get_child(0)
+	first_row.get_child(first_row.get_child_count() - 1).pressed.emit()
+	await _idle()
+	assert(main.state.director.failed_tasks.size() == 1)
+	assert(main.state.director.failed_tasks[0].target == other_failure.target)
+	main.retry_failed_button.pressed.emit()
+	await _idle()
+	assert(main.state.director.failed_tasks.is_empty())
 	await _tap(KEY_E)
 	assert(main.state.ui.kind == "actions" and main.modal_overlay.visible)
 	await _capture("generated-actions")
@@ -80,5 +97,5 @@ func _run() -> void:
 	assert(main.state.battle == null)
 	main.queue_free()
 	await create_timer(0.15).timeout
-	print("NATIVE_CONTENT_E2E_OK logical_keys=true short_taps=true dynamic_actions=true causal_door=true objective=true custom_combat=true cloud_calls=0")
+	print("NATIVE_CONTENT_E2E_OK targeted_retry=true logical_keys=true short_taps=true dynamic_actions=true causal_door=true objective=true custom_combat=true cloud_calls=0")
 	quit(0)

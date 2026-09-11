@@ -105,7 +105,7 @@ def build(plan, rid, seed, depth, exits):
         e = copy.deepcopy(raw)
         e.update(id=rid+':'+raw['id'], local_id=raw['id'], x=pos[0], y=pos[1], spent=False)
         e.setdefault('solid', e['kind'] in ('enemy', 'npc'))
-        if e['kind'] == 'chest' and e['item_id'] not in C.BASE_ITEMS: e['item_id'] = rid+':'+e['item_id']
+        if e['kind'] == 'chest' and e['item_id'] not in C.BASE_ITEMS and ':' not in e['item_id']: e['item_id'] = rid+':'+e['item_id']
         if tuple(pos) in occupied: raise InvalidPatch('entities share a scene anchor')
         occupied.add(tuple(pos)); region['entities'].append(e)
     forward = 0

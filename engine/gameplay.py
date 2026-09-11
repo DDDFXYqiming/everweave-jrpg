@@ -32,7 +32,7 @@ def definitions(world, region):
     items = dict(world.state['items'])
     for item in region.get('plan', {}).get('items', []):
         key = region['id']+':'+item['id']
-        items[key] = dict(item, id=key, origin=region['id'])
+        items[key] = dict(item, id=key, local_id=item['id'], origin=region['id'])
     check_references(region, items)
 
 

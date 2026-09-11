@@ -59,6 +59,18 @@ func _run() -> void:
 	main._accept_snapshot(snapshot)
 	await process_frame
 	assert(main.modal_overlay.visible)
+	var failure_state = snapshot.duplicate(true)
+	failure_state.version += 1
+	failure_state.director = {"mode":"live_llm", "calls":3, "max_calls":10, "repair_calls":1, "accepted":1, "normalization_count":2,
+		"failed_tasks":[{"kind":"region","target":"r_test","name":"待修复的港口","category":"reference","message":"物品引用冲突",
+			"issues":[{"path":"region.items[2].id","message":"ambiguous item identity","category":"reference"}]}]}
+	main._accept_snapshot(failure_state)
+	await process_frame
+	assert(main.failure_list.get_child_count() == 1)
+	assert(not main.retry_failed_button.disabled)
+	assert(main.director_label.text.contains("其中修复 1"))
+	assert(main.director_label.text.contains("本地纠正 2"))
+	assert(main.failure_list.get_child(0).get_child(0).text.contains("待修复的港口"))
 	main.queue_free()
 	await create_timer(0.15).timeout
 	print("GODOT_CLIENT_SMOKE_OK")
