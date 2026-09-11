@@ -42,8 +42,8 @@ def dialogue(v):
  return [text(x,'dialogue',280) for x in arr(v,'dialogue',4,1)]
 
 def entity(v):
- e=obj(v,'entity',('id','kind','name','zone','appearance','role','dialogue','choices','monster','tier','move','item_id','sprite'),('id','kind','name'))
- out=dict(id=ident(e['id']),kind=enum(e['kind'],C.KINDS,'kind'),name=text(e['name'],'name',48),zone=enum(e.get('zone','center'),C.ZONES,'zone'))
+ e=obj(v,'entity',('id','kind','name','zone','appearance','role','dialogue','choices','monster','tier','move','item_id','sprite','at','solid','state','description','footprint','stats'),('id','kind','name'))
+ out=dict(id=ident(e['id']),kind=enum(e['kind'],C.KINDS+('object',),'kind'),name=text(e['name'],'name',48),zone=enum(e.get('zone','center'),C.ZONES,'zone'))
  if 'sprite' in e:out['sprite']=ident(e['sprite'])
  if out['kind']=='npc':
   out.update(role=enum(e.get('role','wanderer'),C.ROLES,'role'),appearance=number(e.get('appearance',0),'appearance',0,7),dialogue=dialogue(e.get('dialogue',['旅人，你听见钟声了吗？'])),choices=[])
@@ -53,14 +53,20 @@ def entity(v):
   if len({c['id'] for c in out['choices']})!=len(out['choices']): raise InvalidPatch('duplicate choice IDs')
  elif out['kind']=='enemy': out.update(monster=enum(e.get('monster','slime'),C.MONSTERS,'monster'),tier=number(e.get('tier',1),'tier',1,3),move=enum(e.get('move','strike'),C.MOVES,'move'))
  elif out['kind']=='chest': out['item_id']=reference(e.get('item_id','potion'))
- return out
+ from .content import entity_extensions
+ return entity_extensions(e,out)
 
 def item(v):
- i=obj(v,'item',('id','name','description','kind','effect','power','price'),('id','name','kind','effect','power'))
- kind=enum(i['kind'],('consumable','weapon','charm','key'),'item.kind'); effect=enum(i['effect'],C.EFFECTS,'effect')
- allowed={'consumable':('heal','restore_mp'),'weapon':('attack','burn','drain'),'charm':('defense',),'key':C.EFFECTS}
+ i=obj(v,'item',('id','name','description','kind','effect','power','price','use','sprite'),('id','name','kind','effect','power'))
+ kind=enum(i['kind'],('consumable','weapon','charm','key','tool'),'item.kind'); effect=enum(i['effect'],C.EFFECTS,'effect')
+ allowed={'consumable':('heal','restore_mp'),'weapon':('attack','burn','drain'),'charm':('defense',),'key':C.EFFECTS,'tool':C.EFFECTS}
  if effect not in allowed[kind]: raise InvalidPatch('effect incompatible with item kind')
- return dict(id=ident(i['id']),name=text(i['name'],'item.name',48),description=text(i.get('description','世界刚刚赋予它一个名字。'),'description'),kind=kind,effect=effect,power=number(i['power'],'power',1,50 if kind=='consumable' else 8),price=number(i.get('price',25),'price',5,120),icon={'weapon':'sword','consumable':'potion','charm':'charm','key':'key'}[kind])
+ result=dict(id=ident(i['id']),name=text(i['name'],'item.name',48),description=text(i.get('description','世界刚刚赋予它一个名字。'),'description'),kind=kind,effect=effect,power=number(i['power'],'power',1,50 if kind=='consumable' else 8),price=number(i.get('price',25),'price',5,120),icon={'weapon':'sword','consumable':'potion','charm':'charm','key':'key','tool':'key'}[kind])
+ if 'use' in i:
+  from .content import item_use
+  result['use']=item_use(i['use'])
+ if 'sprite' in i:result['sprite']=ident(i['sprite'])
+ return result
 
 def destination(v):
  obj(v,'destination',('id','name','description'),('id','name','description'))
@@ -77,6 +83,16 @@ def parse_patch(raw,expected):
   try: raw=json.loads(raw,parse_constant=lambda v: (_ for _ in ()).throw(InvalidPatch('nonfinite JSON')))
   except (ValueError,TypeError) as exc: raise InvalidPatch('invalid JSON') from exc
  raw=copy.deepcopy(raw)
+ if isinstance(raw,dict) and raw.get('kind')==expected and expected in ('region','reaction') and 'visuals' in raw:
+  # Some models emit the art block beside its region/reaction. Its destination
+  # is unambiguous only for a single correctly typed envelope. All art still
+  # passes the usual validation below; conflicting copies must be rejected.
+  other='reaction' if expected=='region' else 'region'
+  body=raw.get(expected)
+  if isinstance(body,dict) and other not in raw:
+   if 'visuals' in body and body['visuals']!=raw['visuals']:
+    raise InvalidPatch('conflicting top-level and '+expected+'.visuals')
+   body['visuals']=raw.pop('visuals')
  if isinstance(raw,dict) and isinstance(raw.get('region'),dict):
   # Harmless envelope differences can be normalized without another paid call.
   # Region identity is always allocated from the engine's request context.
@@ -96,11 +112,14 @@ def parse_patch(raw,expected):
   obj(f,'thread',('id','title','note'),('id','title','note')); out['threads'].append(dict(id=ident(f['id']),title=text(f['title'],'thread',64),note=text(f['note'],'note')))
  if expected=='region':
   if 'reaction' in p: raise InvalidPatch('region cannot also react')
-  r=obj(p.get('region'),'region',('name','biome','layout','weather','rule','description','landmarks','entities','items','quests','destinations','visuals'),('name','biome','layout','description','entities'))
-  reg=dict(name=text(r['name'],'region name',48),biome=enum(r['biome'],C.BIOMES,'biome'),layout=enum(r['layout'],C.LAYOUTS,'layout'),weather=enum(r.get('weather','clear'),C.WEATHERS,'weather'),rule=enum(r.get('rule','normal'),C.RULES,'rule'),description=text(r['description'],'description',450),entities=[entity(e) for e in arr(r['entities'],'entities',12,1)],items=[item(i) for i in arr(r.get('items',[]),'items',4)],landmarks=[],quests=[])
-  for lm in arr(r.get('landmarks',[]),'landmarks',5):
-   obj(lm,'landmark',('type','zone','sprite'),('type','zone')); landmark=dict(type=enum(lm['type'],C.LANDMARKS,'type'),zone=enum(lm['zone'],C.ZONES,'zone'))
+  r=obj(p.get('region'),'region',('name','biome','layout','weather','rule','description','landmarks','entities','items','quests','destinations','visuals','scene','program'),('name','description','entities'))
+  reg=dict(name=text(r['name'],'region name',48),biome=text(r.get('biome','dream'),'biome',48) if 'scene' in r else enum(r['biome'],C.BIOMES,'biome'),layout=text(r.get('layout','authored'),'layout',48) if 'scene' in r else enum(r['layout'],C.LAYOUTS,'layout'),weather=enum(r.get('weather','clear'),C.WEATHERS,'weather'),rule=enum(r.get('rule','normal'),C.RULES,'rule'),description=text(r['description'],'description',450),entities=[entity(e) for e in arr(r['entities'],'entities',32,1)],items=[item(i) for i in arr(r.get('items',[]),'items',8)],landmarks=[],quests=[])
+  for lm in arr(r.get('landmarks',[]),'landmarks',24):
+   obj(lm,'landmark',('type','zone','sprite','id','at','solid','footprint'),('type','zone')); landmark=dict(type=enum(lm['type'],C.LANDMARKS,'type'),zone=enum(lm['zone'],C.ZONES,'zone'))
    if 'sprite' in lm:landmark['sprite']=ident(lm['sprite'])
+   from .content import entity_extensions
+   entity_extensions(lm,landmark)
+   if 'id' in lm:landmark['id']=ident(lm['id'])
    reg['landmarks'].append(landmark)
   ids=[e['id'] for e in reg['entities']]; items=[i['id'] for i in reg['items']]
   if len(ids)!=len(set(ids)) or len(items)!=len(set(items)) or set(items)&set(C.BASE_ITEMS): raise InvalidPatch('duplicate or reserved ID')
@@ -128,10 +147,13 @@ def parse_patch(raw,expected):
    if not bindings:reg['visuals'].pop('bindings')
    for entry in reg['entities']+reg['landmarks']:
     if entry.get('sprite'):entry['sprite']=resolve_sprite(entry['sprite'],reg['visuals'])
+  from .content import scene,program
+  if 'scene' in r:reg['scene']=scene(r['scene'])
+  if 'program' in r:reg['program']=program(r['program'])
   out['region']=reg
  elif expected=='reaction':
   if 'region' in p: raise InvalidPatch('reaction cannot replace visited maps')
-  r=obj(p.get('reaction'),'reaction',('text','weather','rule','npc_lines','spawns','items','quests','locations'),('text',)); out['reaction']=dict(text=text(r['text'],'reaction text',450),npc_lines=[],spawns=[],items=[],quests=[],locations=[])
+  r=obj(p.get('reaction'),'reaction',('text','weather','rule','npc_lines','spawns','items','quests','locations','visuals','paint','program','object_updates'),('text',)); out['reaction']=dict(text=text(r['text'],'reaction text',450),npc_lines=[],spawns=[],items=[],quests=[],locations=[])
   for key,choices in (('weather',C.WEATHERS),('rule',C.RULES)):
    if key in r: out['reaction'][key]=enum(r[key],choices,key)
   for update in arr(r.get('npc_lines',[]),'npc_lines',3):
@@ -147,5 +169,22 @@ def parse_patch(raw,expected):
    if not re.fullmatch('[a-z][a-z0-9_:]*',target): raise InvalidPatch('invalid quest target')
    out['reaction']['quests'].append(dict(id=ident(q['id']),name=text(q['name'],'quest name',64),description=text(q.get('description',q['name']),'quest description'),goal=enum(q['goal'],('defeat','talk','collect'),'goal'),target=target))
   unique_ids(out['reaction']['quests'],'quest')
+  from .content import program,entity_extensions,boolean
+  if 'program' in r:out['reaction']['program']=program(r['program'])
+  if 'visuals' in r:
+   from .visuals import validate_visuals
+   out['reaction']['visuals']=validate_visuals(r['visuals'])
+  if 'paint' in r:
+   # Coordinates are checked against the actual current map at application time.
+   from .content import paint_commands
+   out['reaction']['paint']=paint_commands(r['paint'],96,72)
+  out['reaction']['object_updates']=[]
+  for u in arr(r.get('object_updates',[]),'object updates',12):
+   obj(u,'object update',('id','sprite','at','solid','remove'),('id',))
+   up=dict(id=reference(u['id']))
+   if 'sprite' in u:up['sprite']=ident(u['sprite'])
+   entity_extensions(u,up)
+   if 'remove' in u:up['remove']=boolean(u['remove'])
+   out['reaction']['object_updates'].append(up)
  else: raise InvalidPatch('unsupported kind')
  return out

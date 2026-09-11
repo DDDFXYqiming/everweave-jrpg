@@ -69,7 +69,16 @@ static func compile_tiles(visuals: Dictionary, seed_value: int) -> Texture2D:
 
 static func compile(visuals: Dictionary, seed_value: int) -> Dictionary:
 	var compiled: Dictionary = {}
-	for key in visuals.sprites: compiled[key] = compile_sprite(visuals.sprites[key], visuals.palette)
+	var animations: Dictionary = {}
+	for key in visuals.sprites:
+		var recipe: Dictionary = visuals.sprites[key]
+		compiled[key] = compile_sprite(recipe, visuals.palette)
+		if recipe.has("frames"):
+			var frames: Array[Texture2D] = []
+			for layers in recipe.frames:
+				frames.append(compile_sprite({"size":recipe.size,"layers":layers}, visuals.palette))
+			animations[key] = {"frames":frames,"frame_ms":int(recipe.get("frame_ms",180))}
+	compiled["__animations"] = animations
 	for role in visuals.get("bindings", {}):
 		if not compiled.has(role): compiled[role] = compiled[str(visuals.bindings[role])]
 	# Exits are engine UI affordances, drawn in the region's own palette.
@@ -82,9 +91,18 @@ static func compile(visuals: Dictionary, seed_value: int) -> Dictionary:
 
 static func resolve(key: String, compiled: Dictionary) -> String:
 	if compiled.has(key): return key
-	if key.begins_with("hero_"): return "hero"
-	if key.begins_with("npc_"): return "npc"
-	if key in ["slime", "wolf", "sentinel", "wisp", "mimic"]: return "enemy"
+	if key.begins_with("hero_") and compiled.has("hero"): return "hero"
+	if key.begins_with("npc_") and compiled.has("npc"): return "npc"
+	if key in ["slime", "wolf", "sentinel", "wisp", "mimic"] and compiled.has("enemy"): return "enemy"
 	if key in ["house", "tower", "camp"] and compiled.has("building"): return "building"
 	if key in ["tree", "bush", "flower"] and compiled.has("vegetation"): return "vegetation"
 	return "object"
+
+static func texture(key: String, compiled: Dictionary, seconds: float) -> Texture2D:
+	var resolved: String = resolve(key, compiled)
+	var animations: Dictionary = compiled.get("__animations", {})
+	if animations.has(resolved):
+		var animation: Dictionary = animations[resolved]
+		var frames: Array = animation.frames
+		return frames[int(seconds * 1000.0 / int(animation.frame_ms)) % frames.size()]
+	return compiled[resolved]

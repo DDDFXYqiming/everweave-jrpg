@@ -8,7 +8,8 @@ TERRAINS=('grass','metal','stone','sand','snow','wood','void')
 
 def freeze_sprite(recipe,palette):
     result=copy.deepcopy(recipe)
-    for command in result['layers']:command[-1]=palette.get(command[-1],command[-1])
+    for layers in [result['layers']]+result.get('frames',[]):
+        for command in layers:command[-1]=palette.get(command[-1],command[-1])
     return result
 
 def resolve_sprite(name,visuals):
@@ -30,31 +31,47 @@ def validate_visuals(value):
     for key,v in palette.items():
         if not isinstance(v,str) or not re.fullmatch('#[0-9a-fA-F]{6}',v):raise InvalidPatch('palette colors must be #RRGGBB')
     sprites=value['sprites']
-    if not isinstance(sprites,dict) or not 3<=len(sprites)<=16:raise InvalidPatch('visuals.sprites requires 3..16 recipes')
-    if {'hero','npc','enemy'}-set(sprites):raise InvalidPatch('visuals.sprites requires hero, npc, enemy recipes')
+    if not isinstance(sprites,dict) or not 1<=len(sprites)<=48:raise InvalidPatch('visuals.sprites requires 1..48 recipes')
+    location='visuals'
     def integer(n,lo,hi):
-        if type(n) is not int or not lo<=n<=hi:raise InvalidPatch(f'pixel coordinate must be integer {lo}..{hi}')
+        if type(n) is not int or not lo<=n<=hi:raise InvalidPatch(f'{location}: pixel coordinate must be integer {lo}..{hi}, got {n!r}')
         return n
     result={}
     for key,sprite in sprites.items():
-        ident(key);obj(sprite,'sprite',('size','layers'),('size','layers'))
+        ident(key);obj(sprite,'sprite',('size','layers','frames','frame_ms'),('size','layers'))
         size=arr(sprite['size'],'sprite.size',2,2)
-        w=integer(size[0],8,64);h=integer(size[1],8,80)
+        location=f'visuals.sprites.{key}.size[0]';w=integer(size[0],8,96)
+        location=f'visuals.sprites.{key}.size[1]';h=integer(size[1],8,96)
         layers=[]
-        for command in arr(sprite['layers'],'sprite.layers',48,3):
+        for index,command in enumerate(arr(sprite['layers'],'sprite.layers',48,3)):
             if not isinstance(command,list) or not command:raise InvalidPatch('drawing command must be an array')
             op=command[0]
             if op in ('rect','ellipse') and len(command)==6:
-                x=integer(command[1],0,w-1);y=integer(command[2],0,h-1)
-                width=integer(command[3],1,w-x);height=integer(command[4],1,h-y)
+                location=f'visuals.sprites.{key}.layers[{index}].x';x=integer(command[1],0,w-1)
+                location=f'visuals.sprites.{key}.layers[{index}].y';y=integer(command[2],0,h-1)
+                location=f'visuals.sprites.{key}.layers[{index}].width (canvas {w}x{h})';width=integer(command[3],1,w-x)
+                location=f'visuals.sprites.{key}.layers[{index}].height (canvas {w}x{h})';height=integer(command[4],1,h-y)
                 layers.append([op,x,y,width,height,color(command[5])])
             elif op=='poly' and len(command)==3:
                 points=[]
-                for point in arr(command[1],'polygon points',10,3):
-                    arr(point,'point',2,2);points.append([integer(point[0],0,w),integer(point[1],0,h)])
+                for point_index,point in enumerate(arr(command[1],'polygon points',10,3)):
+                    arr(point,'point',2,2)
+                    location=f'visuals.sprites.{key}.layers[{index}].points[{point_index}].x';px=integer(point[0],0,w)
+                    location=f'visuals.sprites.{key}.layers[{index}].points[{point_index}].y';py=integer(point[1],0,h)
+                    points.append([px,py])
                 layers.append([op,points,color(command[2])])
             else:raise InvalidPatch('drawing commands: [rect|ellipse,x,y,w,h,color] or [poly,[[x,y],...],color]')
         result[key]=dict(size=[w,h],layers=layers)
+        if 'frames' in sprite:
+            # Validate each frame using the same grammar, without nested animation.
+            frames=[]
+            for frame_index,commands in enumerate(arr(sprite['frames'],'frames',8,1)):
+                temp=dict(style='frame',terrain='grass',palette=palette,sprites={'frame':dict(size=[w,h],layers=commands)})
+                try:frames.append(validate_visuals(temp)['sprites']['frame']['layers'])
+                except InvalidPatch as exc:raise InvalidPatch(f'visuals.sprites.{key}.frames[{frame_index}]: {exc}') from None
+            result[key]['frames']=frames
+            location=f'visuals.sprites.{key}.frame_ms'
+            result[key]['frame_ms']=integer(sprite.get('frame_ms',180),80,1500)
     scenery=[ident(v) for v in arr(value.get('scenery',[]),'scenery',6)]
     if any(v not in result for v in scenery):raise InvalidPatch('scenery references undefined sprite')
     density=value.get('density',.045)
@@ -66,15 +83,15 @@ def validate_visuals(value):
     return out
 
 VISUAL_PROMPT='''
-region.visuals is REQUIRED: author ORIGINAL pixel drawing recipes matching this world's specific setting.
+For regions, visuals is REQUIRED; for reactions, provide it only when new shapes are needed: author ORIGINAL pixel drawing recipes matching this world's specific setting.
 Do not reuse the default medieval forest look for science fiction, underwater, space, cities or other themes.
 visuals = {style: short art-direction name, terrain: grass/metal/stone/sand/snow/wood/void,
  palette: {ground:"#RRGGBB",path:"#RRGGBB",water:"#RRGGBB",wall:"#RRGGBB",accent:"#RRGGBB",shadow:"#RRGGBB"},
- sprites: {hero:recipe,npc:recipe,enemy:recipe,...themed named recipes},
+ sprites: {unique_object_id:recipe,...themed named recipes}; opening region must include hero, later regions reuse hero_visual,
  bindings: {building:"building_recipe_id",vegetation:"scenery_recipe_id",object:"object_recipe_id"},
  scenery:[sprite IDs to scatter, can be empty], density:0..0.12}.
 Each recipe = {size:[width,height],layers:[drawing commands in back-to-front order]}.
-Size is 8..64 wide, 8..80 high. 3..48 layers per sprite. Use 6..10 recipes normally, at most 16.
+Size is 8..96 wide/high. 3..48 layers per sprite. Use 6..12 recipes normally, at most48. Optional frames:[layer-arrays] (1..8), frame_ms:80..1500. Frames share size/palette; no nested recipes. Use 16x16 tile recipes through scene.paint.surface for original floors.
 Commands: ["rect",x,y,width,height,color], ["ellipse",x,y,width,height,color], or ["poly",[[x,y],...],color].
 All coordinates integers within the canvas. Rectangles must fit x+width<=canvas width,y+height<=canvas height.
 Colors are #RRGGBB or palette key names. 3..10 vertices per polygon. No URLs, files, text drawing or code.

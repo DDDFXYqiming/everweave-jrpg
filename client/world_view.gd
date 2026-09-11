@@ -64,7 +64,7 @@ func _process(delta: float) -> void:
 
 func _draw_sprite(key: String, foot: Vector2, scale_factor: float = 2.0, tint: Color = Color.WHITE) -> void:
 	if not generated.is_empty():
-		var texture: Texture2D = generated[VisualCompiler.resolve(key, generated)]
+		var texture: Texture2D = VisualCompiler.texture(key, generated, elapsed)
 		var extent: Vector2 = texture.get_size() * scale_factor
 		draw_texture_rect(texture, Rect2((foot - Vector2(extent.x * .5, extent.y)).round(), extent), false, tint)
 		return
@@ -101,10 +101,17 @@ func _draw() -> void:
 			if typ == 2:
 				variant = (variant + int(elapsed * 1.6)) % 2
 			var at := Vector2(x, y) * TILE - camera
+			var surfaces: Array = region.get("surfaces", [])
+			if not generated.is_empty() and not surfaces.is_empty():
+				var surface: String = str(surfaces[y][x])
+				if not surface.is_empty() and generated.has(surface):
+					draw_texture_rect(VisualCompiler.texture(surface, generated, elapsed), Rect2(at.floor(), Vector2(TILE + 1, TILE + 1)), false)
+					continue
 			var terrain_texture: Texture2D = tiles if generated.is_empty() else generated["__tiles"]
 			draw_texture_rect_region(terrain_texture, Rect2(at.floor(), Vector2(TILE + 1, TILE + 1)), Rect2((typ * 2 + variant) * 16, biome_index * 16 if generated.is_empty() else 0, 16, 16))
 	var objects: Array = []
 	for prop in region.get("props", []):
+		if bool(prop.get("spent", false)): continue
 		if float(prop.x) * TILE < camera.x - 140 or float(prop.x) * TILE > camera.x + size.x + 140:
 			continue
 		if float(prop.y) * TILE < camera.y - 100 or float(prop.y) * TILE > camera.y + size.y + 140:
@@ -143,7 +150,7 @@ func _draw() -> void:
 			draw_arc(foot - Vector2(0, 8), 19, 0, TAU, 20, Color(0.91, 0.49, 0.50, 0.65), 1.0)
 		if obj.kind == "chest" and bool(obj.entity.get("spent", false)): tint = Color(.55, .55, .55, .7)
 		_draw_sprite(str(obj.sprite), foot, 2.0, tint)
-		if obj.kind == "npc" and obj.has("entity"):
+		if obj.kind in ["npc", "object"] and obj.has("entity"):
 			var marker := foot - Vector2(0, 64 + sin(elapsed * 2 + float(obj.x)) * 2)
 			draw_rect(Rect2(marker - Vector2(2, 7), Vector2(4, 8)), Color("f0d49c"))
 			draw_rect(Rect2(marker + Vector2(-2, 4), Vector2(4, 3)), Color("f0d49c"))
@@ -180,13 +187,14 @@ func _draw_minimap() -> void:
 	if region.has("visuals"):
 		palette.clear()
 		for key in ["ground", "path", "water", "wall", "path"]: palette.append(Color(str(region.visuals.palette[key])))
+	var map_scale: float = minf(104.0 / float(region.width), 72.0 / float(region.height))
 	for y in range(int(region.height)):
 		for x in range(int(region.width)):
-			draw_rect(Rect2(origin + Vector2(x, y) * 2.0, Vector2(2, 2)), palette[int(region.tiles[y][x])])
+			draw_rect(Rect2(origin + Vector2(x, y) * map_scale, Vector2.ONE * maxf(1.0, map_scale)), palette[int(region.tiles[y][x])])
 	for e in region.entities:
 		if e.kind == "exit":
-			draw_rect(Rect2(origin + Vector2(float(e.x), float(e.y)) * 2 - Vector2.ONE, Vector2(3, 3)), Color("c1a9ef"))
-	draw_rect(Rect2(origin + target_player * 2 - Vector2.ONE, Vector2(4, 4)), Color("f7e0a4"))
+			draw_rect(Rect2(origin + Vector2(float(e.x), float(e.y)) * map_scale - Vector2.ONE, Vector2(3, 3)), Color("c1a9ef"))
+	draw_rect(Rect2(origin + target_player * map_scale - Vector2.ONE, Vector2(4, 4)), Color("f7e0a4"))
 
 func _draw_nearby_hint() -> void:
 	var p: Dictionary = snapshot.get("player", {})

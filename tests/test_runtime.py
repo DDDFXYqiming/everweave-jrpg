@@ -378,6 +378,9 @@ class DirectorTests(unittest.TestCase):
         if kind=='region':
             result['region']['destinations']=[{'id':'next','name':'下一片区域','description':'测试模型生成的区域概要。'}]
             result['region']['visuals']=visual_fixture()
+            if ctx.get('content_version')==2:
+                from content_fixtures import add_scene
+                add_scene(result,ctx)
         return json.dumps(result,ensure_ascii=False),{'input_tokens':111,'output_tokens':222}
 
     def test_live_contract_and_usage_accounting(self):
@@ -498,7 +501,26 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertNotIn('thinking',MockChatHandler.last)
     def test_truncated_response_rejected(self):
         MockChatHandler.mode='truncated'
-        with self.assertRaises(ProviderError):ChatProvider(self.cfg).generate({'setting':SETTING,'target':'r0'},'region')
+        with self.assertRaises(ProviderError) as caught:ChatProvider(self.cfg).generate({'setting':SETTING,'target':'r0'},'region')
+        self.assertEqual(caught.exception.usage['input_tokens'],123)
+        self.assertEqual(caught.exception.usage['output_tokens'],456)
+        self.assertEqual(caught.exception.finish_reason,'length')
+    def test_v2_scene_has_room_for_rules_art_and_low_reasoning(self):
+        ChatProvider(self.cfg).generate({'setting':SETTING,'target':'r0','content_version':2},'region')
+        self.assertEqual(MockChatHandler.last['max_tokens'],65536)
+        self.assertEqual(MockChatHandler.last['reasoning_effort'],'low')
+        self.assertEqual(MockChatHandler.last['thinking'],{'type':'enabled'})
+    def test_truncated_usage_is_counted_without_applying_or_auto_retrying(self):
+        MockChatHandler.mode='truncated'
+        w=World(Store(':memory:'));w.start(SETTING);d=Director(w)
+        try:
+            d.configure(dict(self.cfg,offline=False,max_calls=2));d.cfg['cooldown']=0
+            d.step()
+            self.assertIsNone(w.region())
+            self.assertEqual((d.calls,d.tokens_in,d.tokens_out,d.rejected),(1,123,456,1))
+            self.assertFalse(d.step())
+            self.assertEqual(d.calls,1)
+        finally:w.store.close()
     def test_redirect_cannot_leak_key(self):
         MockChatHandler.mode='redirect'
         with self.assertRaises(ProviderError):ChatProvider(self.cfg).generate({'setting':SETTING,'target':'r0'},'region')

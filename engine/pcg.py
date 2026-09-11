@@ -14,6 +14,9 @@ def reachable(tiles,start):
  return seen
 
 def build_region(plan,rid,seed,depth,exits):
+ if 'scene' in plan:
+  from .scene import build
+  return build(plan,rid,seed,depth,exits)
  rng=random.Random(seed); w,h=WIDTH,HEIGHT
  tiles=[[C.WALL if x<2 or y<2 or x>=w-2 or y>=h-2 else C.GROUND for x in range(w)] for y in range(h)]
  layout=plan['layout']

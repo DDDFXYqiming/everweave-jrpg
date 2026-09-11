@@ -7,7 +7,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT),str(ROOT/'tests')]
 from engine.world import World
 from engine.storage import Store
-from engine.director import Director,ChatProvider
+from engine.director import Director,ChatProvider,ProviderError
 from test_runtime import walk_to
 
 parser=argparse.ArgumentParser(description=__doc__)
@@ -24,7 +24,11 @@ if path.exists() and not args.resume:parser.error('Use a fresh output folder or 
 w=World(Store(path));d=Director(w);responses=[];original=ChatProvider.generate
 if args.resume and (args.output/'trace.json').exists():responses=json.loads((args.output/'trace.json').read_text(encoding='utf-8'))
 def trace(provider,context,kind,repair=''):
-    started=time.monotonic();raw,usage=original(provider,context,kind,repair)
+    started=time.monotonic()
+    try:raw,usage=original(provider,context,kind,repair)
+    except ProviderError as exc:
+        responses.append(dict(target=context['target'],kind=kind,repair=repair,error=str(exc),usage=exc.usage,finish_reason=exc.finish_reason,seconds=round(time.monotonic()-started,2)))
+        raise
     responses.append(dict(target=context['target'],kind=kind,repair=repair,raw=raw,usage=usage,seconds=round(time.monotonic()-started,2)))
     return raw,usage
 def snapshot():

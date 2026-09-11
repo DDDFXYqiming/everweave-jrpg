@@ -33,7 +33,7 @@ func _process(delta: float) -> void:
 
 func sprite(key: String, foot: Vector2, factor: float) -> void:
 	if not generated.is_empty():
-		var texture: Texture2D = generated[VisualCompiler.resolve(key, generated)]
+		var texture: Texture2D = VisualCompiler.texture(key, generated, elapsed)
 		var extent: Vector2 = texture.get_size() * factor
 		draw_texture_rect(texture, Rect2(foot - Vector2(extent.x * .5, extent.y), extent), false)
 		return

@@ -1,0 +1,122 @@
+"""Compile a model's spatial drawing, without substituting a canned map layout."""
+import copy
+from . import catalog as C
+from .schema import InvalidPatch
+from .content import paint_commands
+
+
+def cells_for(obj):
+    """Footprints extend right/up from a sprite's bottom-left logical cell."""
+    w, h = obj.get('footprint', [1, 1])
+    return [(obj['x'] + dx, obj['y'] - dy) for dy in range(h) for dx in range(w)]
+
+
+def solid_at(region, x, y, ignore=None):
+    for obj in region.get('props', []) + region.get('entities', []):
+        if (ignore is not None and obj.get('id') == ignore) or obj.get('spent') or not obj.get('solid', False):
+            continue
+        if (x, y) in cells_for(obj): return True
+    return False
+
+
+def paint(region, commands):
+    width, height = region['width'], region['height']
+    surfaces = region.setdefault('surfaces', [[''] * width for _ in range(height)])
+    for command in paint_commands(commands, width, height):
+        surface = command.get('surface', '')
+        if surface and surface not in region.get('visuals', {}).get('sprites', {}):
+            raise InvalidPatch('undefined surface recipe ' + surface)
+        def put(x, y, tile=None):
+            if not 0 <= x < width or not 0 <= y < height:
+                raise InvalidPatch('painting outside scene')
+            region['tiles'][y][x] = command['tile'] if tile is None else tile
+            surfaces[y][x] = surface
+        if 'line' in command:
+            radius = (command['width'] - 1) // 2
+            for a, b in zip(command['line'], command['line'][1:]):
+                x, y = a
+                while True:
+                    for dy in range(-radius, command['width'] - radius):
+                        for dx in range(-radius, command['width'] - radius):
+                            if 0 <= x+dx < width and 0 <= y+dy < height: put(x+dx, y+dy)
+                    if [x, y] == b: break
+                    if x != b[0]: x += 1 if b[0] > x else -1
+                    else: y += 1 if b[1] > y else -1
+        else:
+            x, y, w, h = command.get('rect', command.get('room'))
+            for yy in range(y, y+h):
+                for xx in range(x, x+w):
+                    edge = xx in (x, x+w-1) or yy in (y, y+h-1)
+                    put(xx, yy, C.WALL if 'room' in command and edge else None)
+            for xx, yy in command.get('doors', []):
+                if not (x <= xx < x+w and y <= yy < y+h and (xx in (x, x+w-1) or yy in (y, y+h-1))):
+                    raise InvalidPatch('door must be on its room perimeter')
+                put(xx, yy, C.PATH)
+
+
+def validate_space(region, player=None, full=False):
+    """Geometry and escape checks, not a claim to prove arbitrary puzzles solvable."""
+    from .pcg import reachable
+    w, h = region['width'], region['height']
+    for obj in region['entities'] + region.get('props', []):
+        if obj.get('spent'): continue
+        for x, y in cells_for(obj):
+            if not 0 <= x < w or not 0 <= y < h:
+                raise InvalidPatch('object footprint is outside map: ' + obj.get('id', obj.get('kind', '?')))
+    start = [player['x'], player['y']] if player else region['spawn']
+    if not (0 <= start[0] < w and 0 <= start[1] < h) or region['tiles'][start[1]][start[0]] in C.BLOCKED:
+        raise InvalidPatch('player/spawn is in blocked terrain')
+    if solid_at(region, *start): raise InvalidPatch('solid object overlaps player/spawn')
+    # Dynamic objects can be doors; do not erase their puzzle to auto-connect them.
+    area = reachable(region['tiles'], start)
+    gates = [e for e in region['entities'] if e['kind'] == 'exit']
+    if gates and not any((g['x'], g['y']) in area for g in gates):
+        raise InvalidPatch('scene leaves no structurally reachable exit')
+    if full:
+        for obj in region['entities']:
+            x, y = obj['x'], obj['y']
+            if not any(p in area for p in ((x, y), (x+1, y), (x-1, y), (x, y+1), (x, y-1))):
+                raise InvalidPatch('no approach to object ' + obj['id'])
+        for obj in region.get('props', []):
+            if obj.get('solid') and any((g['x'], g['y']) in cells_for(obj) for g in gates):
+                raise InvalidPatch('scenery covers an exit')
+
+
+def build(plan, rid, seed, depth, exits):
+    scene = plan['scene']; w, h = scene['size']
+    region = dict(id=rid, name=plan['name'], description=plan['description'], biome=plan['biome'],
+                  layout=plan['layout'], weather=plan['weather'], rule=plan['rule'], depth=depth,
+                  seed=seed, width=w, height=h, tiles=[[scene['base']] * w for _ in range(h)],
+                  props=[], entities=[], spawn=list(scene['spawn']), visits=0, revision=0,
+                  scene=copy.deepcopy(scene), program=copy.deepcopy(plan.get('program', {})))
+    if 'visuals' in plan: region['visuals'] = copy.deepcopy(plan['visuals'])
+    paint(region, scene['paint'])
+    anchors = scene['anchors']
+    occupied = set()
+    for raw in plan.get('landmarks', []):
+        key = raw.get('id', raw['type'])
+        pos = raw.get('at', anchors.get(key))
+        if pos is None: raise InvalidPatch('scene needs anchor for landmark ' + key)
+        prop = dict(raw, id=rid+':'+key, local_id=key, kind=raw['type'], x=pos[0], y=pos[1])
+        region['props'].append(prop)
+    for raw in plan['entities']:
+        pos = raw.get('at', anchors.get(raw['id']))
+        if pos is None: raise InvalidPatch('scene needs anchor for entity ' + raw['id'])
+        e = copy.deepcopy(raw)
+        e.update(id=rid+':'+raw['id'], local_id=raw['id'], x=pos[0], y=pos[1], spent=False)
+        e.setdefault('solid', e['kind'] in ('enemy', 'npc'))
+        if e['kind'] == 'chest' and e['item_id'] not in C.BASE_ITEMS: e['item_id'] = rid+':'+e['item_id']
+        if tuple(pos) in occupied: raise InvalidPatch('entities share a scene anchor')
+        occupied.add(tuple(pos)); region['entities'].append(e)
+    forward = 0
+    for n, link in enumerate(exits):
+        key = 'back' if link['direction'] == 'back' else f'forward_{forward}'
+        if link['direction'] != 'back': forward += 1
+        pos = anchors.get(key)
+        if pos is None: raise InvalidPatch('scene needs exit anchor ' + key)
+        if tuple(pos) in occupied: raise InvalidPatch('exit overlaps another entity')
+        occupied.add(tuple(pos))
+        region['entities'].append(dict(id=f'{rid}:gate_{n}', kind='exit', name=link['label'],
+            x=pos[0], y=pos[1], target=link['target'], direction=link['direction'], spent=False, solid=False))
+    validate_space(region, full=True)
+    return region

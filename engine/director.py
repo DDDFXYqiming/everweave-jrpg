@@ -54,7 +54,11 @@ All fields not described above are forbidden. Stay within the enum catalog provi
 '''
 CATALOG={k:list(getattr(C,k)) for k in ('BIOMES','LAYOUTS','WEATHERS','RULES','ROLES','KINDS','MONSTERS','MOVES','LANDMARKS','ZONES','EFFECTS')}
 
-class ProviderError(RuntimeError): pass
+class ProviderError(RuntimeError):
+ def __init__(self,message,usage=None,finish_reason=None):
+  super().__init__(message)
+  self.usage=usage or {}
+  self.finish_reason=finish_reason
 REASONING_EFFORTS=('default','none','minimal','low','medium','high','xhigh','max','ultra')
 
 def reasoning_effort(cfg):
@@ -90,6 +94,11 @@ class ChatProvider:
   payload=dict(model=cfg['model'],messages=[dict(role='system',content=instructions+'\nENUM CATALOG:\n'+json.dumps(CATALOG)),dict(role='user',content=json.dumps(dict(requested_kind=kind,world_context=context,validation_error=repair),ensure_ascii=False))],stream=False,max_tokens=3600,response_format={'type':'json_object'})
   if kind=='reaction':
    payload['messages'][0]['content']+='\nReturn only a valid JSON object using this exact envelope. Replace example text as appropriate; keep array types. Example: {"kind":"reaction","reaction":{"text":"世界随玩家的选择发生变化。","weather":"fog","npc_lines":[],"spawns":[{"id":"new_lantern","kind":"shrine","name":"新亮起的灯龛","zone":"south"}]},"lore":[],"threads":[]}. No region data or extra top-level fields. Keep reaction.text under 250 Chinese characters.'
+  if context.get('content_version')==2:
+   from .content_prompt import prompt
+   payload['messages'][0]['content']=prompt(kind)
+  if repair and context.get('rejected_response'):
+   payload['messages'][0]['content']+='\nRepair world_context.rejected_response using validation_error. Preserve its valid scene, art, IDs and mechanics; return the complete corrected JSON object, not a replacement design or a diff.'
   effort=reasoning_effort(cfg)
   if cfg.get('deepseek_options',True): payload['thinking']={'type':'disabled' if effort=='none' else 'enabled'}
   if effort!='default': payload['reasoning_effort']=effort
@@ -99,7 +108,11 @@ class ChatProvider:
   if thinking:
    allowance={'minimal':8192,'low':8192,'medium':16384,'high':16384,'xhigh':32768,'max':32768,'ultra':32768,'default':16384}[effort]
    payload['max_tokens']=allowance
-  if kind=='region': payload['max_tokens']=max(payload['max_tokens'],16384)
+  if kind=='region':
+   # V2 includes a complete scene, executable rules and drawing recipes. Use
+   # DeepSeek's 64K thinking allowance without increasing the reasoning effort.
+   minimum=65536 if thinking and context.get('content_version')==2 else 24576 if context.get('content_version')==2 else 16384
+   payload['max_tokens']=max(payload['max_tokens'],minimum)
   base=validate_url(cfg['base_url']); url=base if base.endswith('/chat/completions') else base+'/chat/completions'
   req=urllib.request.Request(url,data=json.dumps(payload,ensure_ascii=False).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+cfg['api_key']},method='POST')
   opener=urllib.request.build_opener(NoRedirect)
@@ -114,14 +127,18 @@ class ChatProvider:
   except (urllib.error.URLError,TimeoutError,OSError) as exc:
    raise ProviderError('Model request failed or timed out; retry manually. '+type(exc).__name__) from None
   except (UnicodeError,json.JSONDecodeError): raise ProviderError('Provider did not return JSON.') from None
+  usage={}
   try:
+   reported=data.get('usage') or {}
+   usage=dict(input_tokens=max(0,int(reported.get('prompt_tokens',0))),output_tokens=max(0,int(reported.get('completion_tokens',0))),reasoning_tokens=max(0,int((reported.get('completion_tokens_details') or {}).get('reasoning_tokens',0))),reasoning_observed=False)
    choice=data['choices'][0]
-   if choice.get('finish_reason')=='length': raise ProviderError('Model output was truncated; simplify the setting or change model.')
+   usage['reasoning_observed']=bool(choice['message'].get('reasoning_content'))
+   if choice.get('finish_reason')=='length':
+    raise ProviderError('Model output reached the completion limit; this request was counted. Retry manually or use a smaller initial scope.',usage,'length')
    content=choice['message']['content']
-   if not isinstance(content,str) or not content.strip(): raise ProviderError('Empty final model content; check output budget / JSON support.')
-   usage=data.get('usage') or {}
-   return content,dict(input_tokens=max(0,int(usage.get('prompt_tokens',0))),output_tokens=max(0,int(usage.get('completion_tokens',0))),reasoning_tokens=max(0,int((usage.get('completion_tokens_details') or {}).get('reasoning_tokens',0))),reasoning_observed=bool(choice['message'].get('reasoning_content')))
-  except (KeyError,IndexError,TypeError,ValueError): raise ProviderError('Unexpected Chat Completions response shape.') from None
+   if not isinstance(content,str) or not content.strip(): raise ProviderError('Empty final model content; check output budget / JSON support.',usage,choice.get('finish_reason'))
+   return content,usage
+  except (KeyError,IndexError,TypeError,ValueError,AttributeError): raise ProviderError('Unexpected Chat Completions response shape.',usage) from None
 
 class Director:
  def __init__(self,world):
@@ -153,6 +170,9 @@ class Director:
  def retry(self):
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
   self.failed.clear(); self.error=''; self.paused=False; self.wake.set()
+ def _record_usage(self,usage):
+  self.tokens_in+=usage.get('input_tokens',0); self.tokens_out+=usage.get('output_tokens',0)
+  self.tokens_reasoning+=usage.get('reasoning_tokens',0); self.reasoning_responses+=int(usage.get('reasoning_observed',False))
  def status(self):
   horizon=self.world.prefetch_targets()
   ready=sum(self.world.state['topology'][rid]['ready'] for rid,distance in horizon)
@@ -206,14 +226,18 @@ class Director:
      with self.world.lock:
       if self.calls>=cfg['max_calls']: raise ProviderError('达到本次进程调用上限。')
       self.calls+=1
-     raw,usage=ChatProvider(cfg).generate(ctx,kind,str(error) if error else '')
+     request_ctx=dict(ctx,rejected_response=raw) if error and raw is not None else ctx
+     raw,usage=ChatProvider(cfg).generate(request_ctx,kind,str(error) if error else '')
      with self.world.lock:
-      self.tokens_in+=usage['input_tokens']; self.tokens_out+=usage['output_tokens']; self.tokens_reasoning+=usage.get('reasoning_tokens',0); self.reasoning_responses+=int(usage.get('reasoning_observed',False))
+      self._record_usage(usage)
     parsed=parse_patch(raw,kind)
     if not cfg['offline'] and kind=='region' and not parsed['region'].get('destinations'):
      raise InvalidPatch('region.destinations is required for live generation: supply 1..2 {id,name,description} new place outlines')
     if not cfg['offline'] and kind=='region' and not parsed['region'].get('visuals'):
      raise InvalidPatch('region.visuals is required: provide theme-specific palette and pixel sprite recipes')
+    if not cfg['offline'] and kind=='region' and ctx.get('content_version')==2:
+     if not parsed['region'].get('scene') or not parsed['region'].get('program'):
+      raise InvalidPatch('content v2 requires region.scene and region.program: author the spatial plan and executable interactions, not legacy templates')
     with self.world.lock:
      if self.world.state and ctx['epoch']==self.world.state['epoch'] and ctx['story_revision']==self.world.state['story_revision']:
       self.world.validate_patch(raw,ctx)
@@ -222,6 +246,12 @@ class Director:
     error=exc
     with self.world.lock: self.rejected+=1
     if cfg['offline']: break
+   except ProviderError as exc:
+    error=exc
+    with self.world.lock:
+     self._record_usage(exc.usage)
+     if exc.usage: self.rejected+=1
+    break
    except Exception as exc:
     error=exc; break  # Network failures never trigger an automatic retry storm.
   with self.world.lock:

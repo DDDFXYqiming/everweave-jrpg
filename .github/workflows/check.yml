@@ -34,3 +34,14 @@ jobs:
           cat /tmp/smoke.log
           grep -q 'GODOT_CLIENT_SMOKE_OK' /tmp/smoke.log
           ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/smoke.log
+      - name: Compile model-drawn pixels and execute content-driven UI contracts
+        run: |
+          python3 tools/build_content_fixture.py
+          timeout 45 /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/visual_compiler_smoke.gd > /tmp/visual.log 2>&1
+          cat /tmp/visual.log
+          grep -q 'VISUAL_COMPILER_OK' /tmp/visual.log
+          ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/visual.log
+          timeout 45 /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/content_smoke.gd > /tmp/content.log 2>&1
+          cat /tmp/content.log
+          grep -q 'GODOT_CONTENT_SMOKE_OK' /tmp/content.log
+          ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/content.log

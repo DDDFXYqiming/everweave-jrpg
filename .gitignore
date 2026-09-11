@@ -39,3 +39,6 @@ tools/Godot*
 *.log
 .DS_Store
 Thumbs.db
+
+# Generated contract snapshots contain test data, never a shipped fallback world.
+/tests/fixtures/generated_content.json

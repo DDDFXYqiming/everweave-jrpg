@@ -378,7 +378,7 @@ func _build_game() -> void:
 	journal_label = _label(side, "", 13, MUTED)
 	var footer := HBoxContainer.new()
 	all.add_child(footer)
-	hint_label = _label(footer, "WASD 移动 · E 交互 · I 背包 · J 记录 · 所有进度自动保存", 13, MUTED)
+	hint_label = _label(footer, "WASD 移动 · E 交互 · F 自由操作 · . 等待 · I 背包 · J 记录 · 所有进度自动保存", 13, MUTED)
 	_button(footer, "M 音乐", _toggle_music)
 
 func _bar(parent: Node, fill: Color) -> ProgressBar:
@@ -647,7 +647,7 @@ func _clear_modal() -> void:
 func _render_modal() -> void:
 	var ui: Dictionary = state.get("ui", {})
 	var battle: Dictionary = state.battle if state.get("battle") is Dictionary else {}
-	var signature: String = JSON.stringify([ui, battle, local_panel, state.get("inventory", [])])
+	var signature: String = JSON.stringify([ui, battle, local_panel, state.get("inventory", []), state.get("available_actions", [])])
 	if signature == modal_signature:
 		return
 	modal_signature = signature
@@ -670,6 +670,15 @@ func _render_modal() -> void:
 		_label(modal_stack, "\n".join(messages), 14)
 		var buttons := HFlowContainer.new()
 		modal_stack.add_child(buttons)
+		var generated_actions: Array = state.get("available_actions", [])
+		if bool(battle.get("authored", false)):
+			for index in range(generated_actions.size()):
+				var entry: Dictionary = generated_actions[index]
+				var b := _button(buttons, str(index + 1) + " " + str(entry.label), _send_action.bind({"op":"combat","move":"rule:"+str(entry.id)}))
+				b.disabled = not bool(entry.enabled)
+				b.tooltip_text = str(entry.description)
+			_button(buttons, "撤離 · Esc", _send_action.bind({"op":"combat","move":"flee"}))
+			return
 		for entry in [["1 攻击", "attack"], ["2 星火术 · 5MP", "skill"], ["3 防御", "defend"], ["4 药剂", "potion"], ["5 撤离", "flee"]]:
 			var b := _button(buttons, str(entry[0]), _send_action.bind({"op": "combat", "move": entry[1]}))
 			if entry[1] == "skill": b.disabled = int(state.player.mp) < 5 or state.region.rule == "no_magic"
@@ -680,6 +689,10 @@ func _render_modal() -> void:
 		var message_lines: Array[String] = []
 		for line in ui.get("lines", []): message_lines.append(str(line))
 		_label(modal_stack, "\n\n".join(message_lines), 18)
+		for entry in ui.get("actions", []):
+			var b := _button(modal_stack, str(entry.label), _send_action.bind({"op":"content_action","id":entry.id}))
+			b.disabled = not bool(entry.enabled)
+			b.tooltip_text = str(entry.description)
 		for ch in ui.get("choices", []):
 			_button(modal_stack, str(ch.text), _send_action.bind({"op": "choice", "id": ch.id}))
 		if ui.get("kind") == "shop":
@@ -694,7 +707,11 @@ func _render_modal() -> void:
 		for item in state.get("inventory", []):
 			var tag: String = "已装备 · " if bool(item.equipped) else ""
 			var b := _button(modal_stack, "%s%s ×%d" % [tag, str(item.name), int(item.quantity)], _send_action.bind({"op": "use", "id": item.id}))
-			b.disabled = str(item.kind) == "key" or bool(item.equipped)
+
+			if item.has("icon_visual"):
+				b.icon = preload("res://client/visual_compiler.gd").compile_sprite(item.icon_visual, {})
+				b.add_theme_constant_override("icon_max_width", 32)
+			b.disabled = (str(item.kind) == "key" and not item.has("use")) or bool(item.equipped)
 			_label(modal_stack, str(item.description), 13, MUTED)
 	else:
 		_label(modal_stack, "旅途记录", 25, GOLD)
@@ -719,10 +736,10 @@ func _process(delta: float) -> void:
 		return
 	var dx: int = 0
 	var dy: int = 0
-	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): dy = -1
-	elif Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): dy = 1
-	elif Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): dx = -1
-	elif Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): dx = 1
+	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): dy = -1
+	elif Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): dy = 1
+	elif Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): dx = -1
+	elif Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): dx = 1
 	if dx != 0 or dy != 0:
 		move_clock = 0.14
 		_send_action({"op": "move", "dx": dx, "dy": dy})
@@ -730,10 +747,20 @@ func _process(delta: float) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo or not game.visible:
 		return
-	var key: int = event.physical_keycode
+	# Windows accessibility input can supply a valid logical key with an unrelated
+	# scan code. Hotkeys follow the logical key; physical-only input still works.
+	var key: int = event.keycode if event.keycode != 0 else event.physical_keycode
 	if key == KEY_M:
 		_toggle_music()
 	elif state.get("battle") is Dictionary:
+		var authored: Array = state.get("available_actions", [])
+		if bool(state.battle.get("authored", false)):
+			var index: int = key - KEY_1
+			if index >= 0 and index < mini(9, authored.size()):
+				_send_action({"op":"combat","move":"rule:"+str(authored[index].id)})
+			elif key == KEY_ESCAPE: _send_action({"op":"combat","move":"flee"})
+			get_viewport().set_input_as_handled()
+			return
 		var moves: Dictionary = {KEY_1: "attack", KEY_2: "skill", KEY_3: "defend", KEY_4: "potion", KEY_5: "flee"}
 		if moves.has(key): _send_action({"op": "combat", "move": moves[key]})
 	elif not state.get("ui", {}).is_empty():
@@ -745,10 +772,22 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			local_panel = ""
 			modal_signature = ""
 			_render_modal()
+	elif key == KEY_F:
+		_send_action({"op":"actions"})
+	elif key == KEY_PERIOD:
+		_send_action({"op":"wait"})
 	elif key == KEY_I:
 		_toggle_panel("inventory")
 	elif key == KEY_J:
 		_toggle_panel("journal")
+	elif key in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_UP, KEY_LEFT, KEY_DOWN, KEY_RIGHT] and local_panel.is_empty():
+		# Handle the first tap as an event: a down/up pair can arrive within one
+		# frame and disappear before _process polls held keys.
+		if connection_ready and not action_busy and move_clock <= 0:
+			var dx: int = 1 if key in [KEY_D, KEY_RIGHT] else -1 if key in [KEY_A, KEY_LEFT] else 0
+			var dy: int = 1 if key in [KEY_S, KEY_DOWN] else -1 if key in [KEY_W, KEY_UP] else 0
+			move_clock = 0.14
+			_send_action({"op":"move","dx":dx,"dy":dy})
 	elif key in [KEY_E, KEY_SPACE] and local_panel.is_empty():
 		_send_action({"op": "interact"})
 	get_viewport().set_input_as_handled()
