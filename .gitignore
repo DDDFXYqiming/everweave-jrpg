@@ -1,0 +1,41 @@
+# Godot cache / exports
+.godot/
+*.tmp
+export.cfg
+export_credentials.cfg
+exports/
+build/
+dist/
+# Local state and credentials never belong in Git
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*credentials*
+*secrets*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+runtime.json
+instance.lock
+saves/
+userdata/
+local-settings.json
+# Python/test/tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+# Official engine binaries must be installed separately
+Godot*.exe
+Godot*_linux.x86_64
+tools/Godot*
+*.zip
+*.log
+.DS_Store
+Thumbs.db

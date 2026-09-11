@@ -1,0 +1,157 @@
+{
+  "kind": "region",
+  "world_title": "未写之境 · Everweave",
+  "region": {
+    "name": "潮汐渡口",
+    "biome": "coast",
+    "layout": "village",
+    "weather": "fireflies",
+    "rule": "normal",
+    "description": "这里是潮汐渡口。你带着「群星坠落的海上王国。」的念头抵达。沿灯火探索，出口之后的土地仍在生长。",
+    "landmarks": [
+      {
+        "type": "house",
+        "zone": "west"
+      },
+      {
+        "type": "tower",
+        "zone": "north"
+      },
+      {
+        "type": "crystal",
+        "zone": "east"
+      }
+    ],
+    "items": [
+      {
+        "id": "ember_blade",
+        "name": "无名的誓言",
+        "description": "旅途中诞生的武器。装备后改变攻击效果。",
+        "kind": "weapon",
+        "effect": "burn",
+        "power": 3,
+        "price": 30
+      }
+    ],
+    "entities": [
+      {
+        "id": "witness",
+        "kind": "npc",
+        "name": "提灯的旅人",
+        "role": "guide",
+        "zone": "south",
+        "appearance": 1,
+        "dialogue": [
+          "你也听见了世界尽头的钟声？",
+          "尚未走过的路，并没有固定的模样。"
+        ],
+        "choices": [
+          {
+            "id": "mercy",
+            "text": "帮助被追赶的陌生人",
+            "reply": "你伸出了手。远处忽然多了一盏灯。",
+            "tag": "mercy"
+          },
+          {
+            "id": "pursue",
+            "text": "追查钟声与失踪的人",
+            "reply": "旅人为你指向被雾覆盖的出口。",
+            "tag": "investigate"
+          },
+          {
+            "id": "reject",
+            "text": "只相信亲眼见到的事",
+            "reply": "他把你的回答记在破旧的书页上。",
+            "tag": "skeptic"
+          }
+        ]
+      },
+      {
+        "id": "trader",
+        "kind": "npc",
+        "name": "流动商人",
+        "role": "merchant",
+        "zone": "west",
+        "appearance": 3,
+        "dialogue": [
+          "金币买不到答案，但能买一点继续前进的勇气。"
+        ]
+      },
+      {
+        "id": "healer",
+        "kind": "npc",
+        "name": "星露医师",
+        "role": "healer",
+        "zone": "center",
+        "appearance": 5,
+        "dialogue": [
+          "坐一会儿，旅人。你不必带着所有伤口上路。"
+        ]
+      },
+      {
+        "id": "cache",
+        "kind": "chest",
+        "name": "遗落的旅行箱",
+        "zone": "east",
+        "item_id": "ember_blade"
+      },
+      {
+        "id": "spring",
+        "kind": "shrine",
+        "name": "遗忘之泉",
+        "zone": "west"
+      },
+      {
+        "id": "watcher",
+        "kind": "enemy",
+        "name": "锈蚀守望者",
+        "zone": "north",
+        "monster": "wolf",
+        "tier": 1,
+        "move": "strike"
+      },
+      {
+        "id": "warden",
+        "kind": "enemy",
+        "name": "边境守门人",
+        "zone": "east",
+        "monster": "sentinel",
+        "tier": 2,
+        "move": "rage"
+      }
+    ],
+    "quests": [
+      {
+        "id": "listen",
+        "name": "听见另一个人的故事",
+        "goal": "talk",
+        "target": "witness"
+      },
+      {
+        "id": "recover",
+        "name": "找到遗落的武器",
+        "goal": "collect",
+        "target": "ember_blade"
+      },
+      {
+        "id": "silence",
+        "name": "让边境重新安静",
+        "goal": "defeat",
+        "target": "warden"
+      }
+    ]
+  },
+  "lore": [
+    {
+      "id": "place_r0",
+      "text": "潮汐渡口的住民把重要的约定刻在灯座上。"
+    }
+  ],
+  "threads": [
+    {
+      "id": "bell",
+      "title": "未抵达的钟声",
+      "note": "让玩家的选择影响钟声的来源。"
+    }
+  ]
+}
