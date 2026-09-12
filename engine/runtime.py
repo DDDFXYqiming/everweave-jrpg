@@ -385,6 +385,7 @@ def design_record(plan):
     shapes = []
     for recipe in plan.get('visuals',{}).get('sprites',{}).values():
         if 'asset' in recipe or 'parts' in recipe:shapes.append(recipe)
+        elif 'material' in recipe:shapes.append(['material',recipe['material'],recipe['material_hash']])
         else:shapes.append([recipe['size'],[c[:-1] for c in recipe['layers']]])
     result=dict(fingerprint=digest([geometry,logic,shapes]), geometry=digest(geometry),logic=digest(logic),
                 shapes=digest(shapes),name=plan['name'],space=scene.get('summary',plan['layout']),

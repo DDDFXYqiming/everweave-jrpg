@@ -74,3 +74,7 @@ jobs:
           grep -q 'HYBRID_AUDIO_OK' /tmp/hybrid-audio.log
           ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/hybrid-audio.log
           python3 tools/test_native.py --hybrid --headless
+          timeout 30 "$GODOT_BIN" --headless --path . --script res://tests/terrain_materials_smoke.gd > /tmp/terrain.log 2>&1
+          cat /tmp/terrain.log
+          grep -q 'TERRAIN_MATERIALS_OK' /tmp/terrain.log
+          ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/terrain.log

@@ -94,7 +94,8 @@ def main():
                         common=' common' if role in ('hero','npc','item','enemy') or title in ('crate','chest','shelf','cauldron','switch') else ''
                         add(prefix+'_'+title,raw,'.png',source,title.replace('_',' '),'image',[role],theme+' '+tags+common,
                             size=list(img.size),perspective='top_down',family='kenney_tiny',anchor='bottom_center',footprint=[1,1],animation='static',source_member=name,curated=number in table,
-                            description=tags,surface_use=('accent: contrasting clusters; use in small patches' if title in ('paving','rubble','stone_path','grass_detail') else 'wall' if title=='stone' else 'base') if role=='ground' else '')
+                            description=tags,surface_use=('accent: contrasting clusters; use in small patches' if title in ('paving','rubble','stone_path','grass_detail') else 'wall' if title=='stone' else 'base') if role=='ground' else '',
+                            **({'placement':'wall_front'} if source=='tiny_dungeon' and title=='torch' else {}))
                     if source=='tiny_town':
                         assemblies={'blue_house':[[48,49,50],[60,63,62],[72,85,75]],'red_house':[[52,53,54],[64,67,66],[76,89,79]],'large_tree':[[6,7,8],[18,19,20],[30,31,32]],'autumn_tree':[[9,10,11],[21,22,23],[33,34,35]]}
                         for title,tiles in assemblies.items():

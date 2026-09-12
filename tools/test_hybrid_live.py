@@ -64,9 +64,10 @@ def main():
         region=w.region() or {};sprites=region.get('visuals',{}).get('sprites',{})
         referenced=sum('asset' in s or 'parts' in s for s in sprites.values())
         mixed=sum(('asset' in s or 'parts' in s) and ('layers' in s or 'parts' in s) for s in sprites.values())
+        materials=sum('material' in s for s in sprites.values())
         summary=dict(scene=args.scene,baseline=args.baseline,ready=bool(region),seconds=round(time.monotonic()-started,3),
             calls=d.calls,repair_calls=d.repair_calls,input_tokens=d.tokens_in,output_tokens=d.tokens_out,reasoning_tokens=d.tokens_reasoning,
-            sprites=len(sprites),library_sprites=referenced,composed_sprites=mixed,original_sprites=len(sprites)-referenced,
+            sprites=len(sprites),library_sprites=referenced,composed_sprites=mixed,material_sprites=materials,original_sprites=len(sprites)-referenced-materials,
             modules=len(region.get('module_sources',[])),used_assets=used_assets(region.get('plan',{})),
             failed_tasks=d.status()['failed_tasks'],task_history=d.task_history)
         write('result.json',summary)

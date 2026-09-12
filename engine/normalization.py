@@ -150,7 +150,8 @@ class Normalizer:
                 if isinstance(value,list):
                     for i,entry in enumerate(value):surfaces(entry,f'{path}[{i}]')
                 elif isinstance(value,dict):
-                    if 'surface' in value:materialize(value['surface'],path+'.surface')
+                    for field in ('surface','wall_surface','door_surface'):
+                        if field in value:materialize(value[field],path+'.'+field)
                     if value.get('op')=='sprite':materialize(value.get('value'),path+'.value')
                     for key,entry in value.items():
                         if key not in ('vars','state'):surfaces(entry,path+'.'+key)
@@ -173,6 +174,12 @@ class Normalizer:
             if isinstance(cues,dict):
                 for group in ('bindings','objects'):
                     for name,value in (audio.get(group,{}) or {}).items() if isinstance(audio.get(group,{}),dict) else []:
+                        if isinstance(value,dict) and set(value)=={'asset'}:
+                            asset=value['asset']
+                            if isinstance(asset,str) and asset in catalog() and catalog()[asset]['kind']=='sfx' and (asset not in cues or cues[asset]==value):
+                                cues.setdefault(asset,copy.deepcopy(value));audio[group][name]=asset
+                                self.record(root+'.audio.'+group+'.'+name,'inline_cue_reference',value,asset)
+                                value=asset
                         if isinstance(value,str) and value not in cues and value in catalog() and catalog()[value]['kind']=='sfx':
                             cues[value]={'asset':value}
                             self.record(root+'.audio.'+group+'.'+name,'library_reference',value,root+'.audio.cues.'+value)
@@ -395,7 +402,8 @@ class Normalizer:
             if op in ('move','sprite','solid','remove') or 'scope' in node or 'on' in node or ('label' in node and 'effects' in node):
                 self.field_ref(node, 'target', 'objects', path)
             if op == 'sprite': self.field_ref(node, 'value', 'sprites', path)
-            if 'surface' in node: self.field_ref(node, 'surface', 'sprites', path)
+            for field in ('surface','wall_surface','door_surface'):
+                if field in node:self.field_ref(node,field,'sprites',path)
             for key, value in node.items():
                 # Plain scalar values and prose are untouched. Reference expressions
                 # and effects are handled only at their documented syntax locations.

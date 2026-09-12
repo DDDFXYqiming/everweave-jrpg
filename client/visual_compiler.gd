@@ -6,6 +6,7 @@ static func color(value: String, palette: Dictionary) -> Color:
 	return Color(str(palette.get(value, value)))
 
 static func compile_sprite(recipe: Dictionary, palette: Dictionary) -> Texture2D:
+	if recipe.has("material"):return compile_sprite(recipe.base,palette)
 	var width: int = int(recipe.size[0])
 	var height: int = int(recipe.size[1])
 	var img := Image.create(width, height, false, Image.FORMAT_RGBA8)

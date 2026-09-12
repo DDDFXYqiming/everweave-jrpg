@@ -5723,7 +5723,8 @@
       "source_member": "Tiles/tile_0029.png",
       "curated": true,
       "description": "torch warm fire",
-      "surface_use": ""
+      "surface_use": "",
+      "placement": "wall_front"
     },
     "dungeon_v1_tile_0030": {
       "name": "tile 0030",

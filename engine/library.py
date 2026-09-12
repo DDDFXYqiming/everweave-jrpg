@@ -52,7 +52,8 @@ def usage(plan):
     sprites=list(plan.get('visuals',{}).get('sprites',{}).values())
     composed=sum('parts' in s or ('asset' in s and ('layers' in s or 'frames' in s)) for s in sprites)
     referenced=sum('asset' in s and 'layers' not in s and 'frames' not in s for s in sprites)
-    return dict(referenced=referenced,composed=composed,drawn=len(sprites)-composed-referenced,
+    materials=sum('material' in s for s in sprites)
+    return dict(referenced=referenced,composed=composed,materials=materials,drawn=len(sprites)-composed-referenced-materials,
                 unique_assets=len(used_assets(plan)),modules=len(plan.get('module_sources',[])))
 
 def candidates(context):
@@ -94,4 +95,5 @@ def candidates(context):
             audio.append(dict(id=key,name=e['name'],kind='music',tags=e['tags'],loop=e['loop']))
         elif key in preferred:audio.append(dict(id=key,name=e['name'],kind='sfx',loop=False))
     from .modules import menu
-    return dict(profile=profile,family=family or 'no_matching_visual_family',perspective='top_down',images=chosen,audio=audio,modules=menu())
+    from .materials import menu as material_menu
+    return dict(profile=profile,family=family or 'no_matching_visual_family',perspective='top_down',images=chosen,audio=audio,modules=menu(),materials=material_menu(profile))

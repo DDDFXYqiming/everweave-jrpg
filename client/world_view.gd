@@ -7,6 +7,10 @@ signal map_requested()
 
 const TILE: float = 32.0
 const VisualCompiler = preload("res://client/visual_compiler.gd")
+const TerrainMaterials = preload("res://client/terrain_materials.gd")
+var materials = TerrainMaterials.new()
+var room_floor_keys: Dictionary = {}
+var terrain_grid: Array = []
 var generated: Dictionary = {}
 var visual_signature: String = ""
 const BIOMES: Array[String] = ["forest", "coast", "snow", "desert", "ruins", "industrial", "dream"]
@@ -41,10 +45,20 @@ func update_world(data: Dictionary) -> void:
 		queue_redraw()
 		return
 	region = value
+	room_floor_keys.clear()
+	if int(region.get("surface_version",0))<2:
+		for command in region.get("scene",{}).get("paint",[]):
+			if not command.has("room") or not command.has("surface"):continue
+			var box: Array = command.room
+			for yy in range(int(box[1]),int(box[1]+box[3])):
+				for xx in range(int(box[0]),int(box[0]+box[2])):
+					if xx in [int(box[0]),int(box[0]+box[2]-1)] or yy in [int(box[1]),int(box[1]+box[3]-1)]:room_floor_keys[Vector2i(xx,yy)]=str(command.surface)
 	var identity: String = JSON.stringify(region.get("visuals", {}))
 	if identity != visual_signature:
 		visual_signature = identity
 		generated = VisualCompiler.compile(region.visuals, int(region.seed)) if region.has("visuals") else {}
+		if region.has("visuals"):materials.configure(region.visuals)
+	terrain_grid=materials.display_grid(region) if region.has("visuals") else region.tiles
 	var p: Dictionary = data.get("player", {})
 	target_player = Vector2(float(p.get("x", 0)), float(p.get("y", 0)))
 	if current_id != str(region.get("id", "")) or visual_player.distance_to(target_player) > 3.0:
@@ -105,13 +119,20 @@ func _draw() -> void:
 				variant = (variant + int(elapsed * 1.6)) % 2
 			var at := Vector2(x, y) * TILE - camera
 			var surfaces: Array = region.get("surfaces", [])
+			var painted: bool = false
 			if not generated.is_empty() and not surfaces.is_empty():
 				var surface: String = str(surfaces[y][x])
+				# Older saved rooms may have the floor recipe on blocked wall cells.
+				if typ==3 and not surface.is_empty() and room_floor_keys.get(Vector2i(x,y),"")==surface:surface=""
 				if not surface.is_empty() and generated.has(surface):
-					draw_texture_rect(VisualCompiler.texture(surface, generated, elapsed), Rect2(at.floor(), Vector2(TILE + 1, TILE + 1)), false)
-					continue
-			var terrain_texture: Texture2D = tiles if generated.is_empty() else generated["__tiles"]
-			draw_texture_rect_region(terrain_texture, Rect2(at.floor(), Vector2(TILE + 1, TILE + 1)), Rect2((typ * 2 + variant) * 16, biome_index * 16 if generated.is_empty() else 0, 16, 16))
+					var texture: Texture2D = materials.texture(surface,typ,int(region.seed),x,y) if materials.styles.has(surface) else VisualCompiler.texture(surface,generated,elapsed)
+					if texture!=null:
+						draw_texture_rect(texture,Rect2(at.floor(),Vector2(TILE+1,TILE+1)),false)
+						painted=true
+			if not painted:
+				var terrain_texture: Texture2D = tiles if generated.is_empty() else generated["__tiles"]
+				draw_texture_rect_region(terrain_texture, Rect2(at.floor(), Vector2(TILE + 1, TILE + 1)), Rect2((typ * 2 + variant) * 16, biome_index * 16 if generated.is_empty() else 0, 16, 16))
+			if not generated.is_empty():materials.edges(self,terrain_grid,x,y,at.floor(),TILE)
 	var objects: Array = []
 	for prop in region.get("props", []):
 		if bool(prop.get("spent", false)): continue

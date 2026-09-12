@@ -39,10 +39,14 @@ class World:
   if rid in self.cache: self.cache.move_to_end(rid); return self.cache[rid]
   r=self.store.load_region(rid)
   if r:
+   from .scene import dress
+   dress(r)
    self.cache[rid]=r
    while len(self.cache)>6: self.cache.popitem(last=False)
   return r
  def persist(self,*regions,event=None,delete=()):
+  from .scene import dress
+  for r in regions:dress(r)
   self.state['version']+=1
   if getattr(self,'_batch',None) is not None:
    self._batch['regions'].update({r['id']:r for r in regions})

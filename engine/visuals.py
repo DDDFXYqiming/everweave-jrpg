@@ -8,6 +8,9 @@ TERRAINS=('grass','metal','stone','sand','snow','wood','void')
 
 def freeze_sprite(recipe,palette):
     result=copy.deepcopy(recipe)
+    if 'material' in result:
+        result['base']=freeze_sprite(result['base'],palette)
+        result['variants']=[freeze_sprite(v,palette) for v in result['variants']]
     for layers in [result.get('layers',[])]+result.get('frames',[]):
         for command in layers:command[-1]=palette.get(command[-1],command[-1])
     for part in result.get('parts',[]):
@@ -46,6 +49,11 @@ def validate_visuals(value,minimum_layers=1):
         return n
     result={}
     for key,sprite in sprites.items():
+        if isinstance(sprite,dict) and 'material' in sprite:
+            ident(key)
+            from .materials import validate
+            result[key]=validate(sprite,palette)
+            continue
         if isinstance(sprite,dict) and ('asset' in sprite or 'parts' in sprite):
             result[key]=library_recipe(sprite,palette,key)
             continue

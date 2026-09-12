@@ -10,6 +10,8 @@
 
 此前 v1 的 Windows、99 项测试与真实 DeepSeek 记录保留在 [引擎验收记录](docs/ENGINE_REVIEW.md) 和 [图形与预生成记录](docs/VISUALS_AND_PREFETCH.md)，不作为 v2 在线生成成功的证据。
 
+地表与蓝图场景已进一步改进：房间地板/墙面/门槛分开绘制，材质在本地生成稳定变化，`scenery/density` 在蓝图地图上实际生效。沿用侧边任务的素材缓存和兼容哈希；不增加绘图请求，不改变旧地图碰撞。见 [同场景前后对照与验收](docs/SCENE_QUALITY.md)。
+
 | 太空机械城 | 海底珊瑚城 |
 |---|---|
 | ![机械城原生渲染](docs/validation/space.png) | ![珊瑚城原生渲染](docs/validation/coral.png) |

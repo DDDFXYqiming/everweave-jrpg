@@ -896,7 +896,7 @@ func _render() -> void:
 	director_label.text += "\n提前两层 · 已准备 %d / %d 区域" % [int(d.get("prefetch_ready", 0)), int(d.get("prefetch_total", 0))]
 	var library_usage: Dictionary = r.get("library_usage",{})
 	if not library_usage.is_empty():
-		director_label.text += "\n图形：引用 %d · 组合 %d · 原创 %d\n能力模块 %d" % [int(library_usage.get("referenced",0)),int(library_usage.get("composed",0)),int(library_usage.get("drawn",0)),int(library_usage.get("modules",0))]
+		director_label.text += "\n图形：引用 %d · 组合 %d · 原创 %d\n地表材质 %d · 能力模块 %d" % [int(library_usage.get("referenced",0)),int(library_usage.get("composed",0)),int(library_usage.get("drawn",0)),int(library_usage.get("materials",0)),int(library_usage.get("modules",0))]
 	lines.clear()
 	for f in state.get("frontier", []):
 		var status_text: String = "可进入" if bool(f.ready) else ("已暂停" if bool(d.get("paused", false)) else "排队中")

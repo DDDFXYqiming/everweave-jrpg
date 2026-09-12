@@ -52,12 +52,14 @@ class HybridContentTests(unittest.TestCase):
         raw['region']['items'][0]['sprite']='dungeon_v1_red_flask'
         raw['region']['scene']['paint'][0]['surface']='town_v1_grass'
         raw['region']['audio']['bindings']['move']='rpg_v1_footstep00'
+        raw['region']['audio']['bindings']['pickup']={'asset':'rpg_v1_handle_coins'}
         raw['region']['program']['actions'][0]['when']={'not':False}
         before=copy.deepcopy(raw)
         self.w.apply_patch(raw,self.w.context())
         self.assertEqual(raw,before)
         self.assertEqual(self.w.region()['visuals']['sprites']['town_v1_grass']['asset'],'town_v1_grass')
         self.assertIn('rpg_v1_footstep00',self.w.region()['audio']['cues'])
+        self.assertEqual(self.w.region()['audio']['bindings']['pickup'],'rpg_v1_handle_coins')
         self.w.action({'op':'invoke','id':'tune'})
         self.assertEqual(self.w.region()['runtime']['vars']['presses'],1)
     def test_aliases_scenery_short_frames_and_audio_options_keep_their_meaning(self):

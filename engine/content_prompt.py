@@ -70,9 +70,11 @@ TILE is ONLY ground/path/water/wall/bridge. Ground, path and bridge are walkable
 water and wall are blocked. Metal/wood/grass describe visuals.terrain, never tile/base values.
 Use base:ground with your own surface recipe for a metal or wooden floor.
 A paint command has one of {rect:[x,y,w,h],tile:TILE,surface?:SPRITE_ID},
-{room:[x,y,w,h],tile:INTERIOR_TILE,doors:[[x,y],...],surface?:SPRITE_ID},
+{room:[x,y,w,h],tile:INTERIOR_TILE,doors:[[x,y],...],surface?:FLOOR_ID,wall_surface?:WALL_ID,door_surface?:THRESHOLD_ID},
 {line:[[x,y],...],width:1..6,tile:TILE,surface?:SPRITE_ID}.
 Rooms draw wall perimeters; doors must be on those perimeters. Lines use axis-aligned segments.
+Room surface applies ONLY to the interior. Wall and threshold use their own optional surfaces;
+omitting them uses readable local wall/door rendering. Never use the floor material for walls.
 Paint in back-to-front order. No giant tile arrays. Model, NOT random PCG, chooses shape and placements.
 The engine does NOT carve roads for you. All entities need a reachable approach and at least one exit.
 A door may be a solid object with a programmed unlock condition. Leave escape access; don't trap spawn.
@@ -159,6 +161,13 @@ Do not invent asset IDs, file paths or asset hashes. The engine pins revisions. 
 for each assembled object. Use library ground sprites in scene.paint.surface. Place library buildings
 as landmarks with supplied footprint; their visual size does not create rooms or collisions for you.
 Direct image IDs may be used in sprite/surface fields; the engine creates their alias locally.
+Prefer a complete material from library_candidates.materials for large surfaces:
+sprites.ground_cover={material:"meadow_v1"}, then scene.paint.surface="ground_cover".
+Materials include seeded subtle variation and compatible detail; never enumerate those cells.
+Use the listed numeric tile types (0 ground,1 path,2 water,3 wall,4 bridge) for that material.
+visuals.scenery:[SPRITE_IDS] and density:0..0.12 now add local non-blocking dressing on open ground.
+Choose small flowers/rubble or vegetation suited to the place. The local placer keeps doors, paths,
+spawn and interactions clear. Important buildings, objects and their locations remain your design.
 Use quiet base surfaces for large floors and accent surfaces in small patches. Keep characters and
 interactive objects readable against the floor; do not carpet an entire hall in a high-contrast accent tile.
 If no candidate fits, author a recipe instead. Do not recreate every ordinary tree, wall or floor.
