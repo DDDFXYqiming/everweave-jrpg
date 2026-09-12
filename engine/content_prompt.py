@@ -90,7 +90,7 @@ npc additionally role:guide/merchant/healer/wanderer,appearance:0..7,dialogue:[1
 choices:[{id,text,reply,tag}]. Prefer object + authored actions for unusual NPC capabilities.
 enemy additionally monster:slime/wolf/sentinel/wisp/mimic (legacy fallback),tier:1..3,move:strike/venom/drain/guard/rage,
 stats?:{hp:1..2000,attack:0..200}. Artwork and behavior come from sprite/program, not monster label.
-chest additionally item_id (a new local item, potion/ether/wayfarer_blade, or an exact existing ID from available_items). Shrine always heals; do not
+chest additionally item_id (a new local item or an exact existing ID from available_items). Shrine always heals; do not
 mislabel machines or unfamiliar objects as shrines. Empty entities is not supported; max32.
 landmarks <=24 {id,type:house/tower/camp/crystal/tree,zone,at?,sprite,solid?,footprint?}.
 Landmarks are scenery; interactive buildings should be objects. Use room paint for accessible interiors.
@@ -104,6 +104,13 @@ destinations:1..2 {id,name,description}; when world_context.destination exists, 
 place. When refresh=true preserve existing_destinations IDs and promised references.
 If hero_visual exists, omit hero recipe; the engine reuses the canonical player identity. Do not redraw it.
 Generation success requires both an authored scene and an executable program, not just text and pictures.
+For item_policy=authored there are NO implicit default items. Only region.items and available_items exist.
+For its opening (target=r0), also provide starting_loadout:{inventory:[{item_id:LOCAL_ID,count:1..9}],
+weapon?:LOCAL_ID,charm?:LOCAL_ID}. Define every starting item in region.items with its own sprite recipe.
+Choose possessions appropriate to the character and setting (<=8 stacks, <=20 total); an empty inventory
+is valid when intentional. Equipping is optional; an equipped item must be owned and match its slot.
+This grants starting possessions exactly once. Never send starting_loadout for later regions or reactions.
+If an authored-items region has enemies, define playable combat actions in program, not a built-in spell.
 '''
 
 REACTION = '''
@@ -151,7 +158,7 @@ def model_context(context,kind):
     """Keep internal validation context complete; project only relevant model input."""
     if kind!='region' or context.get('content_version')!=2:
         return copy.deepcopy(context)
-    keep=('content_version','setting','world_title','target','target_depth','destination','refresh',
+    keep=('content_version','item_policy','setting','world_title','target','target_depth','destination','refresh',
           'existing_destinations','visual_identity','planned_parent','story_revision','player','facts',
           'lore','threads','known_locations','frontier','rejected_response','validation_errors')
     result={key:copy.deepcopy(context[key]) for key in keep if key in context}

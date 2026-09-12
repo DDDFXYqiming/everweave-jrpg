@@ -10,6 +10,7 @@ import time
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit,parse_qs
 from .world import World,GameError
 from .storage import Store,dumps
 from .director import Director,ProviderError,official_deepseek
@@ -69,8 +70,20 @@ class Handler(BaseHTTPRequestHandler):
  def do_OPTIONS(self): self.reply(403,dict(error='Browser access is disabled.'))
  def do_GET(self):
   if not self.authorized(): self.reply(401,dict(error='Local session token required.')); return
-  if self.path!='/state': self.reply(404,dict(error='Not found')); return
-  with self.server.world.lock: self.reply(200,self.server.snapshot())
+  path=urlsplit(self.path)
+  with self.server.world.lock:
+   if path.path=='/state':self.reply(200,self.server.snapshot())
+   elif path.path=='/atlas':
+    from .read_views import atlas
+    self.reply(200,atlas(self.server.world))
+   elif path.path=='/journal':
+    from .read_views import journal
+    query=parse_qs(path.query)
+    try:
+     before=int(query['before'][0]) if 'before' in query else None
+     self.reply(200,journal(self.server.world,query.get('tab',['history'])[0],before,int(query.get('limit',['30'])[0])))
+    except ValueError as exc:self.reply(400,dict(error=str(exc)))
+   else:self.reply(404,dict(error='Not found'))
  def do_POST(self):
   if not self.authorized(): self.reply(401,dict(error='Local session token required.')); return
   try:
@@ -107,10 +120,10 @@ class Handler(BaseHTTPRequestHandler):
      # Validate all inputs before replacing an existing save.
      setting=data.get('setting','')
      if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
-     d.configure(data); w.start(setting); server.seen.clear(); server.remember_configuration()
+     d.configure(data); w.start(setting,authored=not d.cfg['offline']); server.seen.clear(); server.remember_configuration()
     elif self.path=='/configure': d.configure(data); server.remember_configuration()
     elif self.path=='/action': w.action(data)
-    elif self.path=='/retry': d.retry(data.get('target'),data.get('kind'))
+    elif self.path=='/retry': d.retry(data.get('target'),data.get('kind'),data.get('mode','repair'))
     elif self.path=='/pause': d.paused=bool(data.get('paused',True))
     else: self.reply(404,dict(error='Not found')); return
     if request_id:

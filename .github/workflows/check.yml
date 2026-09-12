@@ -40,6 +40,10 @@ jobs:
           cat /tmp/presentation.log
           grep -q 'PRESENTATION_OK' /tmp/presentation.log
           ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/presentation.log
+          timeout 45 /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/atlas_smoke.gd > /tmp/atlas.log 2>&1
+          cat /tmp/atlas.log
+          grep -q 'ATLAS_OK' /tmp/atlas.log
+          ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/atlas.log
       - name: Compile model-drawn pixels and execute content-driven UI contracts
         run: |
           python3 tools/build_content_fixture.py

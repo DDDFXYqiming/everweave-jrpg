@@ -181,14 +181,17 @@ class Director:
  def stop(self):
   self.stop_event.set(); self.wake.set()
   for worker in self.threads:worker.join(timeout=1)
- def retry(self,target=None,kind=None):
+ def retry(self,target=None,kind=None,mode='repair'):
+  if mode not in ('repair','redesign'):raise ProviderError('无效重试方式。')
+  if mode=='redesign' and (not target or kind!='region'):raise ProviderError('重新创作需指定一个失败地区。')
   if (target is None)!=(kind is None) or (target is not None and (not isinstance(target,str) or kind not in ('region','reaction'))):
    raise ProviderError('重试需要地区 ID 和任务类型。')
   selected={key for key in self.failed if target is None or key==(kind,target)}
   if target is not None and not selected:raise ProviderError('这个生成任务已经不再处于失败状态。')
   for key in selected:
+   if mode=='redesign':self.failed_payloads.pop(key,None)
    self.failed.discard(key); self.failures.pop(key,None)
-  self.audit.emit('generation.retry',tasks=[{'kind':k,'target':t} for k,t in sorted(selected)])
+  self.audit.emit('generation.retry',mode=mode,tasks=[{'kind':k,'target':t} for k,t in sorted(selected)])
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
   self.error=next((entry['message'] for entry in reversed(list(self.failures.values()))),'')
   self.paused=False; self.wake.set()

@@ -88,6 +88,42 @@ def distance(entity, player):
     return min(abs(x-player['x'])+abs(y-player['y']) for x, y in cells_for(entity))
 
 
+def item_local_dependency(node):
+    if isinstance(node,list):return any(item_local_dependency(v) for v in node)
+    if not isinstance(node,dict):return False
+    if str(node.get('get',node.get('path',''))).startswith(('objects.','vars.','self.')):return True
+    if node.get('op') in ('move','sprite','solid','remove','paint','timer','emit','end_battle'):return True
+    if 'item' in node and ':' not in node['item']:return True
+    return any(item_local_dependency(v) for v in node.values())
+
+
+def item_availability(world,item):
+    p=world.state['player'];r=world.region();use=item.get('use')
+    label=(use or {}).get('label','装备' if item.get('kind') in ('weapon','charm') else '使用')
+    reason=''
+    if p['inventory'].get(item.get('id'),0)<1:reason='背包里没有这件物品。'
+    elif world.state['battle']:reason='请先结束战斗。'
+    elif world.state['ui']:reason='先结束当前交互。'
+    elif use:
+        if not r:reason='地区尚未就绪。'
+        elif item.get('origin',r['id'])!=r['id'] and item_local_dependency(use):reason='此物品的交互绑定原地区；请返回后使用。'
+        else:
+            # Evaluate on a private view so inspecting conditions cannot alter
+            # player/object state or spend the live runtime's execution budget.
+            view=copy.copy(world);view.state=dict(world.state,player=copy.deepcopy(p))
+            vm=Runtime(view,copy.deepcopy(r))
+            try:
+                if not vm.expr(use['when']):reason=vm._resource_hint(use['when']) or '当前不满足物品使用条件。'
+            except RuleError:reason='此物品当前不可使用。'
+    elif item.get('kind') in ('weapon','charm'):
+        if p.get(item['kind'])==item['id']:reason='已经装备。'
+    elif item.get('kind')=='consumable':
+        stat,cap=('hp','max_hp') if item['effect']=='heal' else ('mp','max_mp')
+        if p[stat]>=p[cap]:reason='生命已满。' if stat=='hp' else '魔力已满。'
+    else:reason='在相关人物或物件处使用。'
+    return dict(enabled=not reason,blocked_reason=reason,label=label)
+
+
 def action(world, a):
     def apply():
         if not isinstance(a, dict) or not world.state or not world.region():
@@ -122,18 +158,11 @@ def action(world, a):
         if op == 'use' and not s['battle']:
             item = s['items'].get(a.get('id'), {})
             if item.get('use'):
-                if s['ui']: raise RuleError('先结束当前交互。')
-                if s['player']['inventory'].get(item['id'], 0) < 1: raise RuleError('没有这件物品。')
+                availability=item_availability(world,item)
+                if not availability['enabled']:raise RuleError(availability['blocked_reason'])
                 vm = Runtime(world, r); use = item['use']
                 # Local-object dependencies cannot silently bind to a different region.
-                def local_dependency(node):
-                    if isinstance(node,list): return any(local_dependency(v) for v in node)
-                    if not isinstance(node,dict): return False
-                    if str(node.get('get',node.get('path',''))).startswith(('objects.','vars.','self.')): return True
-                    if node.get('op') in ('move','sprite','solid','remove','paint','timer','emit','end_battle'): return True
-                    if 'item' in node and ':' not in node['item']: return True
-                    return any(local_dependency(v) for v in node.values())
-                if item.get('origin', r['id']) != r['id'] and local_dependency(use):
+                if item.get('origin', r['id']) != r['id'] and item_local_dependency(use):
                     raise RuleError('此物品的交互绑定原地区；请返回后使用。')
                 if not vm.expr(use['when']): raise RuleError('当前不满足物品使用条件。')
                 s['player']['inventory'][item['id']] -= use['consume']

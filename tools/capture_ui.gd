@@ -14,7 +14,7 @@ func capture(name: String) -> void:
 func _run() -> void:
 	create_timer(35).timeout.connect(func() -> void: quit(1))
 	var args: PackedStringArray = OS.get_cmdline_user_args()
-	assert(args.size() == 2, "snapshot path and output folder required")
+	assert(args.size() in [2,3], "snapshot path, output folder and optional atlas snapshot required")
 	output = args[1]
 	DirAccess.make_dir_recursive_absolute(output)
 	root.size = Vector2i(1600,900)
@@ -39,6 +39,15 @@ func _run() -> void:
 	await capture("display")
 	main._home_tab(2)
 	await capture("connection")
+	if args.size() == 3:
+		main._show_game()
+		var graph: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(args[2]))
+		graph.epoch = str(graph.epoch) + "-gallery"
+		main.atlas_panel.canvas.set_graph(graph)
+		main.atlas_panel.show()
+		await process_frame
+		main.atlas_panel.canvas.locate_current()
+		await capture("atlas")
 	main.queue_free()
 	main = null
 	await create_timer(.2).timeout

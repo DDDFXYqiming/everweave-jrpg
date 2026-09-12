@@ -3,6 +3,7 @@ extends Control
 ## All scene placement is data; the LLM never supplies GDScript or resource paths.
 
 signal entity_clicked(entity_id: String)
+signal map_requested()
 
 const TILE: float = 32.0
 const VisualCompiler = preload("res://client/visual_compiler.gd")
@@ -184,7 +185,7 @@ func _draw_weather(weather: String) -> void:
 
 func _draw_minimap() -> void:
 	var origin := Vector2(size.x - 126.0, 14.0)
-	draw_rect(Rect2(origin - Vector2(5, 5), Vector2(114, 82)), Color(0.035, 0.075, 0.13, 0.89))
+	draw_rect(Rect2(origin - Vector2(5, 5), Vector2(114, 100)), Color(0.035, 0.075, 0.13, 0.89))
 	var palette: Array[Color] = [Color("375e59"), Color("b29e75"), Color("356c7b"), Color("293844"), Color("bd9866")]
 	if region.has("visuals"):
 		palette.clear()
@@ -197,6 +198,7 @@ func _draw_minimap() -> void:
 		if e.kind == "exit":
 			draw_rect(Rect2(origin + Vector2(float(e.x), float(e.y)) * map_scale - Vector2.ONE, Vector2(3, 3)), Color("c1a9ef"))
 	draw_rect(Rect2(origin + target_player * map_scale - Vector2.ONE, Vector2(4, 4)), Color("f7e0a4"))
+	draw_string(font,origin+Vector2(3,89),"旅图 · 点击展开",HORIZONTAL_ALIGNMENT_LEFT,104,11,Color("d7c59d"))
 
 func _draw_nearby_hint() -> void:
 	var p: Dictionary = snapshot.get("player", {})
@@ -211,7 +213,13 @@ func _draw_nearby_hint() -> void:
 			return
 
 func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if Rect2(Vector2(size.x-131,9),Vector2(114,100)).has_point(event.position) else Control.CURSOR_ARROW
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if Rect2(Vector2(size.x-131,9),Vector2(114,100)).has_point(event.position):
+			map_requested.emit()
+			accept_event()
+			return
 		var cell: Vector2 = ((event.position + camera) / TILE).floor()
 		for e in region.get("entities", []):
 			if int(e.x) == int(cell.x) and int(e.y) == int(cell.y):

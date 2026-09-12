@@ -23,12 +23,16 @@ class World:
    for node in self.state['topology'].values():
     if not node.get('refresh_reason'):node['needs_refresh']=False
    self.state['prefetch_policy']=2
- def start(self,setting):
+ def start(self,setting,*,authored=False):
   if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
   self.cache.clear(); self.reaction_needed=False
   self.state=dict(schema_version=2,prefetch_policy=2,director_reaction_pending=False,epoch=uuid.uuid4().hex,version=1,story_revision=0,setting=setting.strip(),title='未写之境 · Everweave',current='r0',time=480,steps=0,
    player=dict(x=26,y=31,facing=[0,-1],hp=90,max_hp=90,mp=24,max_mp=24,level=1,xp=0,gold=35,inventory=dict(potion=3,ether=1,wayfarer_blade=1),weapon='wayfarer_blade',charm=''),
    topology={'r0':dict(parent=None,depth=0,ready=False,visited=False,name='最初的落脚处',children=[])},items=copy.deepcopy(C.BASE_ITEMS),quests={},lore={},threads={},facts={},battle=None,ui={},journal=['你的一句话，正在成为一个可以走进去的世界。'])
+  self.state['journal_count']=1
+  if authored:
+   self.state.update(item_policy='authored',loadout_applied=False,items={})
+   self.state['player'].update(inventory={},weapon='',charm='')
   self.store.commit(self.state,reset=True)
  def region(self,rid=None):
   rid=rid or self.state['current']
@@ -48,6 +52,7 @@ class World:
   for r in regions: self.cache[r['id']]=r; self.cache.move_to_end(r['id'])
   while len(self.cache)>6: self.cache.popitem(last=False)
  def note(self,t):
+  self.state['journal_count']=self.state.get('journal_count',len(self.state['journal']))+1
   self.state['journal'].append(t); self.state['journal']=self.state['journal'][-80:]
  def story(self,kind,text,data=None):
   s=self.state; s['story_revision']+=1; self.reaction_needed=True; s['director_reaction_pending']=True; self.note(text); discarded=[]
@@ -68,7 +73,7 @@ class World:
   s=self.state; rid=target or s['current']; r=self.region(); n=s['topology'][rid]
   parent=self.region(n['parent']) if n['parent'] else None
   art=(parent or r or {}).get('visuals',{})
-  return dict(content_version=2,design_history=s.get('design_history',[])[-12:],hero_visual=s.get('hero_visual'),current_program=(r or {}).get('program',{}),current_runtime=(r or {}).get('runtime',{}),current_scene=(r or {}).get('scene',{}),known_sprites=list((r or {}).get('visuals',{}).get('sprites',{})),epoch=s['epoch'],kind=kind,setting=s['setting'],world_title=s['title'],target=rid,target_depth=n['depth'],target_revision=n.get('generation_revision',0),target_parent=n.get('parent'),destination=n.get('outline'),refresh=bool(n.get('needs_refresh')),existing_destinations=[s['topology'][ch].get('outline') for ch in n['children'] if s['topology'][ch].get('outline')],visual_identity={k:art[k] for k in ('style','terrain','palette') if k in art},planned_parent={k:parent[k] for k in ('id','name','description','biome','rule')} if parent else None,story_revision=s['story_revision'],
+  return dict(content_version=2,item_policy=s.get('item_policy','legacy'),design_history=s.get('design_history',[])[-12:],hero_visual=s.get('hero_visual'),current_program=(r or {}).get('program',{}),current_runtime=(r or {}).get('runtime',{}),current_scene=(r or {}).get('scene',{}),known_sprites=list((r or {}).get('visuals',{}).get('sprites',{})),epoch=s['epoch'],kind=kind,setting=s['setting'],world_title=s['title'],target=rid,target_depth=n['depth'],target_revision=n.get('generation_revision',0),target_parent=n.get('parent'),destination=n.get('outline'),refresh=bool(n.get('needs_refresh')),existing_destinations=[s['topology'][ch].get('outline') for ch in n['children'] if s['topology'][ch].get('outline')],visual_identity={k:art[k] for k in ('style','terrain','palette') if k in art},planned_parent={k:parent[k] for k in ('id','name','description','biome','rule')} if parent else None,story_revision=s['story_revision'],
    player={k:s['player'][k] for k in ('level','hp','gold')},current_region={k:r[k] for k in ('id','name','description','biome','rule','entities')} if r else {},
    available_items=[i for k,i in s['items'].items() if k in C.BASE_ITEMS or k.startswith(s['current']+':') or k in s['player']['inventory']],
    frontier=[dict(id=k,name=s['topology'][k]['name'],outline=s['topology'][k].get('outline'),visited=s['topology'][k]['visited']) for k in s['topology'][s['current']]['children']],
@@ -107,8 +112,11 @@ class World:
     i=copy.deepcopy(raw); i['local_id']=raw['id']; i['id']=rid+':'+i['id']; i['origin']=rid
     if i.get('sprite') in r.get('visuals',{}).get('sprites',{}):i['icon_visual']=freeze_sprite(r['visuals']['sprites'][i['sprite']],r['visuals']['palette'])
     s['items'][i['id']]=i
+   if rid=='r0':
+    from .loadout import apply
+    apply(self,r)
    for raw in r['plan'].get('quests',[]):
-    q=copy.deepcopy(raw); q['id']=rid+':'+q['id']; q['target']=rid+':'+q['target'] if q['target'] not in C.BASE_ITEMS and ':' not in q['target'] else q['target']; q.update(status='active',region=rid,reward=15+r['depth']*5); s['quests'][q['id']]=q
+    q=copy.deepcopy(raw); q['id']=rid+':'+q['id']; local_items={i['id'] for i in r['plan'].get('items',[])}; q['target']=rid+':'+q['target'] if ':' not in q['target'] and (q['target'] in local_items or q['target'] not in C.BASE_ITEMS) else q['target']; q.update(status='active',region=rid,reward=15+r['depth']*5); s['quests'][q['id']]=q
    record=gameplay.design_record(r['plan']);self.state.setdefault('design_history',[]).append(record);self.state['design_history']=self.state['design_history'][-32:]
    previous=self.state['design_history'][:-1]
    if r.get('program') and any(x.get('logic')==record['logic'] for x in previous):self.note('设计提示：这一地区的交互结构与过去相似，导演将在后续创作中避免重复。')
@@ -131,6 +139,12 @@ class World:
   changes=[]
   p=parse_patch(raw,context['kind'],identities,changes)
   p['_corrections']=changes
+  if p['kind']=='region':
+   from .loadout import validate
+   validate(p['region'],context)
+   if context.get('item_policy')=='authored' and any(e['kind']=='enemy' for e in p['region']['entities']):
+    if not any(a['scope']=='combat' for a in p['region'].get('program',{}).get('actions',[])):
+     raise InvalidPatch('enemies need authored player combat actions',path='region.program.actions',expected='at least one playable scope=combat action')
   if p['kind']=='region' and context.get('refresh') and context.get('existing_destinations'):
    expected={d['id'] for d in context['existing_destinations']}
    actual={d['id'] for d in p['region'].get('destinations',[])}
@@ -287,6 +301,7 @@ class World:
    for e in r['entities']:
     if e['kind']=='exit': e['name']=('返回 ' if e['direction']=='back' else '前往 ')+s['topology'][e['target']]['name']
   inv=[dict(s['items'][k],quantity=n,equipped=k in (p['weapon'],p['charm'])) for k,n in p['inventory'].items() if n>0 and k in s['items']]
+  for item in inv:item['usable']=gameplay.item_availability(self,item)
   generated_actions=Runtime(self,r).available(scope='combat' if s['battle'] else 'explore') if r and r.get('program') else []
   ui=copy.deepcopy(s['ui'])
   if ui.get('kind')=='pending_exit':
@@ -378,7 +393,8 @@ class World:
   if kind=='npc':
    self.check_quests('talk',e['id'])
    if e['role']=='merchant':
-    stock=['potion','ether']+[i for i in s['items'] if i.startswith(r['id']+':')][:4]; s['ui']=dict(kind='shop',title=e['name'],lines=e['dialogue'],stock=stock,goods=[s['items'][i] for i in stock])
+    defaults=[key for key in ('potion','ether') if key in s['items']] if s.get('item_policy')!='authored' else []
+    stock=defaults+[i for i in s['items'] if i.startswith(r['id']+':')][:4]; s['ui']=dict(kind='shop',title=e['name'],lines=e['dialogue'],stock=stock,goods=[s['items'][i] for i in stock])
    elif e['role']=='healer':
     p['hp']=p['max_hp']; p['mp']=p['max_mp']; s['ui']=dict(kind='dialogue',title=e['name'],lines=e['dialogue']+['生命与魔力恢复。'],choices=[])
    else:
@@ -398,7 +414,7 @@ class World:
   if move not in ('attack','skill','defend','potion','flee'): raise GameError('无效战斗指令。')
   if move=='skill' and (r['rule']=='no_magic' or p['mp']<5): raise GameError('当前不能使用魔法。')
   if move=='potion' and p['inventory'].get('potion',0)<1: raise GameError('没有星露药剂。')
-  b['turn']+=1; rng=random.Random(C.stable_seed(s['epoch'],b['id'],s['steps'],b['turn'])); weapon=s['items'][p['weapon']]; charm=s['items'].get(p['charm'],{}); log=b['log']; defending=move=='defend'
+  b['turn']+=1; rng=random.Random(C.stable_seed(s['epoch'],b['id'],s['steps'],b['turn'])); weapon=s['items'].get(p['weapon'],dict(power=0,effect='attack')); charm=s['items'].get(p['charm'],{}); log=b['log']; defending=move=='defend'
   if move in ('attack','skill'):
    damage=8+p['level']*2+(weapon['power'] if weapon['effect']=='attack' else 0)+rng.randint(0,4)
    if move=='skill': p['mp']-=5; damage=int(damage*1.9)

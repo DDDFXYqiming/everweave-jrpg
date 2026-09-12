@@ -29,6 +29,18 @@ var loading_premise: Label
 var health_label: Label
 var energy_label: Label
 var previous_window_mode: int = Window.MODE_WINDOWED
+var atlas_panel
+var atlas_signature: String = ""
+var journal_http: HTTPRequest
+var journal_pages: Dictionary = {}
+var journal_busy: bool = false
+var journal_request_tab: String = ""
+var journal_request_epoch: String = ""
+var journal_error: String = ""
+var journal_generation: int = 0
+var journal_request_generation: int = 0
+var redesign_dialog: ConfirmationDialog
+var pending_redesign: Dictionary = {}
 var backend_url: String = ""
 var session_token: String = ""
 var state: Dictionary = {}
@@ -104,6 +116,10 @@ func _ready() -> void:
 	poll_http.timeout = 4
 	add_child(poll_http)
 	poll_http.request_completed.connect(_poll_complete)
+	journal_http = HTTPRequest.new()
+	journal_http.timeout = 10
+	add_child(journal_http)
+	journal_http.request_completed.connect(_journal_loaded)
 	_build_game()
 	_build_home()
 	music = AudioStreamPlayer.new()
@@ -123,6 +139,7 @@ func _exit_tree() -> void:
 		music.stream = null
 	if is_instance_valid(action_http): action_http.cancel_request()
 	if is_instance_valid(poll_http): poll_http.cancel_request()
+	if is_instance_valid(journal_http): journal_http.cancel_request()
 
 func _configure_theme() -> void:
 	var font := SystemFont.new()
@@ -361,6 +378,15 @@ func _build_home() -> void:
 	replace_dialog.confirmed.connect(_confirm_new_world)
 	replace_dialog.canceled.connect(func() -> void: pending_world_configuration = {})
 	add_child(replace_dialog)
+	redesign_dialog = ConfirmationDialog.new()
+	redesign_dialog.title = "重新创作这个地区"
+	redesign_dialog.ok_button_text = "重新创作"
+	redesign_dialog.cancel_button_text = "保留原结果"
+	redesign_dialog.confirmed.connect(func() -> void:
+		_post("/retry",pending_redesign)
+		pending_redesign = {}
+	)
+	add_child(redesign_dialog)
 	_home_tab(0)
 
 func _home_tab(index: int) -> void:
@@ -379,6 +405,12 @@ func _toggle_fullscreen() -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_ESCAPE and not local_panel.is_empty() and not replace_dialog.visible and not redesign_dialog.visible:
+			local_panel = ""
+			modal_signature = ""
+			_render_modal()
+			get_viewport().set_input_as_handled()
+			return
 		if event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed):
 			_toggle_fullscreen()
 			get_viewport().set_input_as_handled()
@@ -398,6 +430,52 @@ func _select_item(id: String) -> void:
 
 func _journal_category(category: String) -> void:
 	journal_tab = category
+	_load_journal()
+	modal_signature = ""
+	_render_modal()
+
+func _load_journal(more: bool = false) -> void:
+	if journal_busy or backend_url.is_empty():return
+	var page: Dictionary = journal_pages.get(journal_tab,{})
+	if not more and not page.is_empty():return
+	if more and page.get("next_cursor") == null:return
+	journal_busy = true
+	journal_error = ""
+	journal_request_tab = journal_tab
+	journal_request_epoch = str(state.get("epoch",""))
+	journal_request_generation = journal_generation
+	var url: String = backend_url + "/journal?tab=" + journal_tab
+	if more: url += "&before=" + str(page.next_cursor)
+	var error: Error = journal_http.request(url,PackedStringArray(["Authorization: Bearer "+session_token]))
+	if error != OK:
+		journal_busy = false
+		journal_error = "记录读取失败，可重试。"
+
+func _journal_loaded(result: int, code: int, _headers_unused: PackedStringArray, body: PackedByteArray) -> void:
+	journal_busy = false
+	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if journal_request_epoch != str(state.get("epoch","")) or journal_request_generation != journal_generation:
+		if local_panel == "journal":_load_journal()
+		return
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200 and data is Dictionary and str(data.get("epoch","")) == journal_request_epoch:
+		var old: Dictionary = journal_pages.get(journal_request_tab,{"entries":[]})
+		var ids: Dictionary = {}
+		for entry in old.entries:ids[str(entry.id)] = true
+		for entry in data.get("entries",[]):
+			if not ids.has(str(entry.id)): old.entries.append(entry)
+		old["next_cursor"] = data.get("next_cursor")
+		journal_pages[journal_request_tab] = old
+	else: journal_error = "暂时无法读取旧记录，可重试。"
+	if local_panel == "journal":
+		if journal_request_tab != journal_tab:_load_journal()
+		modal_signature = ""
+		_render_modal()
+
+func _refresh_journal() -> void:
+	if journal_busy:return
+	journal_generation += 1
+	journal_pages.erase(journal_tab)
+	_load_journal()
 	modal_signature = ""
 	_render_modal()
 
@@ -440,6 +518,7 @@ func _build_game() -> void:
 	map_stack.add_child(world_view)
 	world_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	world_view.entity_clicked.connect(func(id: String) -> void: _send_action({"op": "interact", "id": id}))
+	world_view.map_requested.connect(func() -> void: _toggle_panel("atlas"))
 	loading_overlay = CenterContainer.new()
 	loading_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	map_stack.add_child(loading_overlay)
@@ -512,8 +591,11 @@ func _build_game() -> void:
 	journal_label = _label(side, "", 13, MUTED)
 	var footer := HBoxContainer.new()
 	all.add_child(footer)
-	hint_label = _label(footer, "WASD  移动     E  交互     F  操作     ·  等待     F11  全屏                         自动保存", 13, MUTED)
+	hint_label = _label(footer, "WASD  移动     E  交互     F  操作     ·  等待     G  旅图     F11  全屏                         自动保存", 13, MUTED)
 	_button(footer, "♫  M", _toggle_music)
+	atlas_panel = preload("res://client/travel_atlas.gd").new()
+	game.add_child(atlas_panel)
+	atlas_panel.build(self)
 
 func _toggle_diagnostics() -> void:
 	diagnostics.visible = not diagnostics.visible
@@ -635,6 +717,10 @@ func _toggle_pause() -> void:
 func _toggle_panel(name: String) -> void:
 	if state.get("battle") is Dictionary or not state.get("ui", {}).is_empty(): return
 	local_panel = "" if local_panel == name else name
+	if local_panel == "journal":
+		journal_generation += 1
+		journal_pages.clear()
+		_load_journal()
 	modal_signature = ""
 	_render_modal()
 
@@ -725,7 +811,14 @@ func _accept_snapshot(data: Dictionary) -> void:
 		modal_signature = ""
 		selected_item = ""
 		item_art.clear()
+		journal_pages.clear()
+		journal_generation += 1
+		journal_error = ""
 	state = data
+	var map_key: String = JSON.stringify([state.get("epoch"),state.get("map_count"),state.get("frontier"),state.get("quests")])
+	if map_key != atlas_signature:
+		atlas_signature = map_key
+		if atlas_panel.visible:atlas_panel.refresh()
 	start_button.disabled = action_busy or not connection_ready
 	continue_button.disabled = action_busy or not bool(state.get("started", false)) or not connection_ready
 	start_button.text = "开始另一段旅程" if bool(state.get("started", false)) else "开始新旅程"
@@ -831,7 +924,14 @@ func _render_failures(tasks: Array) -> void:
 		var friendly: Dictionary = {"format":"部分内容需要调整。", "reference":"物品或人物信息还需核对。", "gameplay":"道路或交互需要修复。", "provider":"生成服务暂时没有完成请求。"}
 		var detail_label := _label(row, str(friendly.get(str(task.get("category","format")),"内容准备未完成。")), 12, MUTED)
 		detail_label.tooltip_text = reason + "\n" + JSON.stringify(details, "  ")
+		if str(task.kind) == "region":
+			_button(row,"放弃候选，重新创作",_offer_redesign.bind(str(task.target),str(task.name)))
 		_button(row, "重试此任务", _post.bind("/retry", {"target":str(task.target), "kind":str(task.kind)}))
+
+func _offer_redesign(target: String, name: String) -> void:
+	pending_redesign = {"target":target,"kind":"region","mode":"redesign"}
+	redesign_dialog.dialog_text = "舍弃「" + name + "」上次失败的候选内容，按同一目的地重新创作。已有地图不会被删除，新请求仍计入额度。"
+	redesign_dialog.popup_centered(Vector2i(540,220))
 
 func _clear_modal() -> void:
 	for child in modal_stack.get_children():
@@ -847,6 +947,11 @@ func _fit_modal() -> void:
 func _render_modal() -> void:
 	var ui: Dictionary = state.get("ui", {})
 	var battle: Dictionary = state.battle if state.get("battle") is Dictionary else {}
+	if local_panel == "atlas" and ui.is_empty() and battle.is_empty():
+		modal_overlay.hide()
+		if not atlas_panel.visible:atlas_panel.open()
+		return
+	atlas_panel.hide()
 	var waiting_phase: String = _exit_wait_phase(ui)
 	var signature: String = JSON.stringify([ui, battle, local_panel, state.get("inventory", []), state.get("available_actions", []), waiting_phase, inventory_filter, selected_item, journal_tab, state.get("quests", []), state.get("threads", []), state.get("journal", [])])
 	if signature == modal_signature:
@@ -966,6 +1071,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not local_panel.is_empty() and key != KEY_M:
 		if key == KEY_I: _toggle_panel("inventory")
 		elif key == KEY_J: _toggle_panel("journal")
+		elif key == KEY_G: _toggle_panel("atlas")
 		elif key == KEY_ESCAPE:
 			local_panel = ""
 			modal_signature = ""
@@ -1003,6 +1109,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_toggle_panel("inventory")
 	elif key == KEY_J:
 		_toggle_panel("journal")
+	elif key == KEY_G:
+		_toggle_panel("atlas")
 	elif key in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_UP, KEY_LEFT, KEY_DOWN, KEY_RIGHT] and local_panel.is_empty():
 		# Handle the first tap as an event: a down/up pair can arrive within one
 		# frame and disappear before _process polls held keys.

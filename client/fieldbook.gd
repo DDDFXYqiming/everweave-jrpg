@@ -78,7 +78,9 @@ static func inventory(main, parent: Node) -> void:
 	if bool(selected.get("equipped",false)):
 		main._label(detail,"正在装备",15,main.GOLD)
 	elif bool(selected.can_use):
-		main._button(detail,str(selected.action_label),main._send_action.bind({"op":"use","id":selected.id}))
+		var action: Button = main._button(detail,str(selected.action_label),main._send_action.bind({"op":"use","id":selected.id}))
+		action.disabled = not bool(selected.get("enabled",true))
+		if action.disabled: main._label(detail,str(selected.get("blocked_reason","当前不可使用。")),14,main.MUTED)
 	else: main._label(detail,"随身保管。在相关人物或物件处使用。",14,main.MUTED)
 
 static func journal(main, parent: Node) -> void:
@@ -88,6 +90,7 @@ static func journal(main, parent: Node) -> void:
 	for entry in [["active","待办"],["threads","线索"],["history","经历"],["complete","已完成"]]:
 		var b: Button = main._button(tabs,entry[1],main._journal_category.bind(entry[0]))
 		b.modulate = Color.WHITE if main.journal_tab == entry[0] else Color("999e92")
+	main._button(tabs,"刷新",main._refresh_journal)
 	var entries: Array = []
 	if main.journal_tab == "history":
 		for line in View.history(main.state): entries.append({"name":"", "description":line})
@@ -98,7 +101,10 @@ static func journal(main, parent: Node) -> void:
 		for q in View.objectives(main.state,"all"):
 			if (main.journal_tab == "active" and str(q.get("status","active")) == "active") or (main.journal_tab == "complete" and str(q.get("status","active")) != "active"):
 				entries.append(q)
-	if entries.is_empty(): main._label(parent,"暂无记录。继续探索，新的经历会留在这里。",16,main.MUTED)
+	if main.journal_pages.has(main.journal_tab):entries = main.journal_pages[main.journal_tab].entries
+	if main.journal_busy:main._label(parent,"正在翻阅记录……",13,main.MUTED)
+	if not main.journal_error.is_empty():main._label(parent,main.journal_error,13,main.MUTED)
+	if entries.is_empty() and not main.journal_busy: main._label(parent,"暂无记录。继续探索，新的经历会留在这里。",16,main.MUTED)
 	for entry in entries:
 		var row := PanelContainer.new()
 		row.add_theme_stylebox_override("panel",main._box(Color("202923"),Color("394235"),2))
@@ -111,3 +117,7 @@ static func journal(main, parent: Node) -> void:
 		if entry.has("region"):
 			var current: Dictionary = main.state.get("region",{}) if main.state.get("region") is Dictionary else {}
 			main._label(column,"当前地区" if entry.region == current.get("id") else "旅途中的其他地区",12,main.MUTED)
+	var page: Dictionary = main.journal_pages.get(main.journal_tab,{})
+	if page.get("next_cursor") != null:
+		var more: Button = main._button(parent,"翻阅更早的记录",main._load_journal.bind(true))
+		more.disabled = main.journal_busy

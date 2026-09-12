@@ -62,7 +62,7 @@ class Normalizer:
 
     def _existing_ids(self):
         ctx = self.context
-        self.existing['items'].update(BASE_ITEMS)
+        if self.context.get('item_policy')!='authored':self.existing['items'].update(BASE_ITEMS)
         if ctx.get('hero_visual'):self.existing['sprites'].add('hero')
         for scope in ('lore','threads'):
             for entry in ctx.get(scope, []):
@@ -206,7 +206,7 @@ class Normalizer:
                     self.error(path, 'invalid definition ID', old, 'lower_snake_case, at most 40 characters',category='format'); continue
                 if scope == 'objects' and new in RESERVED_OBJECTS:
                     self.error(path, 'ID is reserved for the runtime', old, 'a distinct object ID'); continue
-                if scope == 'items' and new in BASE_ITEMS:
+                if scope == 'items' and new in BASE_ITEMS and self.context.get('item_policy')!='authored':
                     self.error(path, 'item ID is reserved for an existing base item', old, 'a distinct new item ID'); continue
                 if scope=='destinations' and clean in locations and clean not in {d.get('id') for d in self.context.get('existing_destinations',[]) if isinstance(d,dict)}:
                     self.error(path,'an existing region ID is not a new destination definition',old,'a distinct local destination ID');continue
@@ -335,6 +335,12 @@ class Normalizer:
     def references(self):
         body, root = self.body, self.expected
         if not isinstance(body, dict): return
+        kit=body.get('starting_loadout')
+        if isinstance(kit,dict):
+            for slot in ('weapon','charm'):
+                if kit.get(slot):self.field_ref(kit,slot,'items',root+'.starting_loadout')
+            for i,entry in enumerate(kit.get('inventory',[]) if isinstance(kit.get('inventory'),list) else []):
+                self.field_ref(entry,'item_id','items',f'{root}.starting_loadout.inventory[{i}]')
         for group in ('entities','spawns','landmarks','items','object_updates'):
             entries = body.get(group, [])
             if not isinstance(entries, list): continue

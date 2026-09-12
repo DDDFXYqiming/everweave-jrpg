@@ -55,7 +55,7 @@ def entity(v):
    out['choices'].append(dict(id=checked(loc+'.id',ident,ch['id']),text=checked(loc+'.text',text,ch['text'],'choice',65),reply=checked(loc+'.reply',text,ch['reply'],'reply',300),tag=checked(loc+'.tag',ident,ch['tag'])))
   if len({c['id'] for c in out['choices']})!=len(out['choices']): raise InvalidPatch('duplicate choice IDs')
  elif out['kind']=='enemy': out.update(monster=checked('monster',enum,e.get('monster','slime'),C.MONSTERS,'monster'),tier=checked('tier',number,e.get('tier',1),'tier',1,3),move=checked('move',enum,e.get('move','strike'),C.MOVES,'move'))
- elif out['kind']=='chest': out['item_id']=checked('item_id',reference,e.get('item_id','potion'))
+ elif out['kind']=='chest': out['item_id']=checked('item_id',reference,e.get('item_id'))
  from .content import entity_extensions
  return entity_extensions(e,out)
 
@@ -100,7 +100,7 @@ def _parse_patch(raw,expected,context=None):
   loc=f'threads[{index}]';checked(loc,obj,f,'thread',('id','title','note'),('id','title','note')); out['threads'].append(dict(id=checked(loc+'.id',ident,f['id']),title=checked(loc+'.title',text,f['title'],'thread',64),note=checked(loc+'.note',text,f['note'],'note')))
  if expected=='region':
   if 'reaction' in p: raise InvalidPatch('region cannot also react')
-  r=obj(p.get('region'),'region',('name','biome','layout','weather','rule','description','landmarks','entities','items','quests','destinations','visuals','scene','program'),('name','description','entities'))
+  r=obj(p.get('region'),'region',('name','biome','layout','weather','rule','description','landmarks','entities','items','quests','destinations','visuals','scene','program','starting_loadout'),('name','description','entities'))
   reg=dict(name=text(r['name'],'region name',48),biome=text(r.get('biome','dream'),'biome',48) if 'scene' in r else enum(r['biome'],C.BIOMES,'biome'),layout=text(r.get('layout','authored'),'layout',48) if 'scene' in r else enum(r['layout'],C.LAYOUTS,'layout'),weather=enum(r.get('weather','clear'),C.WEATHERS,'weather'),rule=enum(r.get('rule','normal'),C.RULES,'rule'),description=text(r['description'],'description',450),entities=[entity(e) for e in arr(r['entities'],'entities',32,1)],items=[item(i) for i in arr(r.get('items',[]),'items',8)],landmarks=[],quests=[])
   for lm in arr(r.get('landmarks',[]),'landmarks',24):
    obj(lm,'landmark',('type','zone','sprite','id','at','solid','footprint'),('type','zone')); landmark=dict(type=enum(lm['type'],C.LANDMARKS,'type'),zone=enum(lm['zone'],C.ZONES,'zone'))
@@ -110,7 +110,7 @@ def _parse_patch(raw,expected,context=None):
    if 'id' in lm:landmark['id']=ident(lm['id'])
    reg['landmarks'].append(landmark)
   ids=[e['id'] for e in reg['entities']]; items=[i['id'] for i in reg['items']]
-  if len(ids)!=len(set(ids)) or len(items)!=len(set(items)) or set(items)&set(C.BASE_ITEMS): raise InvalidPatch('duplicate or reserved ID')
+  if len(ids)!=len(set(ids)) or len(items)!=len(set(items)) or ((context or {}).get('item_policy')!='authored' and set(items)&set(C.BASE_ITEMS)): raise InvalidPatch('duplicate or reserved ID')
   known_items={i['id'] for i in (context or {}).get('available_items',[])+(context or {}).get('validation_items',[]) if isinstance(i,dict) and 'id' in i}
   reference_errors=[]
   for index,e in enumerate(reg['entities']):
@@ -148,6 +148,9 @@ def _parse_patch(raw,expected,context=None):
   from .content import scene,program
   if 'scene' in r:reg['scene']=scene(r['scene'])
   if 'program' in r:reg['program']=program(r['program'])
+  if 'starting_loadout' in r:
+   from .loadout import parse
+   reg['starting_loadout']=checked('region.starting_loadout',parse,r['starting_loadout'])
   out['region']=reg
  elif expected=='reaction':
   if 'region' in p: raise InvalidPatch('reaction cannot replace visited maps')
@@ -160,7 +163,7 @@ def _parse_patch(raw,expected,context=None):
   out['reaction']['items']=[item(i) for i in arr(r.get('items',[]),'items',2)]
   out['reaction']['locations']=[destination(v) for v in arr(r.get('locations',[]),'locations',2)]
   for key in ('spawns','items','locations'): unique_ids(out['reaction'][key],key)
-  if any(i['id'] in C.BASE_ITEMS for i in out['reaction']['items']): raise InvalidPatch('reserved item ID')
+  if (context or {}).get('item_policy')!='authored' and any(i['id'] in C.BASE_ITEMS for i in out['reaction']['items']): raise InvalidPatch('reserved item ID')
   for q in arr(r.get('quests',[]),'quests',2):
    obj(q,'quest',('id','name','description','goal','target'),('id','name','goal','target'))
    target=text(q['target'],'quest target',160)

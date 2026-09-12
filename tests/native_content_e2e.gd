@@ -109,7 +109,32 @@ func _run() -> void:
 	await _capture("ready-exit")
 	await _tap(KEY_E)
 	assert(main.state.region.id != previous_region and main.state.ui.is_empty())
+	phase = "minimap opens travel atlas through viewport input"
+	var before_map: Dictionary = main.state.player.duplicate(true)
+	var minimap_click := InputEventMouseButton.new()
+	minimap_click.button_index = MOUSE_BUTTON_LEFT
+	minimap_click.pressed = true
+	minimap_click.position = main.world_view.global_position + Vector2(main.world_view.size.x-80,40)
+	root.push_input(minimap_click,true)
+	var minimap_release := minimap_click.duplicate()
+	minimap_release.pressed = false
+	root.push_input(minimap_release,true)
+	await process_frame
+	assert(main.atlas_panel.visible)
+	while main.atlas_panel.busy:await process_frame
+	assert(main.atlas_panel.canvas.nodes.has(main.state.region.id))
+	assert(main.atlas_panel.canvas.nodes.has(previous_region))
+	var travel_canvas = main.atlas_panel.canvas
+	var current_position: Vector2 = travel_canvas.positions[main.state.region.id] * travel_canvas.zoom + travel_canvas.pan
+	assert(Rect2(Vector2.ZERO,travel_canvas.size).has_point(current_position))
+	assert(current_position.distance_to(travel_canvas.size*.5)<2.0)
+	main.atlas_panel._mark(previous_region)
+	assert(main.atlas_panel.canvas.route.size()==2)
+	assert(main.state.player==before_map)
+	await _capture("travel-atlas")
+	await _tap(KEY_ESCAPE)
+	assert(not main.atlas_panel.visible)
 	main.queue_free()
 	await create_timer(0.15).timeout
-	print("NATIVE_CONTENT_E2E_OK targeted_retry=true logical_keys=true short_taps=true dynamic_actions=true causal_door=true objective=true custom_combat=true pending_exit_live_update=true ready_exit_key=true cloud_calls=0")
+	print("NATIVE_CONTENT_E2E_OK targeted_retry=true logical_keys=true short_taps=true dynamic_actions=true causal_door=true objective=true custom_combat=true pending_exit_live_update=true ready_exit_key=true minimap_atlas=true route_without_teleport=true cloud_calls=0")
 	quit(0)

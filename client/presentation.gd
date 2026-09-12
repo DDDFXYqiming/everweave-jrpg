@@ -22,6 +22,10 @@ static func inventory(snapshot: Dictionary, category: String = "all") -> Array[D
 		var use: Dictionary = raw.get("use", {}) if raw.get("use") is Dictionary else {}
 		item["can_use"] = not bool(raw.get("equipped", false)) and (not use.is_empty() or kind in ["consumable", "weapon", "charm"])
 		item["action_label"] = str(use.get("label", "装备" if kind in ["weapon", "charm"] else "使用"))
+		if raw.get("usable") is Dictionary:
+			item["enabled"] = bool(raw.usable.get("enabled",false))
+			item["blocked_reason"] = str(raw.usable.get("blocked_reason",""))
+			item["action_label"] = str(raw.usable.get("label",item.action_label))
 		result.append(item)
 	return result
 

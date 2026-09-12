@@ -555,6 +555,20 @@ class ServerHTTPTests(unittest.TestCase):
         self.server.director.cfg['cooldown']=0
         for _ in range(3):self.server.director.step()
     def test_unauthenticated_requests_rejected(self):self.assertEqual(self.request(token='wrong')[0],401)
+    def test_player_map_and_history_are_authenticated_and_read_only(self):
+        self.start_demo();before=copy.deepcopy(self.server.world.state)
+        for path in ('/atlas','/journal?tab=history&limit=2'):
+            self.assertEqual(self.request(path,token='wrong')[0],401)
+            status,value=self.request(path)
+            self.assertEqual(status,200)
+            self.assertEqual(value['epoch'],before['epoch'])
+            self.assertEqual(self.server.world.state,before)
+        self.assertEqual(self.request('/journal?limit=100000')[0],400)
+    def test_online_http_start_selects_authored_possessions(self):
+        status,_=self.request('/start',dict(setting=SETTING,offline=False,api_key='test-only'))
+        self.assertEqual(status,200)
+        self.assertEqual(self.server.world.state['items'],{})
+        self.assertEqual(self.server.world.state['item_policy'],'authored')
     def test_browser_origin_rejected(self):self.assertEqual(self.request(extra={'Origin':'https://evil.invalid'})[0],401)
     def test_new_save_needs_explicit_replace(self):
         self.start_demo()
