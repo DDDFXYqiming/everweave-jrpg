@@ -79,12 +79,17 @@ def unique_ids(values,name):
  if len({v['id'] for v in values})!=len(values): raise InvalidPatch('duplicate '+name+' IDs')
 
 def parse_patch(raw,expected,context=None,corrections=None):
- from .normalization import normalize_patch
- normalized,changes,errors=normalize_patch(raw,expected,context)
+ from .normalization import normalize_patch,decode
+ from .modules import expand
+ expanded,module_sources=expand(decode(raw),expected)
+ normalized,changes,errors=normalize_patch(expanded,expected,context)
  if corrections is not None:corrections.extend(changes)
  errors.extend(_independent_errors(normalized,expected))
  if errors:raise InvalidPatch(issues=unique_issues(errors),corrections=changes)
- try:return _parse_patch(normalized,expected,context)
+ try:
+  result=_parse_patch(normalized,expected,context)
+  if module_sources:result[expected]['module_sources']=module_sources
+  return result
  except InvalidPatch as exc:
   exc.corrections=changes
   raise
@@ -100,7 +105,7 @@ def _parse_patch(raw,expected,context=None):
   loc=f'threads[{index}]';checked(loc,obj,f,'thread',('id','title','note'),('id','title','note')); out['threads'].append(dict(id=checked(loc+'.id',ident,f['id']),title=checked(loc+'.title',text,f['title'],'thread',64),note=checked(loc+'.note',text,f['note'],'note')))
  if expected=='region':
   if 'reaction' in p: raise InvalidPatch('region cannot also react')
-  r=obj(p.get('region'),'region',('name','biome','layout','weather','rule','description','landmarks','entities','items','quests','destinations','visuals','scene','program','starting_loadout'),('name','description','entities'))
+  r=obj(p.get('region'),'region',('name','biome','layout','weather','rule','description','landmarks','entities','items','quests','destinations','visuals','scene','program','starting_loadout','audio'),('name','description','entities'))
   reg=dict(name=text(r['name'],'region name',48),biome=text(r.get('biome','dream'),'biome',48) if 'scene' in r else enum(r['biome'],C.BIOMES,'biome'),layout=text(r.get('layout','authored'),'layout',48) if 'scene' in r else enum(r['layout'],C.LAYOUTS,'layout'),weather=enum(r.get('weather','clear'),C.WEATHERS,'weather'),rule=enum(r.get('rule','normal'),C.RULES,'rule'),description=text(r['description'],'description',450),entities=[entity(e) for e in arr(r['entities'],'entities',32,1)],items=[item(i) for i in arr(r.get('items',[]),'items',8)],landmarks=[],quests=[])
   for lm in arr(r.get('landmarks',[]),'landmarks',24):
    obj(lm,'landmark',('type','zone','sprite','id','at','solid','footprint'),('type','zone')); landmark=dict(type=enum(lm['type'],C.LANDMARKS,'type'),zone=enum(lm['zone'],C.ZONES,'zone'))
@@ -145,16 +150,28 @@ def _parse_patch(raw,expected,context=None):
       try:entry['sprite']=checked(f'region.{group}[{index}].sprite',resolve_sprite,entry['sprite'],reg['visuals'])
       except InvalidPatch as exc:sprite_errors.extend(exc.issues)
    if sprite_errors:raise InvalidPatch(issues=sprite_errors)
+   from .library import resolve as library_asset
+   for group in ('entities','landmarks'):
+    for entry,raw_entry in zip(reg[group],r.get(group,[])):
+     visual=reg['visuals']['sprites'].get(entry.get('sprite'),{})
+     if 'footprint' not in raw_entry and visual.get('asset'):
+      entry['footprint']=library_asset(visual['asset'],'image',visual.get('asset_hash'))['footprint']
   from .content import scene,program
   if 'scene' in r:reg['scene']=scene(r['scene'])
   if 'program' in r:reg['program']=program(r['program'])
   if 'starting_loadout' in r:
    from .loadout import parse
    reg['starting_loadout']=checked('region.starting_loadout',parse,r['starting_loadout'])
+  if 'audio' in r:
+   from .audio import validate_audio
+   reg['audio']=checked('region.audio',validate_audio,r['audio'])
   out['region']=reg
  elif expected=='reaction':
   if 'region' in p: raise InvalidPatch('reaction cannot replace visited maps')
-  r=obj(p.get('reaction'),'reaction',('text','weather','rule','npc_lines','spawns','items','quests','locations','visuals','paint','program','object_updates','future_updates'),('text',)); out['reaction']=dict(text=text(r['text'],'reaction text',450),npc_lines=[],spawns=[],items=[],quests=[],locations=[])
+  r=obj(p.get('reaction'),'reaction',('text','weather','rule','npc_lines','spawns','items','quests','locations','visuals','paint','program','object_updates','future_updates','audio'),('text',)); out['reaction']=dict(text=text(r['text'],'reaction text',450),npc_lines=[],spawns=[],items=[],quests=[],locations=[])
+  if 'audio' in r:
+   from .audio import validate_audio
+   out['reaction']['audio']=checked('reaction.audio',validate_audio,r['audio'],(context or {}).get('current_audio'))
   for key,choices in (('weather',C.WEATHERS),('rule',C.RULES)):
    if key in r: out['reaction'][key]=enum(r[key],choices,key)
   for update in arr(r.get('npc_lines',[]),'npc_lines',3):

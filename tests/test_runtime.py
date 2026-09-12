@@ -381,6 +381,8 @@ class DirectorTests(unittest.TestCase):
             result['region']['destinations']=[{'id':'next','name':'下一片区域','description':'测试模型生成的区域概要。'}]
             result['region']['visuals']=visual_fixture()
             if ctx.get('content_version')==2:
+                result['region']['audio']={'music':{'explore':{'score':{'bpm':120,'voices':[{'wave':'sine','notes':[[60,1],[64,1],[67,2]]}]}}}}
+            if ctx.get('content_version')==2:
                 from content_fixtures import add_scene
                 add_scene(result,ctx)
         return json.dumps(result,ensure_ascii=False),{'input_tokens':111,'output_tokens':222}

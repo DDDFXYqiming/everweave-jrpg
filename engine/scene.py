@@ -1,5 +1,7 @@
 """Compile a model's spatial drawing, without substituting a canned map layout."""
 import copy
+import json
+import math
 from . import catalog as C
 from .schema import InvalidPatch
 from .content import paint_commands
@@ -25,13 +27,14 @@ def paint(region, commands):
     surfaces = region.setdefault('surfaces', [[''] * width for _ in range(height)])
     for command in paint_commands(commands, width, height):
         surface = command.get('surface', '')
-        if surface and surface not in region.get('visuals', {}).get('sprites', {}):
-            raise InvalidPatch('undefined surface recipe ' + surface)
-        def put(x, y, tile=None):
+        for field in ('surface','wall_surface','door_surface'):
+            if command.get(field) and command[field] not in region.get('visuals',{}).get('sprites',{}):
+                raise InvalidPatch('undefined surface recipe '+command[field])
+        def put(x, y, tile=None, skin=None):
             if not 0 <= x < width or not 0 <= y < height:
                 raise InvalidPatch('painting outside scene')
             region['tiles'][y][x] = command['tile'] if tile is None else tile
-            surfaces[y][x] = surface
+            surfaces[y][x] = surface if skin is None else skin
         if 'line' in command:
             radius = (command['width'] - 1) // 2
             for a, b in zip(command['line'], command['line'][1:]):
@@ -48,11 +51,69 @@ def paint(region, commands):
             for yy in range(y, y+h):
                 for xx in range(x, x+w):
                     edge = xx in (x, x+w-1) or yy in (y, y+h-1)
-                    put(xx, yy, C.WALL if 'room' in command and edge else None)
+                    wall='room' in command and edge
+                    put(xx, yy, C.WALL if wall else None, command.get('wall_surface','') if wall else None)
             for xx, yy in command.get('doors', []):
                 if not (x <= xx < x+w and y <= yy < y+h and (xx in (x, x+w-1) or yy in (y, y+h-1))):
                     raise InvalidPatch('door must be on its room perimeter')
-                put(xx, yy, C.PATH)
+                put(xx, yy, C.PATH,command.get('door_surface',''))
+
+
+def dress(region):
+    """Seeded visual-only dressing. Never add collision, loot or gameplay rules."""
+    if not region.get('scene') or not region.get('visuals'):return
+    art=region['visuals'];explicit=[p for p in region.get('props',[]) if not p.get('scenery_auto')]
+    sprites=art.get('sprites',{});choices=[k for k in art.get('scenery',[]) if k in sprites]
+    from .materials import definitions
+    material_defs=definitions()
+    from .library import catalog
+    placements={k:catalog().get(sprites[k].get('asset'),{}).get('placement','ground') for k in choices}
+    legacy={asset:m['tiles'] for m in material_defs.values() for asset in m.get('legacy_assets',[])}
+    surface_roles={k:(s.get('tiles',[]) if 'material' in s else legacy.get(s.get('asset'),[])) for k,s in sprites.items()}
+    no_dressing={k for k,s in sprites.items() if 'material' in s and not s.get('dressing',True)}
+    objects=region.get('entities',[])+explicit
+    signature=C.stable_seed('dressing-v2',region['seed'],json.dumps([region['tiles'],region.get('surfaces',[]),art.get('scenery',[]),art.get('density',0),
+        [[e.get('id'),e['x'],e['y'],e.get('footprint'),e.get('spent')] for e in objects],
+        {k:sprites[k].get('size',[16,16]) for k in choices},surface_roles,sorted(no_dressing),placements],sort_keys=True))
+    if region.get('dressing_signature')==signature:return
+    region['dressing_signature']=signature;region['props']=explicit
+    density=art.get('density',.045)
+    if not choices or density<=0:return
+    w,h=region['width'],region['height'];reserved=set()
+    def ground(x,y):
+        if not (0<=x<w and 0<=y<h):return False
+        tile=region['tiles'][y][x]
+        if tile not in (C.GROUND,C.PATH):return False
+        skins=region.get('surfaces',[])
+        skin=skins[y][x] if skins else ''
+        if skin in no_dressing:return False
+        roles=surface_roles.get(skin,[])
+        # Older models sometimes label an entire indoor floor PATH, or a road
+        # GROUND. Use an explicit material role when available; never block it.
+        if roles:return C.GROUND in roles
+        return tile==C.GROUND
+    for e in objects+[dict(x=region['spawn'][0],y=region['spawn'][1])]:
+        if e.get('spent'):continue
+        for x,y in cells_for(e):
+            reserved.update((x+dx,y+dy) for dy in range(-1,2) for dx in range(-1,2))
+    candidates=[]
+    for y in range(h):
+        for x in range(w):
+            roll=C.stable_seed(region['seed'],'decoration',x,y)
+            if (roll%10000)/10000 < density:candidates.append((roll,x,y))
+    count=0
+    for roll,x,y in sorted(candidates):
+        if count>=192:break
+        key=choices[(roll//10000)%len(choices)];sw,sh=sprites[key].get('size',[16,16])
+        # Match renderer's bottom-center visual bounds, not just a one-cell anchor.
+        left=math.floor(x+.5-sw/32);right=math.ceil(x+.5+sw/32);top=math.floor(y+1-sh/16)
+        area={(xx,yy) for yy in range(top,y+1) for xx in range(left,right)}
+        if area & reserved:continue
+        if placements[key]=='wall_front':
+            if not ground(x,y+1) or any(not (0<=xx<w and 0<=yy<h) or region['tiles'][yy][xx]!=C.WALL for xx,yy in area):continue
+        elif any(not ground(xx,yy) for xx,yy in area):continue
+        region['props'].append(dict(id=f'{region["id"]}:__scenery_{x}_{y}',kind='decoration',sprite=key,x=x,y=y,solid=False,scenery_auto=True))
+        reserved.update(area);count+=1
 
 
 def validate_space(region, player=None, full=False):
@@ -96,8 +157,12 @@ def build(plan, rid, seed, depth, exits):
                   layout=plan['layout'], weather=plan['weather'], rule=plan['rule'], depth=depth,
                   seed=seed, width=w, height=h, tiles=[[scene['base']] * w for _ in range(h)],
                   props=[], entities=[], spawn=list(scene['spawn']), visits=0, revision=0,
-                  scene=copy.deepcopy(scene), program=copy.deepcopy(plan.get('program', {})))
+                  surface_version=2,scene=copy.deepcopy(scene), program=copy.deepcopy(plan.get('program', {})))
     if 'visuals' in plan: region['visuals'] = copy.deepcopy(plan['visuals'])
+    if 'audio' in plan:region['audio']=copy.deepcopy(plan['audio'])
+    if 'module_sources' in plan:region['module_sources']=copy.deepcopy(plan['module_sources'])
+    from .library import usage
+    region['library_usage']=usage(plan)
     paint(region, scene['paint'])
     anchors = scene['anchors']
     occupied = set()
@@ -132,4 +197,5 @@ def build(plan, rid, seed, depth, exits):
         region['entities'].append(dict(id=f'{rid}:gate_{n}', kind='exit', name=link['label'],
             x=pos[0], y=pos[1], target=link['target'], direction=link['direction'], anchor_key=key, spent=False, solid=False))
     validate_space(region, full=True)
+    dress(region)
     return region

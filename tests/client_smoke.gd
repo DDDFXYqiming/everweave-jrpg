@@ -6,6 +6,7 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 func _run() -> void:
+	load("res://client/i18n.gd").set_language("zh",false)
 	var main = load("res://client/main.tscn").instantiate()
 	main.backend_url = "http://127.0.0.1:1"
 	main.session_token = "isolated-smoke-test"

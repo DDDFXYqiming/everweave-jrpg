@@ -70,9 +70,11 @@ TILE is ONLY ground/path/water/wall/bridge. Ground, path and bridge are walkable
 water and wall are blocked. Metal/wood/grass describe visuals.terrain, never tile/base values.
 Use base:ground with your own surface recipe for a metal or wooden floor.
 A paint command has one of {rect:[x,y,w,h],tile:TILE,surface?:SPRITE_ID},
-{room:[x,y,w,h],tile:INTERIOR_TILE,doors:[[x,y],...],surface?:SPRITE_ID},
+{room:[x,y,w,h],tile:INTERIOR_TILE,doors:[[x,y],...],surface?:FLOOR_ID,wall_surface?:WALL_ID,door_surface?:THRESHOLD_ID},
 {line:[[x,y],...],width:1..6,tile:TILE,surface?:SPRITE_ID}.
 Rooms draw wall perimeters; doors must be on those perimeters. Lines use axis-aligned segments.
+Room surface applies ONLY to the interior. Wall and threshold use their own optional surfaces;
+omitting them uses readable local wall/door rendering. Never use the floor material for walls.
 Paint in back-to-front order. No giant tile arrays. Model, NOT random PCG, chooses shape and placements.
 The engine does NOT carve roads for you. All entities need a reachable approach and at least one exit.
 A door may be a solid object with a programmed unlock condition. Leave escape access; don't trap spawn.
@@ -141,12 +143,77 @@ run after their committed player-action conditions are satisfied. Geometry must 
 '''
 
 
-def prompt(kind):
+HYBRID = '''
+HYBRID CONTENT: library first, AI-directed composition, original data for gaps. Reusing materials and
+reviewed abilities is encouraged; keep the scene/story purposeful. Aim for mostly library content,
+not a hard quota. library_candidates contains a SMALL compatible selection, not the full library.
+You may mix all three visual forms in one region or one object:
+1) {"asset":"EXACT_CANDIDATE_IMAGE_ID"} uses its original size/colors.
+2) {"size":[48,48],"parts":[{"asset":"EXACT_ID","at":[0,0],"scale":1,"flip_x":false,"tint":"#ffffff"}],
+    "layers":[["rect",20,16,3,3,"accent"],["rect",26,16,3,3,"accent"],["rect",22,24,5,2,"shadow"]]}
+3) Existing size/layers pixel drawing recipes create genuinely missing shapes.
+parts <=16, integer scale 1..4, complete parts fit within 8..96 canvas. Optional overlays have 1..48 commands.
+Drawing commands: [rect|ellipse,x,y,width,height,COLOR] or [poly,[[x,y],...3..10 vertices],COLOR].
+Coordinates are integers, shapes fit the canvas; COLOR is #RRGGBB or a palette key. Original standalone
+recipes need 1..48 commands. Library bases can have frames:[overlay-command-arrays], <=8, frame_ms 80..1500.
+For a wholly drawn sprite, each animation frame is a complete image; for a library base, each frame is its overlay.
+Do not invent asset IDs, file paths or asset hashes. The engine pins revisions. Use distinct sprite keys
+for each assembled object. Use library ground sprites in scene.paint.surface. Place library buildings
+as landmarks with supplied footprint; their visual size does not create rooms or collisions for you.
+Direct image IDs may be used in sprite/surface fields; the engine creates their alias locally.
+Prefer a complete material from library_candidates.materials for large surfaces:
+sprites.ground_cover={material:"meadow_v1"}, then scene.paint.surface="ground_cover".
+Materials include seeded subtle variation and compatible detail; never enumerate those cells.
+Use the listed numeric tile types (0 ground,1 path,2 water,3 wall,4 bridge) for that material.
+visuals.scenery:[SPRITE_IDS] and density:0..0.12 now add local non-blocking dressing on open ground.
+Choose small flowers/rubble or vegetation suited to the place. The local placer keeps doors, paths,
+spawn and interactions clear. Important buildings, objects and their locations remain your design.
+Use quiet base surfaces for large floors and accent surfaces in small patches. Keep characters and
+interactive objects readable against the floor; do not carpet an entire hall in a high-contrast accent tile.
+If no candidate fits, author a recipe instead. Do not recreate every ordinary tree, wall or floor.
+Visuals still has style,terrain,palette,sprites,bindings/scenery. terrain is grass/metal/stone/sand/snow/wood/void.
+bindings is {BARE_ALIAS:DEFINED_SPRITE_ID}; it may name roles or specific objects. scenery is an ARRAY
+of 0..6 sprite IDs, never descriptive sentences; put art-direction notes in style instead.
+Palette has ground/path/water/wall/accent/shadow
+as #RRGGBB. The asset's own palette stays intact; your overlays and generated ground use visuals.palette.
+Opening MUST define sprites.hero or bindings.hero pointing to a defined sprite, e.g.
+sprites.hero={asset:"dungeon_v1_adventurer"} when that asset is offered. An entity named
+hero is not a visual binding. Later regions reuse the canonical hero; do not redraw it.
+
+Optional region.modules or reaction.modules is [{module:CANDIDATE_MODULE_ID,id:UNIQUE_BARE_ID,args:{...}}].
+Use the exact listed argument keys/types. Modules expand into ordinary validated program rules.
+Keep program for ADDITIONAL original rules and objectives. No compulsory modules; a peaceful region
+need not have combat. Module action names are listed using <id> as your chosen instance ID.
+Use module-provided actions instead of copying their implementation into program.
+
+Audio is part of the composition. Include region.audio for a new hybrid region:
+audio={music:{explore:SOURCE,combat?:SOURCE,ANY_SPECIAL_CUE?:SOURCE},ambience?:SOURCE,
+ cues:{CUE_ID:SFX},bindings:{move?:CUE,interact?:CUE,pickup?:CUE,combat?:CUE,victory?:CUE,enter?:CUE,ui?:CUE},
+ objects:{EXISTING_LOCAL_OBJECT_ID:CUE}}.
+Music SOURCE={asset:EXACT_MUSIC_ID,volume?:0..1,pitch?:0.5..2}; exploration/combat crossfade locally.
+For missing short music SOURCE={score:{bpm:60..180,voices:[{wave:sine/triangle/square,gain:0..0.3,
+ notes:[[MIDI_36..96_OR_0_FOR_REST,BEATS_0.125..4],...]}]}}; <=2 voices, <=24 notes and <=16 seconds per voice.
+SFX={asset:EXACT_SFX_ID,volume?:0..1,pitch?:0.5..2,delay_ms?:0..500} or
+{synth:{wave:sine/triangle/square/noise,frequency:30..4000,duration:0.02..1}} or {layers:[1..3 non-layered SFX]}.
+Short scored jingles may also use the same bounded score structure in a cue and play once.
+An explicit op:music can select a scored cue as a looping special track; op:sound plays it once.
+Do not send audio waveforms. Cue IDs are bare. Objects play on interaction; use explicit rule effects
+{op:sound,cue:CUE_ID} for activation and {op:music,cue:MUSIC_CUE_ID} for special story music.
+{op:music,cue:default} restores normal exploration/combat selection. Do not duplicate the same cue in
+both a standard binding and an explicit effect. Reactions can update music/cues or add original layers.
+Standard bindings may directly name a candidate SFX asset; a cue alias is then created locally.
+Use current_audio for existing cue names. Audio is optional for legacy saved regions.
+'''
+
+def prompt(kind,hybrid=False):
     focus=('Create only the requested region; following destinations need short outlines, not their complete rules or art. '
            'Use a small coherent set of mechanics and individually authored shapes; do not simulate a whole campaign in this response.'
            if kind=='region' else 'Return only the smallest complete causal reaction; omit unchanged content and unused optional fields.')
-    return (COMMON + (REGION if kind == 'region' else REACTION + '\nAn entity:' + REGION.split('An entity:')[1].split('landmarks <=')[0])
-            + '\n' + VISUAL_PROMPT
+    base=COMMON + (REGION if kind == 'region' else REACTION + '\nAn entity:' + REGION.split('An entity:')[1].split('landmarks <=')[0])
+    if hybrid:
+        base=base.replace('explicit, individually authored sprite','explicit sprite, usually from the compatible library')
+    return (base
+            + '\n' + (HYBRID if hybrid else VISUAL_PROMPT)
             + '\nEmit compact JSON. Omit default when:true, once:false, scope:explore, fail_when:false and empty optional lists. '
               'Do not repeat labels in descriptions unless there is new player-facing information. '
             + focus
@@ -154,10 +221,14 @@ def prompt(kind):
               'Only kind, world_title, region OR reaction, lore and threads are top-level keys.')
 
 
-def model_context(context,kind):
+def model_context(context,kind,hybrid=False):
     """Keep internal validation context complete; project only relevant model input."""
     if kind!='region' or context.get('content_version')!=2:
-        return copy.deepcopy(context)
+        result=copy.deepcopy(context)
+        if hybrid:
+            from .library import candidates
+            result['library_candidates']=candidates(context)
+        return result
     keep=('content_version','item_policy','setting','world_title','target','target_depth','destination','refresh',
           'existing_destinations','visual_identity','planned_parent','story_revision','player','facts',
           'lore','threads','known_locations','frontier','rejected_response','validation_errors')
@@ -174,4 +245,7 @@ def model_context(context,kind):
                               for record in context.get('design_history',[])]
     result['recent_events']=[{k:copy.deepcopy(e[k]) for k in ('type','text','data','region','revision') if k in e}
                              for e in context.get('recent_events',[])]
+    if hybrid:
+        from .library import candidates
+        result['library_candidates']=candidates(context)
     return result

@@ -34,6 +34,9 @@ def definitions(world, region):
         key = region['id']+':'+item['id']
         items[key] = dict(item, id=key, local_id=item['id'], origin=region['id'])
     check_references(region, items)
+    objects={e.get('id') for e in region['entities']}|{e.get('local_id') for e in region['entities']}
+    for key in region.get('audio',{}).get('objects',{}):
+        if key not in objects:raise RuleError('audio references an unknown object',path='audio.objects.'+key)
 
 
 def enter(world, region):
@@ -42,6 +45,8 @@ def enter(world, region):
     register_objectives(world, region)
     vm = Runtime(world, region)
     vm.emit('enter')
+    cue=region.get('audio',{}).get('bindings',{}).get('enter')
+    if cue:world.queue_audio(cue,region)
 
 
 def register_objectives(world, region):
@@ -68,7 +73,17 @@ def reaction(world, region, patch):
         art['bindings'] = {**old.get('bindings', {}), **art.get('bindings', {})}
         if world.state.get('hero_visual'): art['sprites']['hero'] = copy.deepcopy(world.state['hero_visual'])
         region['visuals'] = art
+    if 'audio' in patch:
+        audio=region.setdefault('audio',{})
+        for group in ('music','cues','bindings','objects'):audio.setdefault(group,{}).update(copy.deepcopy(patch['audio'].get(group,{})))
+        if 'ambience' in patch['audio']:audio['ambience']=copy.deepcopy(patch['audio']['ambience'])
+        if len(audio['music'])>16 or len(audio['cues'])>32:raise RuleError('installed audio capacity reached')
     if patch.get('program'): install(region, patch['program']); register_objectives(world, region)
+    if patch.get('module_sources'):
+        known={(s['module'],s['id'],s['sha256']) for s in region.get('module_sources',[])}
+        for source in patch['module_sources']:
+            if (source['module'],source['id'],source['sha256']) not in known:
+                region.setdefault('module_sources',[]).append(copy.deepcopy(source))
     if patch.get('paint'): paint(region, patch['paint'])
     vm = Runtime(world, region)
     for update in patch.get('object_updates', []):
@@ -81,6 +96,8 @@ def reaction(world, region, patch):
             obj['sprite'] = update['sprite']
         if update.get('remove'): obj['spent'] = True
     definitions(world, region)
+    from .library import usage
+    region['library_usage']=usage(region)
     validate_space(region, world.state['player'] if world.state['current'] == region['id'] else None)
 
 
@@ -136,7 +153,7 @@ def action(world, a):
             vm = Runtime(world, r)
             if op == 'actions':
                 options = vm.available(scope='explore')
-                s['ui'] = dict(kind='actions', title='此刻可以做什么', lines=[], actions=options)
+                s['ui'] = dict(kind='actions', title='此刻可以做什么', system_title=True, lines=[], actions=options)
                 world.persist(); return
             if op == 'invoke':
                 definition = vm.invoke(a.get('id'), 'explore')
@@ -186,7 +203,7 @@ def action(world, a):
 
 def show_messages(world, vm):
     if vm.messages and not world.state.get('battle') and not world.state['ui']:
-        world.state['ui'] = dict(kind='message', title='世界发生了变化', lines=vm.messages[-6:])
+        world.state['ui'] = dict(kind='message', title='世界发生了变化', system_title=True, lines=vm.messages[-6:])
 
 
 def interact(world, entity):
@@ -214,6 +231,7 @@ def combat(world, move):
     key = move[5:]
     if key not in offered or not offered[key]['enabled']: raise RuleError('当前不能使用这个技能。')
     b['turn'] += 1
+    world.sound_event('combat')
     vm.emit('turn_start', target='enemy')
     if p['hp'] <= 0: world._defeat(); world.persist(r); return True
     if b['hp'] > 0 and not vm.end_result:

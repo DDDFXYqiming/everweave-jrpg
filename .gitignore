@@ -22,6 +22,8 @@ runtime.json
 instance.lock
 saves/
 userdata/
+# External content is reconstructed from the committed manifests at startup.
+/assets/library/blobs/
 local-settings.json
 # Python/test/tool caches
 __pycache__/

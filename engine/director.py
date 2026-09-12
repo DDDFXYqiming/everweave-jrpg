@@ -99,10 +99,14 @@ class ChatProvider:
    payload['messages'][0]['content']+='\nReturn only a valid JSON object using this exact envelope. Replace example text as appropriate; keep array types. Example: {"kind":"reaction","reaction":{"text":"世界随玩家的选择发生变化。","weather":"fog","npc_lines":[],"spawns":[{"id":"new_lantern","kind":"shrine","name":"新亮起的灯龛","zone":"south"}]},"lore":[],"threads":[]}. No region data or extra top-level fields. Keep reaction.text under 250 Chinese characters.'
   if context.get('content_version')==2:
    from .content_prompt import prompt,model_context
-   payload['messages'][0]['content']=prompt(kind)
-   payload['messages'][1]['content']=json.dumps(dict(requested_kind=kind,world_context=model_context(context,kind),validation_error=repair),ensure_ascii=False,separators=(',',':'))
+   hybrid=bool(cfg.get('hybrid_content',True))
+   payload['messages'][0]['content']=prompt(kind,hybrid=hybrid)
+   payload['messages'][1]['content']=json.dumps(dict(requested_kind=kind,world_context=model_context(context,kind,hybrid=hybrid),validation_error=repair),ensure_ascii=False,separators=(',',':'))
   if repair and context.get('rejected_response'):
    payload['messages'][0]['content']+='\nRepair world_context.rejected_response using validation_error. Preserve its valid scene, art, IDs and mechanics; return the complete corrected JSON object, not a replacement design or a diff.'
+  if cfg.get('language','zh')=='en':
+   system=payload['messages'][0]['content'].replace('Use Chinese display names','Use English display names').replace('Use Chinese display text.','Use English display text.')
+   payload['messages'][0]['content']=system+'\nWrite all NEW player-facing names, objectives, dialogue, descriptions and action labels in English. Preserve existing names, prior story text and all technical IDs exactly; do not translate the saved world. The language of the user setting does not override this output language.'
   effort=reasoning_effort(cfg)
   if cfg.get('deepseek_options',True): payload['thinking']={'type':'disabled' if effort=='none' else 'enabled'}
   if effort!='default': payload['reasoning_effort']=effort
@@ -167,8 +171,10 @@ class Director:
   if not offline and not key and urllib.parse.urlsplit(base).hostname not in ('localhost','127.0.0.1','::1'): raise ProviderError('在线模式需要 API Key；密钥仅保留在本机进程内存。')
   limit=int(cfg.get('max_calls',60))
   if not 1<=limit<=1000: raise ProviderError('调用上限应为 1～1000。')
+  language=cfg.get('language','zh')
+  if language not in ('zh','en'):raise ProviderError('Unsupported language')
   effort=reasoning_effort(cfg)
-  self.cfg=dict(offline=offline,base_url=base,model=model,api_key=key,deepseek_options=bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
+  self.cfg=dict(language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
   self.audit.add_secret(key)
   self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit)
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
@@ -348,6 +354,8 @@ class Director:
     if not cfg['offline'] and kind=='region' and ctx.get('content_version')==2:
      if not parsed['region'].get('scene') or not parsed['region'].get('program'):
       raise InvalidPatch('content v2 requires region.scene and region.program: author the spatial plan and executable interactions, not legacy templates')
+     if cfg.get('hybrid_content',True) and not parsed['region'].get('audio',{}).get('music',{}).get('explore'):
+      raise InvalidPatch('hybrid region needs an exploration music choice',path='region.audio.music.explore',expected='a library music asset or a short score; see library_candidates.audio')
     with self.world.lock:
      if self._current(ctx,generation):
       validation_started=time.monotonic()

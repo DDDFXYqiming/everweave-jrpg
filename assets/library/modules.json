@@ -1,0 +1,351 @@
+{
+  "duel_v1": {
+    "description": "Optional combat: named strike/skill, defense, one enemy response. Adds no enemies or items.",
+    "args": {
+      "attack_label": {
+        "type": "text"
+      },
+      "skill_label": {
+        "type": "text"
+      },
+      "damage": {
+        "type": "integer",
+        "min": 1,
+        "max": 35
+      },
+      "skill_damage": {
+        "type": "integer",
+        "min": 1,
+        "max": 60
+      },
+      "mp_cost": {
+        "type": "integer",
+        "min": 0,
+        "max": 15
+      }
+    },
+    "program": {
+      "vars": {
+        "@id_guard": 0
+      },
+      "actions": [
+        {
+          "id": "@id_strike",
+          "label": {
+            "$arg": "attack_label"
+          },
+          "scope": "combat",
+          "effects": [
+            {
+              "op": "stat",
+              "target": "enemy",
+              "name": "hp",
+              "delta": {
+                "op": "sub",
+                "args": [
+                  0,
+                  {
+                    "$arg": "damage"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "@id_skill",
+          "label": {
+            "$arg": "skill_label"
+          },
+          "scope": "combat",
+          "when": {
+            "op": "ge",
+            "args": [
+              {
+                "get": "player.mp"
+              },
+              {
+                "$arg": "mp_cost"
+              }
+            ]
+          },
+          "effects": [
+            {
+              "op": "stat",
+              "target": "player",
+              "name": "mp",
+              "delta": {
+                "op": "sub",
+                "args": [
+                  0,
+                  {
+                    "$arg": "mp_cost"
+                  }
+                ]
+              }
+            },
+            {
+              "op": "stat",
+              "target": "enemy",
+              "name": "hp",
+              "delta": {
+                "op": "sub",
+                "args": [
+                  0,
+                  {
+                    "$arg": "skill_damage"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "@id_guard",
+          "label": "防御",
+          "scope": "combat",
+          "effects": [
+            {
+              "op": "set",
+              "path": "vars.@id_guard",
+              "value": 1
+            }
+          ]
+        }
+      ],
+      "hooks": [
+        {
+          "id": "@id_enemy",
+          "on": "enemy_turn",
+          "effects": [
+            {
+              "op": "stat",
+              "target": "player",
+              "name": "hp",
+              "delta": {
+                "op": "sub",
+                "args": [
+                  0,
+                  {
+                    "op": "max",
+                    "args": [
+                      1,
+                      {
+                        "op": "sub",
+                        "args": [
+                          {
+                            "get": "battle.attack"
+                          },
+                          {
+                            "op": "mul",
+                            "args": [
+                              {
+                                "get": "vars.@id_guard"
+                              },
+                              5
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "op": "set",
+              "path": "vars.@id_guard",
+              "value": 0
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "switch_door_v1": {
+    "description": "A nearby switch opens a solid object once. Existing room geometry and exit anchors stay authored.",
+    "args": {
+      "switch": {
+        "type": "reference"
+      },
+      "door": {
+        "type": "reference"
+      },
+      "opened_sprite": {
+        "type": "reference"
+      },
+      "label": {
+        "type": "text"
+      }
+    },
+    "program": {
+      "actions": [
+        {
+          "id": "@id_open",
+          "label": {
+            "$arg": "label"
+          },
+          "target": {
+            "$arg": "switch"
+          },
+          "once": true,
+          "effects": [
+            {
+              "op": "solid",
+              "target": {
+                "$arg": "door"
+              },
+              "value": false
+            },
+            {
+              "op": "sprite",
+              "target": {
+                "$arg": "door"
+              },
+              "value": {
+                "$arg": "opened_sprite"
+              }
+            },
+            {
+              "op": "set",
+              "path": "vars.@id_opened",
+              "value": true
+            }
+          ]
+        }
+      ],
+      "vars": {
+        "@id_opened": false
+      }
+    }
+  },
+  "trade_v1": {
+    "description": "One optional repeatable purchase through an existing object, checking real gold and item identity.",
+    "args": {
+      "merchant": {
+        "type": "reference"
+      },
+      "item": {
+        "type": "reference"
+      },
+      "price": {
+        "type": "integer",
+        "min": 1,
+        "max": 120
+      },
+      "label": {
+        "type": "text"
+      }
+    },
+    "program": {
+      "actions": [
+        {
+          "id": "@id_buy",
+          "label": {
+            "$arg": "label"
+          },
+          "target": {
+            "$arg": "merchant"
+          },
+          "when": {
+            "op": "ge",
+            "args": [
+              {
+                "get": "player.gold"
+              },
+              {
+                "$arg": "price"
+              }
+            ]
+          },
+          "effects": [
+            {
+              "op": "stat",
+              "target": "player",
+              "name": "gold",
+              "delta": {
+                "op": "sub",
+                "args": [
+                  0,
+                  {
+                    "$arg": "price"
+                  }
+                ]
+              }
+            },
+            {
+              "op": "item",
+              "id": {
+                "$arg": "item"
+              },
+              "count": 1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "lift_v1": {
+    "description": "Two existing controls move the player between authored landing cells; runtime validates collision and safety.",
+    "args": {
+      "lower_control": {
+        "type": "reference"
+      },
+      "upper_control": {
+        "type": "reference"
+      },
+      "lower": {
+        "type": "point"
+      },
+      "upper": {
+        "type": "point"
+      },
+      "up_label": {
+        "type": "text"
+      },
+      "down_label": {
+        "type": "text"
+      }
+    },
+    "program": {
+      "actions": [
+        {
+          "id": "@id_up",
+          "label": {
+            "$arg": "up_label"
+          },
+          "target": {
+            "$arg": "lower_control"
+          },
+          "effects": [
+            {
+              "op": "move",
+              "target": "player",
+              "to": {
+                "$arg": "upper"
+              }
+            }
+          ]
+        },
+        {
+          "id": "@id_down",
+          "label": {
+            "$arg": "down_label"
+          },
+          "target": {
+            "$arg": "upper_control"
+          },
+          "effects": [
+            {
+              "op": "move",
+              "target": "player",
+              "to": {
+                "$arg": "lower"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -36,6 +36,7 @@ def authored_patch():
             dict(id='door',kind='object',name='实体门',sprite='gate',solid=True),
             dict(id='foe',kind='enemy',name='等待被理解的机关兽',sprite='enemy',monster='sentinel',tier=1,move='strike',stats={'hp':45,'attack':4})],
         items=[],quests=[],destinations=[{'id':'terrace','name':'朝向昨日的露台','description':'一段未来的旅程。'}],visuals=art,
+        audio={'music':{'explore':{'score':{'bpm':120,'voices':[{'wave':'sine','notes':[[60,1],[64,1],[67,2]]}]}}}},
         program=dict(summary='历史位置驱动影子；状态条件开门；不同于单目标任务的合取条件',vars={'presses':0},
             actions=[
                 dict(id='tune',label='校准余光',target='lever',scope='explore',when=expr('lt',get('vars.presses'),2),effects=[{'op':'change','path':'vars.presses','value':1}]),

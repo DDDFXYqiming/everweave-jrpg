@@ -10,17 +10,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Restore local content from pinned manifests
+        run: python3 -m engine.asset_cache --download
       - name: Authoritative engine / HTTP / persistence tests (no cloud requests)
         run: python3 -m unittest discover -s tests -v
       - name: Check private publish file selection
         run: python3 tools/publish_private.py --dry-run
+      - name: Verify pinned local content assets
+        run: python3 tools/import_library.py --verify
   godot:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Restore local content from pinned manifests
+        run: python3 -m engine.asset_cache --download
       - name: Obtain official Godot Standard
         run: |
-          curl --fail --location --retry 2 'https://downloads.godotengine.org/?version=4.7.2&flavor=stable&slug=linux.x86_64.zip&platform=linux.64' -o /tmp/godot.zip
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 180 'https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip' -o /tmp/godot.zip ||
+            curl --fail --location --retry 2 --retry-all-errors --connect-timeout 15 --max-time 180 'https://downloads.godotengine.org/?version=4.7.2&flavor=stable&slug=linux.x86_64.zip&platform=linux.64' -o /tmp/godot.zip
           unzip -q /tmp/godot.zip -d /tmp/godot
           chmod +x /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
       - name: Import assets and check scripts with the native engine
@@ -59,3 +66,20 @@ jobs:
         env:
           GODOT_BIN: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
         run: python3 tools/test_native.py --content --headless
+      - name: Verify hybrid pixels, real audio samples, and module gameplay
+        env:
+          GODOT_BIN: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
+        run: |
+          timeout 45 "$GODOT_BIN" --headless --path . --script res://tests/hybrid_audio_smoke.gd > /tmp/hybrid-audio.log 2>&1
+          cat /tmp/hybrid-audio.log
+          grep -q 'HYBRID_AUDIO_OK' /tmp/hybrid-audio.log
+          ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/hybrid-audio.log
+          python3 tools/test_native.py --hybrid --headless
+          timeout 30 "$GODOT_BIN" --headless --path . --script res://tests/terrain_materials_smoke.gd > /tmp/terrain.log 2>&1
+          cat /tmp/terrain.log
+          grep -q 'TERRAIN_MATERIALS_OK' /tmp/terrain.log
+          ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/terrain.log
+          timeout 40 "$GODOT_BIN" --headless --path . --script res://tests/i18n_smoke.gd > /tmp/i18n.log 2>&1
+          cat /tmp/i18n.log
+          grep -q 'I18N_OK' /tmp/i18n.log
+          ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/i18n.log

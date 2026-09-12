@@ -1,4 +1,5 @@
 extends Control
+const L = preload("res://client/i18n.gd")
 ## Atlas-backed pixel renderer. Only validated runtime data reaches this layer.
 ## All scene placement is data; the LLM never supplies GDScript or resource paths.
 
@@ -7,6 +8,10 @@ signal map_requested()
 
 const TILE: float = 32.0
 const VisualCompiler = preload("res://client/visual_compiler.gd")
+const TerrainMaterials = preload("res://client/terrain_materials.gd")
+var materials = TerrainMaterials.new()
+var room_floor_keys: Dictionary = {}
+var terrain_grid: Array = []
 var generated: Dictionary = {}
 var visual_signature: String = ""
 const BIOMES: Array[String] = ["forest", "coast", "snow", "desert", "ruins", "industrial", "dream"]
@@ -41,10 +46,20 @@ func update_world(data: Dictionary) -> void:
 		queue_redraw()
 		return
 	region = value
+	room_floor_keys.clear()
+	if int(region.get("surface_version",0))<2:
+		for command in region.get("scene",{}).get("paint",[]):
+			if not command.has("room") or not command.has("surface"):continue
+			var box: Array = command.room
+			for yy in range(int(box[1]),int(box[1]+box[3])):
+				for xx in range(int(box[0]),int(box[0]+box[2])):
+					if xx in [int(box[0]),int(box[0]+box[2]-1)] or yy in [int(box[1]),int(box[1]+box[3]-1)]:room_floor_keys[Vector2i(xx,yy)]=str(command.surface)
 	var identity: String = JSON.stringify(region.get("visuals", {}))
 	if identity != visual_signature:
 		visual_signature = identity
 		generated = VisualCompiler.compile(region.visuals, int(region.seed)) if region.has("visuals") else {}
+		if region.has("visuals"):materials.configure(region.visuals)
+	terrain_grid=materials.display_grid(region) if region.has("visuals") else region.tiles
 	var p: Dictionary = data.get("player", {})
 	target_player = Vector2(float(p.get("x", 0)), float(p.get("y", 0)))
 	if current_id != str(region.get("id", "")) or visual_player.distance_to(target_player) > 3.0:
@@ -105,13 +120,20 @@ func _draw() -> void:
 				variant = (variant + int(elapsed * 1.6)) % 2
 			var at := Vector2(x, y) * TILE - camera
 			var surfaces: Array = region.get("surfaces", [])
+			var painted: bool = false
 			if not generated.is_empty() and not surfaces.is_empty():
 				var surface: String = str(surfaces[y][x])
+				# Older saved rooms may have the floor recipe on blocked wall cells.
+				if typ==3 and not surface.is_empty() and room_floor_keys.get(Vector2i(x,y),"")==surface:surface=""
 				if not surface.is_empty() and generated.has(surface):
-					draw_texture_rect(VisualCompiler.texture(surface, generated, elapsed), Rect2(at.floor(), Vector2(TILE + 1, TILE + 1)), false)
-					continue
-			var terrain_texture: Texture2D = tiles if generated.is_empty() else generated["__tiles"]
-			draw_texture_rect_region(terrain_texture, Rect2(at.floor(), Vector2(TILE + 1, TILE + 1)), Rect2((typ * 2 + variant) * 16, biome_index * 16 if generated.is_empty() else 0, 16, 16))
+					var texture: Texture2D = materials.texture(surface,typ,int(region.seed),x,y) if materials.styles.has(surface) else VisualCompiler.texture(surface,generated,elapsed)
+					if texture!=null:
+						draw_texture_rect(texture,Rect2(at.floor(),Vector2(TILE+1,TILE+1)),false)
+						painted=true
+			if not painted:
+				var terrain_texture: Texture2D = tiles if generated.is_empty() else generated["__tiles"]
+				draw_texture_rect_region(terrain_texture, Rect2(at.floor(), Vector2(TILE + 1, TILE + 1)), Rect2((typ * 2 + variant) * 16, biome_index * 16 if generated.is_empty() else 0, 16, 16))
+			if not generated.is_empty():materials.edges(self,terrain_grid,x,y,at.floor(),TILE)
 	var objects: Array = []
 	for prop in region.get("props", []):
 		if bool(prop.get("spent", false)): continue
@@ -119,7 +141,7 @@ func _draw() -> void:
 			continue
 		if float(prop.y) * TILE < camera.y - 100 or float(prop.y) * TILE > camera.y + size.y + 140:
 			continue
-		objects.append({"y": float(prop.y), "x": float(prop.x), "sprite": str(prop.get("sprite", prop.kind)), "kind": "prop"})
+		objects.append({"y": float(prop.y), "x": float(prop.x), "footprint":prop.get("footprint",[1,1]), "sprite": str(prop.get("sprite", prop.kind)), "kind": "prop"})
 	for entity in region.get("entities", []):
 		var kind: String = str(entity.kind)
 		if bool(entity.get("spent", false)) and kind != "chest":
@@ -134,11 +156,12 @@ func _draw() -> void:
 		elif kind == "chest" and bool(entity.get("spent", false)):
 			key = "chest_open"
 		if not generated.is_empty() and entity.has("sprite"): key = str(entity.sprite)
-		objects.append({"y": float(entity.y), "x": float(entity.x), "sprite": key, "kind": kind, "entity": entity})
+		objects.append({"y": float(entity.y), "x": float(entity.x), "footprint":entity.get("footprint",[1,1]), "sprite": key, "kind": kind, "entity": entity})
 	objects.append({"y": visual_player.y, "x": visual_player.x, "sprite": "hero_%d" % walk_frame, "kind": "player"})
 	objects.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.y) < float(b.y))
 	for obj in objects:
-		var foot := (Vector2(float(obj.x), float(obj.y)) + Vector2(0.5, 1.0)) * TILE - camera
+		var footprint: Array = obj.get("footprint",[1,1])
+		var foot := (Vector2(float(obj.x), float(obj.y)) + Vector2(float(footprint[0])*.5, 1.0)) * TILE - camera
 		var tint := Color.WHITE
 		if generated.is_empty() and obj.kind == "prop" and obj.sprite in ["tree", "bush"]:
 			if region.biome == "snow":
@@ -198,19 +221,25 @@ func _draw_minimap() -> void:
 		if e.kind == "exit":
 			draw_rect(Rect2(origin + Vector2(float(e.x), float(e.y)) * map_scale - Vector2.ONE, Vector2(3, 3)), Color("c1a9ef"))
 	draw_rect(Rect2(origin + target_player * map_scale - Vector2.ONE, Vector2(4, 4)), Color("f7e0a4"))
-	draw_string(font,origin+Vector2(3,89),"旅图 · 点击展开",HORIZONTAL_ALIGNMENT_LEFT,104,11,Color("d7c59d"))
+	draw_string(font,origin+Vector2(3,89),L.t("旅图 · 点击展开"),HORIZONTAL_ALIGNMENT_LEFT,104,11,Color("d7c59d"))
 
 func _draw_nearby_hint() -> void:
 	var p: Dictionary = snapshot.get("player", {})
 	for e in region.get("entities", []):
 		if bool(e.get("spent", false)): continue
-		if absf(float(e.x) - float(p.get("x", 0))) + absf(float(e.y) - float(p.get("y", 0))) <= 1.0:
+		if _distance_to_object(e,Vector2(float(p.get("x",0)),float(p.get("y",0)))) <= 1:
 			var text: String = "E  ·  " + str(e.name)
 			var width: float = minf(size.x - 40, font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x + 28)
 			var at := Vector2((size.x - width) / 2, size.y - 48)
 			draw_rect(Rect2(at, Vector2(width, 34)), Color(0.035, 0.075, 0.13, 0.93))
 			draw_string(font, at + Vector2(14, 23), text, HORIZONTAL_ALIGNMENT_LEFT, width - 24, 16, Color("e6dcbf"))
 			return
+
+func _distance_to_object(e: Dictionary, p: Vector2) -> float:
+	var footprint: Array = e.get("footprint",[1,1])
+	var dx: float = maxf(maxf(float(e.x)-p.x,0),p.x-(float(e.x)+float(footprint[0])-1))
+	var dy: float = maxf(maxf(float(e.y)-float(footprint[1])+1-p.y,0),p.y-float(e.y))
+	return dx+dy
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
@@ -222,7 +251,7 @@ func _gui_input(event: InputEvent) -> void:
 			return
 		var cell: Vector2 = ((event.position + camera) / TILE).floor()
 		for e in region.get("entities", []):
-			if int(e.x) == int(cell.x) and int(e.y) == int(cell.y):
+			if _distance_to_object(e,cell) == 0:
 				entity_clicked.emit(str(e.id))
 				accept_event()
 				return

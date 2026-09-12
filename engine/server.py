@@ -26,8 +26,8 @@ class GameServer(ThreadingHTTPServer):
   if address[0]!='127.0.0.1': raise ValueError('Only IPv4 loopback binding is supported')
   self.token=token; self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
   self.snapshot_sequence=0
-  self.preference_keys=('offline','base_url','model','deepseek_options','reasoning_effort','max_calls')
-  self.preferences=dict(offline=False,base_url='https://api.deepseek.com',model='deepseek-flash',deepseek_options=True,reasoning_effort='low',max_calls=60)
+  self.preference_keys=('offline','base_url','model','deepseek_options','reasoning_effort','max_calls','hybrid_content','language')
+  self.preferences=dict(offline=False,base_url='https://api.deepseek.com',model='deepseek-flash',deepseek_options=True,reasoning_effort='low',max_calls=60,hybrid_content=True,language='zh')
   self.preference_path=None if str(save_path)==':memory:' else Path(save_path).with_name('settings.json')
   if self.preference_path and self.preference_path.exists():
    try:
@@ -44,6 +44,8 @@ class GameServer(ThreadingHTTPServer):
    self.audit.emit('server.stopped');self.audit.close()
  def remember_configuration(self):
   self.preferences={k:self.director.cfg[k] for k in self.preference_keys}
+  self.save_preferences()
+ def save_preferences(self):
   if self.preference_path:
    temporary=self.preference_path.with_suffix('.tmp')
    temporary.write_text(dumps(self.preferences),encoding='utf-8'); temporary.replace(self.preference_path)
@@ -61,7 +63,7 @@ class Handler(BaseHTTPRequestHandler):
  def reply(self,status,value):
   body=dumps(value).encode(); self.send_response(status); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(body))); self.send_header('Cache-Control','no-store'); self.send_header('X-Content-Type-Options','nosniff'); self.end_headers()
   try: self.wfile.write(body)
-  except (BrokenPipeError,ConnectionResetError): pass
+  except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError): pass
  def authorized(self):
   expected='Bearer '+self.server.token; supplied=self.headers.get('Authorization','')
   # Web pages cannot use this API: no CORS; reject browser origins and foreign Host headers.
@@ -120,8 +122,14 @@ class Handler(BaseHTTPRequestHandler):
      # Validate all inputs before replacing an existing save.
      setting=data.get('setting','')
      if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
-     d.configure(data); w.start(setting,authored=not d.cfg['offline']); server.seen.clear(); server.remember_configuration()
+     d.configure(data); w.start(setting,authored=not d.cfg['offline'],language=d.cfg['language']); server.seen.clear(); server.remember_configuration()
     elif self.path=='/configure': d.configure(data); server.remember_configuration()
+    elif self.path=='/language':
+     language=data.get('language')
+     if language not in ('zh','en'):raise ValueError('Unsupported language')
+     server.preferences['language']=language
+     if d.cfg is not None:d.cfg['language']=language
+     server.save_preferences()
     elif self.path=='/action': w.action(data)
     elif self.path=='/retry': d.retry(data.get('target'),data.get('kind'),data.get('mode','repair'))
     elif self.path=='/pause': d.paused=bool(data.get('paused',True))

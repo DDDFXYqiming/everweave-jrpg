@@ -1,0 +1,256 @@
+{
+  "meadow_v1": {
+    "name": "meadow with low contrast flecks",
+    "tags": [
+      "town"
+    ],
+    "tiles": [
+      0
+    ],
+    "base": {
+      "asset": "town_v1_grass"
+    },
+    "variants": [
+      {
+        "asset": "town_v1_grass_detail"
+      }
+    ],
+    "legacy_assets": [
+      "town_v1_grass",
+      "town_v1_grass_detail"
+    ],
+    "grain": 0.026,
+    "detail_density": 0.16
+  },
+  "earth_path_v1": {
+    "name": "quiet earthen path with occasional stones",
+    "tags": [
+      "town"
+    ],
+    "tiles": [
+      1,
+      4
+    ],
+    "base": {
+      "asset": "town_v1_tile_0025"
+    },
+    "variants": [
+      {
+        "asset": "town_v1_stone_path"
+      }
+    ],
+    "legacy_assets": [
+      "town_v1_stone_path"
+    ],
+    "grain": 0.026,
+    "detail_density": 0.12,
+    "detail_key": "#84c669"
+  },
+  "archive_floor_v1": {
+    "name": "dark stone floor with scattered wear",
+    "tags": [
+      "dungeon"
+    ],
+    "tiles": [
+      0,
+      1
+    ],
+    "base": {
+      "asset": "dungeon_v1_floor"
+    },
+    "variants": [
+      {
+        "asset": "dungeon_v1_rubble"
+      }
+    ],
+    "legacy_assets": [
+      "dungeon_v1_floor",
+      "dungeon_v1_rubble",
+      "dungeon_v1_paving"
+    ],
+    "grain": 0.026,
+    "detail_density": 0.09
+  },
+  "masonry_v1": {
+    "name": "connected stone wall faces",
+    "tags": [
+      "town",
+      "dungeon"
+    ],
+    "tiles": [
+      3
+    ],
+    "base": {
+      "asset": "dungeon_v1_stone"
+    },
+    "variants": [],
+    "legacy_assets": [
+      "dungeon_v1_stone"
+    ],
+    "grain": 0.017,
+    "detail_density": 0.16,
+    "dressing": false
+  },
+  "wood_planks_v1": {
+    "name": "palette colored wooden planks",
+    "tags": [
+      "common"
+    ],
+    "tiles": [
+      0,
+      1,
+      4
+    ],
+    "base": {
+      "layers": [
+        [
+          "rect",
+          0,
+          0,
+          16,
+          16,
+          "#a27851"
+        ],
+        [
+          "rect",
+          0,
+          7,
+          16,
+          1,
+          "#795437"
+        ],
+        [
+          "rect",
+          0,
+          15,
+          16,
+          1,
+          "#795437"
+        ],
+        [
+          "rect",
+          5,
+          0,
+          1,
+          7,
+          "#795437"
+        ],
+        [
+          "rect",
+          11,
+          8,
+          1,
+          7,
+          "#795437"
+        ]
+      ]
+    },
+    "variants": [],
+    "legacy_assets": [],
+    "grain": 0.018,
+    "detail_density": 0.16,
+    "dressing": false
+  },
+  "metal_panels_v1": {
+    "name": "palette colored metal panels",
+    "tags": [
+      "sci_fi"
+    ],
+    "tiles": [
+      0,
+      1,
+      3
+    ],
+    "base": {
+      "layers": [
+        [
+          "rect",
+          0,
+          0,
+          16,
+          16,
+          "ground"
+        ],
+        [
+          "rect",
+          0,
+          0,
+          16,
+          1,
+          "shadow"
+        ],
+        [
+          "rect",
+          0,
+          0,
+          1,
+          16,
+          "shadow"
+        ],
+        [
+          "rect",
+          2,
+          2,
+          1,
+          1,
+          "path"
+        ],
+        [
+          "rect",
+          13,
+          13,
+          1,
+          1,
+          "path"
+        ]
+      ]
+    },
+    "variants": [],
+    "legacy_assets": [],
+    "grain": 0.012,
+    "detail_density": 0.16,
+    "dressing": false
+  },
+  "water_ripples_v1": {
+    "name": "palette colored water and shoreline",
+    "tags": [
+      "common"
+    ],
+    "tiles": [
+      2
+    ],
+    "base": {
+      "layers": [
+        [
+          "rect",
+          0,
+          0,
+          16,
+          16,
+          "water"
+        ],
+        [
+          "rect",
+          3,
+          5,
+          4,
+          1,
+          "path"
+        ],
+        [
+          "rect",
+          10,
+          12,
+          3,
+          1,
+          "path"
+        ]
+      ]
+    },
+    "variants": [],
+    "legacy_assets": [],
+    "grain": 0.018,
+    "detail_density": 0.16,
+    "dressing": false
+  }
+}

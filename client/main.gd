@@ -1,4 +1,5 @@
 extends Control
+const L = preload("res://client/i18n.gd")
 ## Thin Godot client: pixel world, controls and presentation. No paid model calls here.
 ## A single local standard-library Python helper owns state, validation and the director.
 
@@ -59,6 +60,7 @@ var local_panel: String = ""
 var modal_signature: String = ""
 var hp_tint: StyleBoxFlat
 var music: AudioStreamPlayer
+var soundscape
 var music_muted: bool = false
 
 var home: Control
@@ -68,6 +70,7 @@ var base_input: LineEdit
 var model_input: LineEdit
 var key_input: LineEdit
 var mode_select: OptionButton
+var hybrid_select: CheckBox
 var online_settings: VBoxContainer
 var custom_fields: GridContainer
 var provider_summary: Label
@@ -102,8 +105,16 @@ var pause_button: Button
 var retry_failed_button: Button
 var failure_list: VBoxContainer
 var failure_signature: String = ""
+var language_select: OptionButton
+var language_http: HTTPRequest
+var language_busy: bool = false
+var language_sent: String = ""
+var home_page_index: int = 0
 
 func _ready() -> void:
+	L.initialize()
+	auto_translate_mode=Node.AUTO_TRANSLATE_MODE_DISABLED
+	get_window().title="Everweave" if L.language=="en" else "Everweave · 未写之境"
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	get_window().content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
 	_configure_theme()
@@ -120,20 +131,21 @@ func _ready() -> void:
 	journal_http.timeout = 10
 	add_child(journal_http)
 	journal_http.request_completed.connect(_journal_loaded)
+	language_http=HTTPRequest.new()
+	language_http.timeout=4
+	add_child(language_http)
+	language_http.request_completed.connect(_language_saved)
 	_build_game()
 	_build_home()
-	music = AudioStreamPlayer.new()
-	music.stream = preload("res://assets/wander.wav")
-	music.volume_db = -14
-	add_child(music)
-	music.finished.connect(func() -> void:
-		if not music_muted: music.play()
-	)
+	soundscape = preload("res://client/soundscape.gd").new()
+	add_child(soundscape)
+	music = soundscape.music_players[0]
 	home.show()
 	game.hide()
 	_poll()
 
 func _exit_tree() -> void:
+	if is_instance_valid(language_http):language_http.cancel_request()
 	if is_instance_valid(music):
 		music.stop()
 		music.stream = null
@@ -269,20 +281,29 @@ func _build_home() -> void:
 	var identity := _vbox(layout)
 	identity.custom_minimum_size.x = 270
 	_label(identity,"E V E R W E A V E",13,GOLD)
-	_label(identity,"未写之境",48)
-	_label(identity,"旅途手记",20,MUTED)
+	_label(identity,L.t("未写之境"),48)
+	_label(identity,L.t("旅途手记"),20,MUTED)
 	var spacer := Control.new()
 	spacer.custom_minimum_size.y = 120
 	identity.add_child(spacer)
-	_label(identity,"写下一个地方，\n和你要扮演的人。",22,GOLD)
-	_label(identity,"移动  WASD\n交互  E    行囊  I    手记  J\n全屏  F11",13,MUTED)
+	_label(identity,L.t("写下一个地方，\n和你要扮演的人。"),22,GOLD)
+	_label(identity,L.t("移动  WASD\n交互  E    行囊  I    手记  J\n全屏  F11"),13,MUTED)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size.x = 650
 	layout.add_child(panel)
 	var box := _vbox(panel)
+	var language_row := HBoxContainer.new()
+	box.add_child(language_row)
+	_label(language_row,L.t("界面语言"),14,MUTED)
+	language_select=OptionButton.new()
+	language_select.add_item("简体中文",0)
+	language_select.add_item("English",1)
+	language_select.select(1 if L.language=="en" else 0)
+	language_row.add_child(language_select)
+	language_select.item_selected.connect(_change_language)
 	var tabs := HBoxContainer.new()
 	box.add_child(tabs)
-	for entry in [["旅程","compass"],["显示与声音","screen"],["连接","settings"]]:
+	for entry in [[L.t("旅程"),"compass"],[L.t("显示与声音"),"screen"],[L.t("连接"),"settings"]]:
 		var b := _button(tabs,entry[0],_home_tab.bind(home_tabs.size()))
 		b.icon = Icons.get_icon(entry[1])
 		b.add_theme_constant_override("icon_max_width",20)
@@ -293,74 +314,88 @@ func _build_home() -> void:
 		page.custom_minimum_size = Vector2(610,400)
 		home_pages.append(page)
 	var journey: Control = home_pages[0]
-	_label(journey,"启程",30,GOLD)
-	_label(journey,"地点、身份、一个悬而未决的故事。",15,MUTED)
+	_label(journey,L.t("启程"),30,GOLD)
+	_label(journey,L.t("地点、身份、一个悬而未决的故事。"),15,MUTED)
 	setting_input = TextEdit.new()
 	setting_input.custom_minimum_size = Vector2(600,164)
-	setting_input.placeholder_text = "描述这次旅程……"
-	setting_input.text = "群山间有一座建在巨树上的驿站。我是一名失去地图的信使，随身带着一封没有收件人的信。"
+	setting_input.placeholder_text = L.t("描述这次旅程……")
+	setting_input.text = L.t("群山间有一座建在巨树上的驿站。我是一名失去地图的信使，随身带着一封没有收件人的信。")
 	setting_input.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	journey.add_child(setting_input)
-	_label(journey,"新旅程会在这里保存；已有进度可直接继续。",13,MUTED)
+	_label(journey,L.t("新旅程会在这里保存；已有进度可直接继续。"),13,MUTED)
 	var buttons := HBoxContainer.new()
 	journey.add_child(buttons)
-	continue_button = _button(buttons,"继续旅程",_continue_world)
-	start_button = _button(buttons,"开始新旅程",_start_world)
+	continue_button = _button(buttons,L.t("继续旅程"),_continue_world)
+	start_button = _button(buttons,L.t("开始新旅程"),_start_world)
 	start_button.disabled = true
 	continue_button.disabled = true
-	return_button = _button(journey,"返回当前旅程  ·  Esc",_show_game)
+	return_button = _button(journey,L.t("返回当前旅程  ·  Esc"),_show_game)
 	return_button.hide()
 	var display: Control = home_pages[1]
-	_label(display,"显示与声音",30,GOLD)
-	_label(display,"窗口随屏幕比例展开，画面与文字保持原有比例。",15,MUTED)
-	display_button = _button(display,"切换全屏  ·  F11",_toggle_fullscreen)
+	_label(display,L.t("显示与声音"),30,GOLD)
+	_label(display,L.t("窗口随屏幕比例展开，画面与文字保持原有比例。"),15,MUTED)
+	display_button = _button(display,L.t("切换全屏  ·  F11"),_toggle_fullscreen)
 	display_button.icon = Icons.get_icon("screen")
 	display_button.add_theme_constant_override("icon_max_width",22)
 	var volume := HSlider.new()
 	volume.min_value = 0
 	volume.max_value = 100
-	volume.value = 40
+	volume.value = soundscape.music_gain*100 if is_instance_valid(soundscape) else 65
 	display.add_child(volume)
-	_label(display,"音乐音量",15,MUTED)
+	_label(display,L.t("音乐音量"),15,MUTED)
 	volume.value_changed.connect(func(value: float) -> void:
-		if is_instance_valid(music): music.volume_db = linear_to_db(value / 100.0)
+		if is_instance_valid(soundscape): soundscape.music_gain = value / 100.0
 	)
-	_button(display,"开启 / 关闭音乐  ·  M",_toggle_music)
+	var effects_volume := HSlider.new()
+	effects_volume.min_value = 0
+	effects_volume.max_value = 100
+	effects_volume.value = soundscape.effects_gain*100 if is_instance_valid(soundscape) else 70
+	display.add_child(effects_volume)
+	_label(display,L.t("音效与环境声"),15,MUTED)
+	effects_volume.value_changed.connect(func(value: float) -> void:
+		if is_instance_valid(soundscape):soundscape.effects_gain = value/100.0
+	)
+	_button(display,L.t("开启 / 关闭音乐  ·  M"),_toggle_music)
 	var connection: Control = home_pages[2]
-	_label(connection,"世界连接",30,GOLD)
-	_label(connection,"选择内容生成服务。更改将在下次继续旅程时应用。",14,MUTED)
+	_label(connection,L.t("世界连接"),30,GOLD)
+	_label(connection,L.t("选择内容生成服务。更改将在下次继续旅程时应用。"),14,MUTED)
 	mode_select = OptionButton.new()
 	mode_select.add_item("DeepSeek",0)
-	mode_select.add_item("其他兼容服务",1)
-	mode_select.add_item("离线演示",2)
+	mode_select.add_item(L.t("其他兼容服务"),1)
+	mode_select.add_item(L.t("离线演示"),2)
 	connection.add_child(mode_select)
 	mode_help = _label(connection,"",13,MUTED)
 	online_settings = _vbox(connection)
+	hybrid_select = CheckBox.new()
+	hybrid_select.text = L.t("新内容优先使用本地素材库")
+	hybrid_select.button_pressed = true
+	hybrid_select.tooltip_text = L.t("给模型提供匹配的图像、音频和能力候选，缺少的部分仍可原创。")
+	online_settings.add_child(hybrid_select)
 	provider_summary = _label(online_settings,"DeepSeek Flash",14,GOLD)
 	custom_fields = GridContainer.new()
 	custom_fields.columns = 2
 	online_settings.add_child(custom_fields)
-	_label(custom_fields,"服务地址",14,MUTED)
+	_label(custom_fields,L.t("服务地址"),14,MUTED)
 	base_input = LineEdit.new()
 	base_input.text = "https://api.deepseek.com"
 	base_input.custom_minimum_size.x = 440
 	custom_fields.add_child(base_input)
-	_label(custom_fields,"模型",14,MUTED)
+	_label(custom_fields,L.t("模型"),14,MUTED)
 	model_input = LineEdit.new()
 	model_input.text = "deepseek-flash"
 	custom_fields.add_child(model_input)
 	var grid := GridContainer.new()
 	grid.columns = 2
 	online_settings.add_child(grid)
-	_label(grid,"密钥",14,MUTED)
+	_label(grid,L.t("密钥"),14,MUTED)
 	key_input = LineEdit.new()
 	key_input.secret = true
 	key_input.custom_minimum_size.x = 440
 	grid.add_child(key_input)
-	_label(grid,"思考等级",14,MUTED)
+	_label(grid,L.t("思考等级"),14,MUTED)
 	effort_select = OptionButton.new()
 	grid.add_child(effort_select)
-	_label(grid,"请求额度",14,MUTED)
+	_label(grid,L.t("请求额度"),14,MUTED)
 	budget_input = SpinBox.new()
 	budget_input.min_value = 1
 	budget_input.max_value = 1000
@@ -369,19 +404,19 @@ func _build_home() -> void:
 	effort_help = _label(online_settings,"",12,MUTED)
 	mode_select.item_selected.connect(_mode_changed)
 	_mode_changed(0)
-	_button(connection,"应用并继续旅程",_continue_world)
-	form_error = _label(box,"连接存档中……",13,MUTED)
+	_button(connection,L.t("应用并继续旅程"),_continue_world)
+	form_error = _label(box,L.t("连接存档中……"),13,MUTED)
 	replace_dialog = ConfirmationDialog.new()
-	replace_dialog.title = "开始另一段旅程"
-	replace_dialog.ok_button_text = "开始新旅程"
-	replace_dialog.cancel_button_text = "保留当前旅程"
+	replace_dialog.title = L.t("开始另一段旅程")
+	replace_dialog.ok_button_text = L.t("开始新旅程")
+	replace_dialog.cancel_button_text = L.t("保留当前旅程")
 	replace_dialog.confirmed.connect(_confirm_new_world)
 	replace_dialog.canceled.connect(func() -> void: pending_world_configuration = {})
 	add_child(replace_dialog)
 	redesign_dialog = ConfirmationDialog.new()
-	redesign_dialog.title = "重新创作这个地区"
-	redesign_dialog.ok_button_text = "重新创作"
-	redesign_dialog.cancel_button_text = "保留原结果"
+	redesign_dialog.title = L.t("重新创作这个地区")
+	redesign_dialog.ok_button_text = L.t("重新创作")
+	redesign_dialog.cancel_button_text = L.t("保留原结果")
 	redesign_dialog.confirmed.connect(func() -> void:
 		_post("/retry",pending_redesign)
 		pending_redesign = {}
@@ -390,9 +425,71 @@ func _build_home() -> void:
 	_home_tab(0)
 
 func _home_tab(index: int) -> void:
+	home_page_index=index
 	for i in range(home_pages.size()):
 		home_pages[i].visible = i == index
 		home_tabs[i].modulate = Color.WHITE if i == index else Color("899582")
+
+func _change_language(index: int, persist: bool = true, notify_backend: bool = true) -> void:
+	if action_busy:
+		language_select.select(1 if L.language=="en" else 0)
+		return
+	var value: String = "en" if index==1 else "zh"
+	if value==L.language:return
+	var page: int = home_page_index
+	var showing_game: bool = game.visible
+	var fields := {"setting":setting_input.text,"base":base_input.text,"model":model_input.text,"key":key_input.text,"mode":mode_select.selected,"effort":effort_select.get_item_metadata(effort_select.selected),"budget":budget_input.value,"hybrid":hybrid_select.button_pressed}
+	var example: String = L.t("群山间有一座建在巨树上的驿站。我是一名失去地图的信使，随身带着一封没有收件人的信。")
+	var keep_setting: bool = bool(state.get("started",false)) or setting_input.text!=example
+	L.set_language(value,persist)
+	get_window().title="Everweave" if value=="en" else "Everweave · 未写之境"
+	for node in [home,game,replace_dialog,redesign_dialog]:
+		remove_child(node)
+		node.queue_free()
+	home_tabs.clear()
+	home_pages.clear()
+	modal_signature=""
+	failure_signature=""
+	atlas_signature=""
+	last_action_error=""
+	_build_game()
+	_build_home()
+	mode_select.select(int(fields.mode))
+	_mode_changed(int(fields.mode))
+	_set_effort(str(fields.effort))
+	if keep_setting:setting_input.text=fields.setting
+	base_input.text=fields.base
+	model_input.text=fields.model
+	key_input.text=fields.key
+	budget_input.value=fields.budget
+	hybrid_select.button_pressed=fields.hybrid
+	start_button.disabled=not connection_ready
+	continue_button.disabled=not connection_ready or not bool(state.get("started",false))
+	start_button.text=L.t("开始另一段旅程") if bool(state.get("started",false)) else L.t("开始新旅程")
+	return_button.visible=bool(state.get("started",false))
+	_home_tab(page)
+	home.visible=not showing_game
+	game.visible=showing_game
+	_render()
+	if notify_backend:_send_language()
+
+func _send_language() -> void:
+	if language_busy or not connection_ready:return
+	language_sent=L.language
+	language_busy=true
+	var headers := PackedStringArray(["Content-Type: application/json","Authorization: Bearer "+session_token])
+	var error: int = language_http.request(backend_url+"/language",headers,HTTPClient.METHOD_POST,JSON.stringify({"language":language_sent}))
+	if error!=OK:
+		language_busy=false
+		form_error.text=L.t("界面语言已切换，生成语言设置暂未保存。")
+
+func _language_saved(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	language_busy=false
+	if result==HTTPRequest.RESULT_SUCCESS and code==200:
+		var data: Variant = JSON.parse_string(body.get_string_from_utf8())
+		if data is Dictionary:_accept_snapshot(data)
+	else:form_error.text=L.t("界面语言已切换，生成语言设置暂未保存。")
+	if language_sent!=L.language:_send_language()
 
 func _toggle_fullscreen() -> void:
 	var window := get_window()
@@ -401,7 +498,7 @@ func _toggle_fullscreen() -> void:
 	else:
 		previous_window_mode = window.mode
 		window.mode = Window.MODE_FULLSCREEN
-	display_button.text = "退出全屏  ·  F11" if window.mode == Window.MODE_FULLSCREEN else "切换全屏  ·  F11"
+	display_button.text = L.t("退出全屏  ·  F11") if window.mode == Window.MODE_FULLSCREEN else L.t("切换全屏  ·  F11")
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -449,7 +546,7 @@ func _load_journal(more: bool = false) -> void:
 	var error: Error = journal_http.request(url,PackedStringArray(["Authorization: Bearer "+session_token]))
 	if error != OK:
 		journal_busy = false
-		journal_error = "记录读取失败，可重试。"
+		journal_error = L.t("记录读取失败，可重试。")
 
 func _journal_loaded(result: int, code: int, _headers_unused: PackedStringArray, body: PackedByteArray) -> void:
 	journal_busy = false
@@ -465,7 +562,7 @@ func _journal_loaded(result: int, code: int, _headers_unused: PackedStringArray,
 			if not ids.has(str(entry.id)): old.entries.append(entry)
 		old["next_cursor"] = data.get("next_cursor")
 		journal_pages[journal_request_tab] = old
-	else: journal_error = "暂时无法读取旧记录，可重试。"
+	else: journal_error = L.t("暂时无法读取旧记录，可重试。")
 	if local_panel == "journal":
 		if journal_request_tab != journal_tab:_load_journal()
 		modal_signature = ""
@@ -494,12 +591,12 @@ func _build_game() -> void:
 	all.add_child(header)
 	var heading := _vbox(header)
 	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_label = _label(heading, "未写之境", 27, GOLD)
-	subtitle_label = _label(heading, "正在织出第一片土地", 13, MUTED)
+	title_label = _label(heading, L.t("未写之境"), 27, GOLD)
+	subtitle_label = _label(heading, L.t("正在织出第一片土地"), 13, MUTED)
 	stats_label = _label(header, "", 16)
 	stats_label.custom_minimum_size.x = 220
 	stats_label.size_flags_horizontal = Control.SIZE_SHRINK_END
-	for entry in [["行囊  I","bag","inventory"],["手记  J","book","journal"],["设置","settings","settings"]]:
+	for entry in [[L.t("行囊  I"),"bag","inventory"],[L.t("手记  J"),"book","journal"],[L.t("设置"),"settings","settings"]]:
 		var callback: Callable = _show_home if entry[2] == "settings" else _toggle_panel.bind(entry[2])
 		var b := _button(header,entry[0],callback)
 		b.icon = Icons.get_icon(entry[1])
@@ -527,9 +624,9 @@ func _build_game() -> void:
 	loading_panel.custom_minimum_size.x = 490
 	loading_overlay.add_child(loading_panel)
 	var loading_text := _vbox(loading_panel)
-	_label(loading_text,"第一处落脚地",30,GOLD)
+	_label(loading_text,L.t("第一处落脚地"),30,GOLD)
 	loading_premise = _label(loading_text,"",17)
-	_label(loading_text,"正在准备地点、人物与画面。完成后会直接进入旅程。",14,MUTED)
+	_label(loading_text,L.t("正在准备地点、人物与画面。完成后会直接进入旅程。"),14,MUTED)
 	modal_overlay = Control.new()
 	map_stack.add_child(modal_overlay)
 	modal_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -559,8 +656,8 @@ func _build_game() -> void:
 	var side_frame := _vbox(side_panel)
 	var controls := HBoxContainer.new()
 	side_frame.add_child(controls)
-	pause_button = _button(controls, "暂停生成", _toggle_pause)
-	retry_failed_button = _button(controls, "重试", func() -> void: _post("/retry", {}))
+	pause_button = _button(controls, L.t("暂停生成"), _toggle_pause)
+	retry_failed_button = _button(controls, L.t("重试"), func() -> void: _post("/retry", {}))
 	var side_scroll := ScrollContainer.new()
 	side_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	side_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -568,17 +665,17 @@ func _build_game() -> void:
 	var side := _vbox(side_scroll)
 	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	side.custom_minimum_size.x = 250
-	_label(side, "旅人", 14, GOLD)
-	health_label = _label(side,"生命",12,MUTED)
+	_label(side, L.t("旅人"), 14, GOLD)
+	health_label = _label(side,L.t("生命"),12,MUTED)
 	hp_bar = _bar(side, Color("b5856b"))
-	energy_label = _label(side,"魔力",12,MUTED)
+	energy_label = _label(side,L.t("魔力"),12,MUTED)
 	mp_bar = _bar(side, Color("98a480"))
 	rule_label = _label(side, "", 13, MINT)
-	_label(side, "当前待办", 17, GOLD)
+	_label(side, L.t("当前待办"), 17, GOLD)
 	quest_label = _label(side, "", 14)
-	_label(side, "沿途", 17, GOLD)
+	_label(side, L.t("沿途"), 17, GOLD)
 	status_summary = _label(side,"",13,MUTED)
-	diagnostics_button = _button(side,"生成详情  +",_toggle_diagnostics)
+	diagnostics_button = _button(side,L.t("生成详情  +"),_toggle_diagnostics)
 	diagnostics_button.add_theme_font_size_override("font_size",12)
 	diagnostics = _vbox(side)
 	diagnostics.hide()
@@ -587,11 +684,11 @@ func _build_game() -> void:
 	error_label = _label(side, "", 13, Color("e7a69d"))
 	failure_list = VBoxContainer.new()
 	side.add_child(failure_list)
-	_label(side, "刚刚发生", 17, GOLD)
+	_label(side, L.t("刚刚发生"), 17, GOLD)
 	journal_label = _label(side, "", 13, MUTED)
 	var footer := HBoxContainer.new()
 	all.add_child(footer)
-	hint_label = _label(footer, "WASD  移动     E  交互     F  操作     ·  等待     G  旅图     F11  全屏                         自动保存", 13, MUTED)
+	hint_label = _label(footer, L.t("WASD  移动     E  交互     F  操作     ·  等待     G  旅图     F11  全屏                         自动保存"), 13, MUTED)
 	_button(footer, "♫  M", _toggle_music)
 	atlas_panel = preload("res://client/travel_atlas.gd").new()
 	game.add_child(atlas_panel)
@@ -599,7 +696,7 @@ func _build_game() -> void:
 
 func _toggle_diagnostics() -> void:
 	diagnostics.visible = not diagnostics.visible
-	diagnostics_button.text = "收起详情  −" if diagnostics.visible else "生成详情  +"
+	diagnostics_button.text = L.t("收起详情  −") if diagnostics.visible else L.t("生成详情  +")
 
 func _bar(parent: Node, fill: Color) -> ProgressBar:
 	var bar := ProgressBar.new()
@@ -616,7 +713,7 @@ func _bar(parent: Node, fill: Color) -> ProgressBar:
 
 func _configuration() -> Dictionary:
 	var custom: bool = mode_select.selected == 1
-	return {"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
+	return {"language":L.language,"hybrid_content":hybrid_select.button_pressed,"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
 
 func _set_effort(effort: String) -> void:
 	for i in range(effort_select.item_count):
@@ -630,18 +727,18 @@ func _mode_changed(index: int) -> void:
 	effort_select.clear()
 	var efforts: Array = ["low", "high", "max", "none"] if index != 1 else ["low", "medium", "high", "xhigh", "max", "minimal", "none", "default"]
 	for effort in efforts:
-		var label: String = "关闭思考" if effort == "none" else ("服务默认（不传参数）" if effort == "default" else effort)
+		var label: String = L.t("关闭思考") if effort == "none" else (L.t("服务默认（不传参数）") if effort == "default" else effort)
 		effort_select.add_item(label)
 		effort_select.set_item_metadata(effort_select.item_count - 1, effort)
 	_set_effort(previous)
-	effort_help.text = "默认 low；可随时调整思考等级，应用后用于后续生成。" if index != 1 else "等级由接入服务支持；不接受此参数的服务请选择“服务默认”。"
+	effort_help.text = L.t("默认 low；可随时调整思考等级，应用后用于后续生成。") if index != 1 else L.t("等级由接入服务支持；不接受此参数的服务请选择“服务默认”。")
 	online_settings.visible = index != 2
 	custom_fields.visible = index == 1
 	provider_summary.visible = index == 0
 	key_input.text = ""
-	mode_help.text = "从一句设定开始，由模型生成世界并持续续写。" if index != 2 else "仅检查地图、交互与存档功能。内容来自固定测试样例，不调用 LLM。"
-	key_input.placeholder_text = "留空使用此服务已有的密钥"
-	if index == 0: key_input.placeholder_text = "留空使用启动器加载的 DeepSeek 密钥"
+	mode_help.text = L.t("从一句设定开始，由模型生成世界并持续续写。") if index != 2 else L.t("仅检查地图、交互与存档功能。内容来自固定测试样例，不调用 LLM。")
+	key_input.placeholder_text = L.t("留空使用此服务已有的密钥")
+	if index == 0: key_input.placeholder_text = L.t("留空使用启动器加载的 DeepSeek 密钥")
 
 func _sync_configuration() -> void:
 	var cfg: Dictionary = state.get("configuration", {})
@@ -649,6 +746,7 @@ func _sync_configuration() -> void:
 	base_input.text = str(cfg.get("base_url", "https://api.deepseek.com"))
 	model_input.text = str(cfg.get("model", "deepseek-flash"))
 	budget_input.value = int(cfg.get("max_calls", 60))
+	hybrid_select.button_pressed = bool(cfg.get("hybrid_content",true))
 	var index: int = 2 if bool(cfg.get("offline", false)) else (0 if base_input.text == "https://api.deepseek.com" and model_input.text == "deepseek-flash" and bool(cfg.get("deepseek_options", true)) else 1)
 	mode_select.select(index)
 	_mode_changed(index)
@@ -658,7 +756,7 @@ func _start_world() -> void:
 	if action_busy: return
 	var setting: String = setting_input.text.strip_edges()
 	if setting.length() < 3 or setting.length() > 600:
-		last_action_error = "世界设定需要 3～600 个字符。"
+		last_action_error = L.t("世界设定需要 3～600 个字符。")
 		form_error.text = last_action_error
 		return
 	var config := _configuration()
@@ -666,7 +764,7 @@ func _start_world() -> void:
 	config["replace_save"] = bool(state.get("started", false))
 	if config.replace_save:
 		pending_world_configuration = config
-		replace_dialog.dialog_text = "将按以下设定从头生成新世界：\n\n" + setting.left(180) + "\n\n当前世界及进度会被替换。取消可保留原世界。"
+		replace_dialog.dialog_text = L.t("将按以下设定从头生成新世界：\n\n") + setting.left(180) + L.t("\n\n当前世界及进度会被替换。取消可保留原世界。")
 		replace_dialog.popup_centered(Vector2i(560, 250))
 		return
 	_submit_world(config)
@@ -699,13 +797,11 @@ func _show_game() -> void:
 	home.hide()
 	game.show()
 	get_viewport().gui_release_focus()
-	if not music_muted and not music.playing: music.play()
 	_render()
 
 func _toggle_music() -> void:
 	music_muted = not music_muted
-	music.stream_paused = music_muted
-	if not music_muted and not music.playing: music.play()
+	if is_instance_valid(soundscape):soundscape.muted = music_muted
 
 func _toggle_pause() -> void:
 	var d: Dictionary = state.get("director", {})
@@ -717,6 +813,7 @@ func _toggle_pause() -> void:
 func _toggle_panel(name: String) -> void:
 	if state.get("battle") is Dictionary or not state.get("ui", {}).is_empty(): return
 	local_panel = "" if local_panel == name else name
+	if is_instance_valid(soundscape):soundscape.play_ui()
 	if local_panel == "journal":
 		journal_generation += 1
 		journal_pages.clear()
@@ -733,12 +830,12 @@ func _poll() -> void:
 	var result: Error = poll_http.request(backend_url + "/state", PackedStringArray(["Authorization: Bearer " + session_token]))
 	if result != OK:
 		poll_busy = false
-		_connection_error("无法请求本机引擎。请检查启动窗口。")
+		_connection_error(L.t("无法请求本机引擎。请检查启动窗口。"))
 
 func _post(route: String, body: Dictionary) -> void:
 	if action_busy: return
 	if backend_url.is_empty() or not connection_ready:
-		_connection_error("本机引擎尚未连接。请通过启动脚本运行。")
+		_connection_error(L.t("本机引擎尚未连接。请通过启动脚本运行。"))
 		switch_after_action = false
 		return
 	action_busy = true
@@ -749,19 +846,19 @@ func _post(route: String, body: Dictionary) -> void:
 	if result != OK:
 		action_busy = false
 		switch_after_action = false
-		_connection_error("动作未能发送。")
+		_connection_error(L.t("动作未能发送。"))
 
 func _send_action(body: Dictionary) -> void:
 	_post("/action", body)
 
 func _decode(result: int, code: int, body: PackedByteArray) -> Dictionary:
 	if result != HTTPRequest.RESULT_SUCCESS:
-		return {"error": "本机连接中断；没有自动重发动作，避免重复扣款。"}
+		return {"error": L.t("本机连接中断；没有自动重发动作，避免重复扣款。")}
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
 	if not parsed is Dictionary:
-		return {"error": "引擎返回了不可解析的响应。"}
+		return {"error": L.t("引擎返回了不可解析的响应。")}
 	if code != 200 and not parsed.has("error"):
-		return {"error": "引擎响应 HTTP " + str(code)}
+		return {"error": L.t("引擎响应 HTTP ") + str(code)}
 	return parsed
 
 func _poll_complete(result: int, code: int, _headers_unused: PackedStringArray, body: PackedByteArray) -> void:
@@ -821,80 +918,90 @@ func _accept_snapshot(data: Dictionary) -> void:
 		if atlas_panel.visible:atlas_panel.refresh()
 	start_button.disabled = action_busy or not connection_ready
 	continue_button.disabled = action_busy or not bool(state.get("started", false)) or not connection_ready
-	start_button.text = "开始另一段旅程" if bool(state.get("started", false)) else "开始新旅程"
+	start_button.text = L.t("开始另一段旅程") if bool(state.get("started", false)) else L.t("开始新旅程")
 	return_button.visible = bool(state.get("started", false))
 	if first_snapshot:
 		first_snapshot = false
 		_sync_configuration()
+		if str(state.get("configuration",{}).get("language","zh"))!=L.language:_send_language()
 		if state.get("region") is Dictionary:
 			setting_input.text = str(state.get("setting", setting_input.text))
-	form_error.text = last_action_error if not last_action_error.is_empty() else "本机引擎已连接。" + ("找到存档，可继续旅途。" if bool(state.get("started", false)) else "")
+	form_error.text = L.system_text(last_action_error) if not last_action_error.is_empty() else L.t("本机引擎已连接。") + (L.t("找到存档，可继续旅途。") if bool(state.get("started", false)) else "")
 	_render()
 
 func _connection_error(message: String) -> void:
+	message=L.system_text(message)
 	if is_instance_valid(form_error): form_error.text = message
 	if is_instance_valid(error_label): error_label.text = message
 
 func _render() -> void:
 	if not bool(state.get("started", false)): return
+	if is_instance_valid(soundscape):soundscape.update_state(state,game.visible)
 	world_view.update_world(state)
 	var r: Dictionary = state.region if state.get("region") is Dictionary else {}
 	loading_overlay.visible = r.is_empty()
 	loading_premise.text = str(state.get("setting",""))
 	var p: Dictionary = state.get("player", {})
-	title_label.text = str(r.get("name", "你的世界正在形成"))
+	title_label.text = str(r.get("name", L.t("你的世界正在形成")))
 	var day: int = int(float(state.get("time", 480)) / 1440.0) + 1
 	var hour: int = int(float(state.get("time", 480)) / 60.0) % 24
 	var minute: int = int(state.get("time", 480)) % 60
-	subtitle_label.text = "%s  ·  第 %d 天 %02d:%02d  ·  已抵达 %d 区域" % [str(state.get("title", "未写之境")), day, hour, minute, int(state.get("map_count", 0))]
+	var world_title: String = str(state.get("title",L.t("未写之境")))
+	if world_title=="未写之境 · Everweave":world_title=L.t("未写之境")
+	subtitle_label.text = L.t("%s  ·  第 %d 天 %02d:%02d  ·  已抵达 %d 区域") % [world_title, day, hour, minute, int(state.get("map_count", 0))]
 	stats_label.text = "Lv.%d   %d G\nHP %d / %d   MP %d / %d" % [int(p.get("level", 1)), int(p.get("gold", 0)), int(p.get("hp", 0)), int(p.get("max_hp", 1)), int(p.get("mp", 0)), int(p.get("max_mp", 1))]
 	hp_bar.max_value = float(p.get("max_hp", 1))
 	hp_bar.value = float(p.get("hp", 0))
 	mp_bar.max_value = float(p.get("max_mp", 1))
 	mp_bar.value = float(p.get("mp", 0))
-	health_label.text = "生命  %d / %d" % [int(p.get("hp",0)),int(p.get("max_hp",0))]
-	energy_label.text = "魔力  %d / %d" % [int(p.get("mp",0)),int(p.get("max_mp",0))]
-	var rules: Dictionary = {"normal": "", "no_magic": "静默领域：无法使用魔法", "healing_rain": "治愈之雨：步行 / 战斗缓慢回血", "volatile": "易燃世界：双方伤害增加", "echo": "回声：每第三回合攻击重复"}
+	health_label.text = L.t("生命  %d / %d") % [int(p.get("hp",0)),int(p.get("max_hp",0))]
+	energy_label.text = L.t("魔力  %d / %d") % [int(p.get("mp",0)),int(p.get("max_mp",0))]
+	var rules: Dictionary = {"normal": "", "no_magic": L.t("静默领域：无法使用魔法"), "healing_rain": L.t("治愈之雨：步行 / 战斗缓慢回血"), "volatile": L.t("易燃世界：双方伤害增加"), "echo": L.t("回声：每第三回合攻击重复")}
 	rule_label.text = str(rules.get(str(r.get("rule", "normal")), ""))
 	rule_label.visible = not rule_label.text.is_empty()
 	var lines: Array[String] = []
 	for q in View.objectives(state):
 		if str(q.get("region","")) != str(r.get("id", "")): continue
-		lines.append("·  " + str(q.get("name","未完的事")))
+		lines.append("·  " + str(q.get("name",L.t("未完的事"))))
 		if lines.size() >= 3: break
-	quest_label.text = "\n".join(lines) if not lines.is_empty() else "探索四周，找到正在等待你的事。"
+	quest_label.text = "\n".join(lines) if not lines.is_empty() else L.t("探索四周，找到正在等待你的事。")
 	status_summary.text = View.summary(state)
 	var d: Dictionary = state.get("director", {})
 	var mode: String = str(d.get("mode", "not_configured"))
-	var mode_text: String = "离线演示 · 非 LLM" if mode == "offline_demo" else "在线 · " + str(d.get("model", ""))
-	if mode == "not_configured": mode_text = "尚未配置导演"
-	if mode == "live_llm": mode_text += " · 思考 " + str(d.get("reasoning_effort", "low"))
+	var mode_text: String = L.t("离线演示 · 非 LLM") if mode == "offline_demo" else L.t("在线 · ") + str(d.get("model", ""))
+	if mode == "not_configured": mode_text = L.t("尚未配置导演")
+	if mode == "live_llm": mode_text += L.t(" · 思考 ") + str(d.get("reasoning_effort", "low"))
 	var active_lines: Array[String] = []
 	for task in d.get("active_tasks", []):
-		var purpose: String = "世界变化" if str(task.kind) == "reaction" else ("更新草案" if str(task.get("source", "")) == "refresh" else "自动预生成")
-		var stage: String = " · 修复中" if str(task.get("phase", "")) == "repairing" else (" · 校验中" if str(task.get("phase", "")) == "validating" else "")
-		active_lines.append("%s %s · %.0f 秒%s" % [purpose, str(task.name), float(task.get("elapsed_seconds", 0)), stage])
+		var purpose: String = L.t("世界变化") if str(task.kind) == "reaction" else (L.t("更新草案") if str(task.get("source", "")) == "refresh" else L.t("自动预生成"))
+		var stage: String = L.t(" · 修复中") if str(task.get("phase", "")) == "repairing" else (L.t(" · 校验中") if str(task.get("phase", "")) == "validating" else "")
+		active_lines.append(L.t("%s %s · %.0f 秒%s") % [purpose, str(task.name), float(task.get("elapsed_seconds", 0)), stage])
 	var activity: String = "\n".join(active_lines) if not active_lines.is_empty() else str(d.get("busy", ""))
-	director_label.text = mode_text + "\n" + (activity if not activity.is_empty() else ("导演已暂停" if bool(d.get("paused", false)) else "等待重要事件 · 不按帧调用"))
+	director_label.text = mode_text + "\n" + (activity if not activity.is_empty() else (L.t("导演已暂停") if bool(d.get("paused", false)) else L.t("等待重要事件 · 不按帧调用")))
 	var failed_tasks: Array = d.get("failed_tasks", [])
-	director_label.text += "\n请求 %d / %d · 其中修复 %d" % [int(d.get("calls", 0)), int(d.get("max_calls", 60)), int(d.get("repair_calls", 0))]
-	director_label.text += "\n已应用 %d · 过期 %d · 失败任务 %d" % [int(d.get("accepted", 0)), int(d.get("stale", 0)), failed_tasks.size()]
-	director_label.text += "\n在途 %d · 本地纠正 %d 处\n输入 %d / 输出 %d tokens" % [int(d.get("active_requests", 0)), int(d.get("normalization_count", 0)), int(d.get("input_tokens", 0)), int(d.get("output_tokens", 0))]
-	director_label.text += "\n提前两层 · 已准备 %d / %d 区域" % [int(d.get("prefetch_ready", 0)), int(d.get("prefetch_total", 0))]
+	director_label.text += L.t("\n请求 %d / %d · 其中修复 %d") % [int(d.get("calls", 0)), int(d.get("max_calls", 60)), int(d.get("repair_calls", 0))]
+	director_label.text += L.t("\n已应用 %d · 过期 %d · 失败任务 %d") % [int(d.get("accepted", 0)), int(d.get("stale", 0)), failed_tasks.size()]
+	director_label.text += L.t("\n在途 %d · 本地纠正 %d 处\n输入 %d / 输出 %d tokens") % [int(d.get("active_requests", 0)), int(d.get("normalization_count", 0)), int(d.get("input_tokens", 0)), int(d.get("output_tokens", 0))]
+	director_label.text += L.t("\n提前两层 · 已准备 %d / %d 区域") % [int(d.get("prefetch_ready", 0)), int(d.get("prefetch_total", 0))]
+	var library_usage: Dictionary = r.get("library_usage",{})
+	if not library_usage.is_empty():
+		director_label.text += L.t("\n图形：引用 %d · 组合 %d · 原创 %d\n地表材质 %d · 能力模块 %d") % [int(library_usage.get("referenced",0)),int(library_usage.get("composed",0)),int(library_usage.get("drawn",0)),int(library_usage.get("materials",0)),int(library_usage.get("modules",0))]
 	lines.clear()
 	for f in state.get("frontier", []):
-		var status_text: String = "可进入" if bool(f.ready) else ("已暂停" if bool(d.get("paused", false)) else "排队中")
+		var status_text: String = L.t("可进入") if bool(f.ready) else (L.t("已暂停") if bool(d.get("paused", false)) else L.t("排队中"))
 		for failure in failed_tasks:
-			if str(failure.target) == str(f.id) and str(failure.kind) == "region" and not bool(f.ready): status_text = "生成失败"
+			if str(failure.target) == str(f.id) and str(failure.kind) == "region" and not bool(f.ready): status_text = L.t("生成失败")
 		for task in d.get("active_tasks", []):
 			if str(task.target) == str(f.id) and str(task.kind) == "region":
-				status_text = ("可进入，后台更新" if bool(f.ready) else "修复中" if str(task.get("phase", "")) == "repairing" else "生成中") + " · %.0f秒" % float(task.get("elapsed_seconds", 0))
+				status_text = (L.t("可进入，后台更新") if bool(f.ready) else L.t("修复中") if str(task.get("phase", "")) == "repairing" else L.t("生成中")) + L.t(" · %.0f秒") % float(task.get("elapsed_seconds", 0))
 		lines.append(("● " if bool(f.ready) else "○ ") + str(f.name) + " · " + status_text)
-	frontier_label.text = "下一片土地\n" + "\n".join(lines)
+	frontier_label.text = L.t("下一片土地\n") + "\n".join(lines)
 	error_label.text = last_action_error if not last_action_error.is_empty() else (str(d.get("error", "")) if failed_tasks.is_empty() else "")
+	var library_error: String = preload("res://client/asset_library.gd").last_error
+	if not library_error.is_empty():error_label.text = library_error
 	retry_failed_button.disabled = failed_tasks.is_empty()
 	_render_failures(failed_tasks)
-	pause_button.text = "继续生成" if bool(d.get("paused", false)) else "暂停生成"
+	pause_button.text = L.t("继续生成") if bool(d.get("paused", false)) else L.t("暂停生成")
 	var history: Array = state.get("journal", [])
 	lines.clear()
 	for i in range(maxi(0, history.size() - 1), history.size()):
@@ -909,28 +1016,28 @@ func _render_failures(tasks: Array) -> void:
 	for child in failure_list.get_children():
 		failure_list.remove_child(child)
 		child.queue_free()
-	var categories: Dictionary = {"format":"格式", "reference":"身份与引用", "gameplay":"玩法与地图", "provider":"模型服务", "internal":"引擎处理"}
+	var categories: Dictionary = {"format":L.t("格式"), "reference":L.t("身份与引用"), "gameplay":L.t("玩法与地图"), "provider":L.t("模型服务"), "internal":L.t("引擎处理")}
 	for task in tasks:
 		var row := VBoxContainer.new()
 		failure_list.add_child(row)
-		var kind: String = "地区生成" if str(task.kind) == "region" else "世界变化"
-		_label(row, "%s · %s失败" % [str(task.name), kind], 14, Color("e7a69d"))
+		var kind: String = L.t("地区生成") if str(task.kind) == "region" else L.t("世界变化")
+		_label(row, L.t("%s · %s失败") % [str(task.name), kind], 14, Color("e7a69d"))
 		var details: Array = task.get("issues", [])
-		var reason: String = str(task.get("message", "生成未完成"))
+		var reason: String = str(task.get("message", L.t("生成未完成")))
 		if not details.is_empty():
 			var field_path: String = str(details[0].get("path", "$"))
 			reason = (field_path + "\n" if field_path != "$" else "") + str(details[0].get("message", reason))
-			if details.size() > 1: reason += "\n另有 %d 项问题，重试时一并修复。" % (details.size() - 1)
-		var friendly: Dictionary = {"format":"部分内容需要调整。", "reference":"物品或人物信息还需核对。", "gameplay":"道路或交互需要修复。", "provider":"生成服务暂时没有完成请求。"}
-		var detail_label := _label(row, str(friendly.get(str(task.get("category","format")),"内容准备未完成。")), 12, MUTED)
+			if details.size() > 1: reason += L.t("\n另有 %d 项问题，重试时一并修复。") % (details.size() - 1)
+		var friendly: Dictionary = {"format":L.t("部分内容需要调整。"), "reference":L.t("物品或人物信息还需核对。"), "gameplay":L.t("道路或交互需要修复。"), "provider":L.t("生成服务暂时没有完成请求。")}
+		var detail_label := _label(row, str(friendly.get(str(task.get("category","format")),L.t("内容准备未完成。"))), 12, MUTED)
 		detail_label.tooltip_text = reason + "\n" + JSON.stringify(details, "  ")
 		if str(task.kind) == "region":
-			_button(row,"放弃候选，重新创作",_offer_redesign.bind(str(task.target),str(task.name)))
-		_button(row, "重试此任务", _post.bind("/retry", {"target":str(task.target), "kind":str(task.kind)}))
+			_button(row,L.t("放弃候选，重新创作"),_offer_redesign.bind(str(task.target),str(task.name)))
+		_button(row, L.t("重试此任务"), _post.bind("/retry", {"target":str(task.target), "kind":str(task.kind)}))
 
 func _offer_redesign(target: String, name: String) -> void:
 	pending_redesign = {"target":target,"kind":"region","mode":"redesign"}
-	redesign_dialog.dialog_text = "舍弃「" + name + "」上次失败的候选内容，按同一目的地重新创作。已有地图不会被删除，新请求仍计入额度。"
+	redesign_dialog.dialog_text = L.t("舍弃「") + name + L.t("」上次失败的候选内容，按同一目的地重新创作。已有地图不会被删除，新请求仍计入额度。")
 	redesign_dialog.popup_centered(Vector2i(540,220))
 
 func _clear_modal() -> void:
@@ -964,7 +1071,7 @@ func _render_modal() -> void:
 	modal_overlay.show()
 	if not battle.is_empty():
 		_label(modal_stack, str(battle.name), 24, GOLD)
-		_label(modal_stack, "HP %d / %d   ·   回合 %d" % [int(battle.hp), int(battle.max_hp), int(battle.turn)], 15, MUTED)
+		_label(modal_stack, L.t("HP %d / %d   ·   回合 %d") % [int(battle.hp), int(battle.max_hp), int(battle.turn)], 15, MUTED)
 		battle_canvas = BattleView.new()
 		battle_canvas.custom_minimum_size = Vector2(510, 215)
 		modal_stack.add_child(battle_canvas)
@@ -983,50 +1090,51 @@ func _render_modal() -> void:
 				var b := _button(buttons, str(index + 1) + " " + str(entry.label), _send_action.bind({"op":"combat","move":"rule:"+str(entry.id)}))
 				b.disabled = not bool(entry.enabled)
 				b.tooltip_text = str(entry.description)
-				if b.disabled: _label(modal_stack, str(entry.label) + "：" + str(entry.get("blocked_reason", entry.description)), 13, MUTED)
-			_button(buttons, "撤離 · Esc", _send_action.bind({"op":"combat","move":"flee"}))
+				if b.disabled: _label(modal_stack, str(entry.label) + "：" + L.system_text(str(entry.get("blocked_reason", entry.description))), 13, MUTED)
+			_button(buttons, L.t("撤離 · Esc"), _send_action.bind({"op":"combat","move":"flee"}))
 			return
-		for entry in [["1 攻击", "attack"], ["2 星火术 · 5MP", "skill"], ["3 防御", "defend"], ["4 药剂", "potion"], ["5 撤离", "flee"]]:
+		for entry in [[L.t("1 攻击"), "attack"], [L.t("2 星火术 · 5MP"), "skill"], [L.t("3 防御"), "defend"], [L.t("4 药剂"), "potion"], [L.t("5 撤离"), "flee"]]:
 			var b := _button(buttons, str(entry[0]), _send_action.bind({"op": "combat", "move": entry[1]}))
 			if entry[1] == "skill": b.disabled = int(state.player.mp) < 5 or state.region.rule == "no_magic"
 			if entry[1] == "potion": b.disabled = int(state.player.inventory.get("potion", 0)) < 1
 		return
 	if not ui.is_empty():
 		if ui.get("kind") == "pending_exit":
-			_label(modal_stack, "可以进入下一地区了" if waiting_phase == "ready" else "正在准备 " + str(ui.get("name", "下一地区")), 24, GOLD)
-			var explanation: String = "地图由后台自动提前准备，无需反复触发出口。你也可以先回去探索。"
-			if waiting_phase == "failed": explanation = "这个地区的生成未通过校验，可重试此任务；其他地区会继续准备。"
-			elif waiting_phase == "paused": explanation = "后台已暂停追加请求，可在右侧继续导演。"
-			elif waiting_phase == "ready": explanation = "地图已准备好，按 E 或点击下方按钮即可进入。"
+			_label(modal_stack, L.t("可以进入下一地区了") if waiting_phase == "ready" else L.t("正在准备 ") + str(ui.get("name", L.t("下一地区"))), 24, GOLD)
+			var explanation: String = L.t("地图由后台自动提前准备，无需反复触发出口。你也可以先回去探索。")
+			if waiting_phase == "failed": explanation = L.t("这个地区的生成未通过校验，可重试此任务；其他地区会继续准备。")
+			elif waiting_phase == "paused": explanation = L.t("后台已暂停追加请求，可在右侧继续导演。")
+			elif waiting_phase == "ready": explanation = L.t("地图已准备好，按 E 或点击下方按钮即可进入。")
 			_label(modal_stack, explanation, 18)
-			if waiting_phase == "ready": _button(modal_stack, "进入 " + str(ui.get("name", "下一地区")) + " · E", _send_action.bind({"op":"enter_exit"}))
-			elif waiting_phase == "failed": _button(modal_stack, "重试这个地区", _post.bind("/retry", {"target":str(ui.target),"kind":"region"}))
-			_button(modal_stack, "继续探索当前地区 · Esc", _send_action.bind({"op":"close"}))
+			if waiting_phase == "ready": _button(modal_stack, L.t("进入 ") + str(ui.get("name", L.t("下一地区"))) + " · E", _send_action.bind({"op":"enter_exit"}))
+			elif waiting_phase == "failed": _button(modal_stack, L.t("重试这个地区"), _post.bind("/retry", {"target":str(ui.target),"kind":"region"}))
+			_button(modal_stack, L.t("继续探索当前地区 · Esc"), _send_action.bind({"op":"close"}))
 			return
-		_label(modal_stack, str(ui.get("title", "")), 24, GOLD)
+		var modal_title: String = str(ui.get("title",""))
+		_label(modal_stack,L.t(modal_title) if ui.get("system_title",false) else modal_title,24,GOLD)
 		var message_lines: Array[String] = []
 		for line in ui.get("lines", []): message_lines.append(str(line))
 		_label(modal_stack, "\n\n".join(message_lines), 18)
 		if ui.get("kind") == "actions" and ui.get("actions", []).is_empty():
-			_label(modal_stack, "这里暂时没有可用的自定义操作。走近人物或物件后按 E 交互，或继续探索其他位置。", 16, MUTED)
+			_label(modal_stack, L.t("这里暂时没有可用的自定义操作。走近人物或物件后按 E 交互，或继续探索其他位置。"), 16, MUTED)
 		for entry in ui.get("actions", []):
 			var b := _button(modal_stack, str(entry.label), _send_action.bind({"op":"content_action","id":entry.id}))
 			b.disabled = not bool(entry.enabled)
 			b.tooltip_text = str(entry.description)
-			if b.disabled: _label(modal_stack, str(entry.get("blocked_reason", entry.description)), 14, MUTED)
+			if b.disabled: _label(modal_stack, L.system_text(str(entry.get("blocked_reason", entry.description))), 14, MUTED)
 		for ch in ui.get("choices", []):
 			_button(modal_stack, str(ch.text), _send_action.bind({"op": "choice", "id": ch.id}))
 		if ui.get("kind") == "shop":
 			for item in ui.get("goods", []):
 				var b := _button(modal_stack, "%s  ·  %d G" % [str(item.name), int(item.price)], _send_action.bind({"op": "buy", "id": item.id}))
 				b.disabled = int(state.player.gold) < int(item.price)
-		_button(modal_stack, "返回  ·  E / Esc", _send_action.bind({"op": "close"}))
+		_button(modal_stack, L.t("返回  ·  E / Esc"), _send_action.bind({"op": "close"}))
 		return
 	if local_panel == "inventory":
 		Fieldbook.inventory(self,modal_stack)
 	else:
 		Fieldbook.journal(self,modal_stack)
-	_button(modal_stack, "收起  ·  Esc", func() -> void:
+	_button(modal_stack, L.t("收起  ·  Esc"), func() -> void:
 		local_panel = ""
 		modal_signature = ""
 		_render_modal()

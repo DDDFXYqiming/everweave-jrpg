@@ -149,6 +149,9 @@ def effects(value, depth=0):
         elif op == 'message':
             obj(raw, op, ('op', 'text'), ('op', 'text'))
             out = dict(op=op, text=expression(raw['text']))
+        elif op in ('sound','music'):
+            obj(raw,op,('op','cue'),('op','cue'))
+            out=dict(op=op,cue=ident(raw['cue']))
         elif op == 'emit':
             obj(raw, op, ('op', 'event'), ('op', 'event'))
             out = dict(op=op, event=event_name(raw['event']))
@@ -212,7 +215,7 @@ def point(value, width, height):
 def paint_commands(value, width, height):
     result = []
     for raw in arr(value, 'scene paint', 96):
-        obj(raw, 'paint command', ('rect', 'room', 'line', 'width', 'tile', 'surface', 'doors'), ('tile',))
+        obj(raw, 'paint command', ('rect', 'room', 'line', 'width', 'tile', 'surface', 'doors','wall_surface','door_surface'), ('tile',))
         shapes = set(raw) & {'rect', 'room', 'line'}
         if len(shapes) != 1: raise InvalidPatch('paint needs exactly one rect, room or line')
         shape = next(iter(shapes)); out = dict(tile=tile(raw['tile']))
@@ -226,6 +229,10 @@ def paint_commands(value, width, height):
             out['line'] = [point(p, width, height) for p in arr(raw['line'], 'line', 20, 2)]
             out['width'] = integer(raw.get('width', 1), 1, 6)
         if 'surface' in raw: out['surface'] = ident(raw['surface'])
+        for field in ('wall_surface','door_surface'):
+            if field in raw:
+                if shape!='room':raise InvalidPatch(field+' requires a room command')
+                out[field]=ident(raw[field])
         if 'doors' in raw:
             if shape != 'room': raise InvalidPatch('doors require room')
             out['doors'] = [point(p, width, height) for p in arr(raw['doors'], 'doors', 8)]
