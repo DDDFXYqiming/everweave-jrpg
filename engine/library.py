@@ -25,7 +25,7 @@ def resolve(key,kind=None,pinned=None):
     entry=catalog()[key]
     if kind and entry['kind'] not in ((kind,) if isinstance(kind,str) else kind):
         raise InvalidPatch('library asset has the wrong media type',category='reference',value=key,expected=str(kind))
-    if pinned is not None and pinned!=entry['sha256']:
+    if pinned is not None and pinned!=entry['sha256'] and pinned not in entry.get('legacy_hashes',[]):
         raise InvalidPatch('library asset revision differs from saved content',category='reference',value=key,expected=entry['sha256'])
     file=(ROOT/entry['file']).resolve()
     if not file.is_relative_to((ROOT/'assets/library/blobs').resolve()):raise InvalidPatch('asset escapes the local library')

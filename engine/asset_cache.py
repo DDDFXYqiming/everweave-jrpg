@@ -7,10 +7,12 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import struct
 import sys
 import tempfile
 import urllib.request
 import zipfile
+import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_PACKAGE = 20_000_000
@@ -18,6 +20,22 @@ MAX_PACKAGE = 20_000_000
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def encode_rgba(width, height, pixels):
+    """A canonical PNG: no filters, stored DEFLATE blocks, no encoder-dependent bits."""
+    if not (8<=width<=96 and 8<=height<=96 and len(pixels)==width*height*4):
+        raise ValueError('Invalid composed RGBA image')
+    raw=b''.join(b'\x00'+pixels[y*width*4:(y+1)*width*4] for y in range(height))
+    blocks=[]
+    for start in range(0,len(raw),65535):
+        block=raw[start:start+65535]
+        blocks.append(bytes([int(start+len(block)==len(raw))])+struct.pack('<HH',len(block),65535-len(block))+block)
+    compressed=b'\x78\x01'+b''.join(blocks)+struct.pack('>I',zlib.adler32(raw))
+    def chunk(kind,data):
+        return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data))
+    return (b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',width,height,8,6,0,0,0))
+            +chunk(b'IDAT',compressed)+chunk(b'IEND',b''))
 
 
 def asset_path(root, entry):
@@ -141,9 +159,7 @@ def prepare(root=ROOT, *, download=False, cache=None, verify_only=False, progres
                             for x, tile in enumerate(row):
                                 picture = Image.open(io.BytesIO(member(f'Tiles/tile_{tile:04d}.png'))).convert('RGBA')
                                 canvas.alpha_composite(picture, (x*16, y*16))
-                        output = io.BytesIO()
-                        canvas.save(output, format='PNG')
-                        data = output.getvalue()
+                        data = encode_rgba(canvas.width,canvas.height,canvas.tobytes())
                     else:
                         raise ValueError(f'{key}: no source member or assembly recipe')
             else:

@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+import struct
+import zlib
 
 from engine import asset_cache as cache
 
@@ -79,6 +81,19 @@ class AssetCacheTests(unittest.TestCase):
         class Response(io.BytesIO):url='https://example.com/a'
         with patch('urllib.request.urlopen',return_value=Response(b'wrong')):
             with self.assertRaisesRegex(ValueError,'hash'):cache.fetch('https://example.com/a','0'*64)
+
+    def test_canonical_png_decodes_to_exact_rgba_without_a_platform_encoder(self):
+        pixels=bytes(range(256));png=cache.encode_rgba(8,8,pixels)
+        self.assertEqual(png[:8],b'\x89PNG\r\n\x1a\n')
+        cursor=8;payload=b''
+        while cursor<len(png):
+            count=struct.unpack('>I',png[cursor:cursor+4])[0]
+            kind=png[cursor+4:cursor+8];data=png[cursor+8:cursor+8+count]
+            if kind==b'IDAT':payload+=data
+            cursor+=12+count
+        raw=zlib.decompress(payload)
+        self.assertEqual(b''.join(raw[y*33+1:y*33+33] for y in range(8)),pixels)
+        self.assertEqual(cache.encode_rgba(8,8,pixels),png)
 
 
 if __name__=='__main__':unittest.main()

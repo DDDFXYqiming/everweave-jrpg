@@ -9,10 +9,13 @@ import io
 import json
 from pathlib import Path
 import re
+import sys
 import urllib.request
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
+from engine.asset_cache import encode_rgba
 LIB=ROOT/'assets/library'
 CACHE=ROOT/'userdata/library-ingest'
 
@@ -59,6 +62,8 @@ def main():
         if path.exists():assert digest(path.read_bytes())==sha
         else:path.write_bytes(data)
         if suffix=='.ogg':meta.update(ogg_metadata(data))
+        if 'derived_from_tiles' in meta:meta['encoding']='rgba_png_stored_v1'
+        if assets.get(key,{}).get('legacy_hashes'):meta['legacy_hashes']=assets[key]['legacy_hashes']
         assets[key]=dict(name=name,kind=kind,roles=roles,tags=tags.split(),source=source,
                          sha256=sha,file=rel.as_posix(),bytes=len(data),**meta)
     for source,spec in sources.items():
@@ -98,7 +103,7 @@ def main():
                                 for x,n in enumerate(row):
                                     tile=Image.open(io.BytesIO(archive.read(f'Tiles/tile_{n:04d}.png'))).convert('RGBA')
                                     image.alpha_composite(tile,(x*16,y*16))
-                            output=io.BytesIO();image.save(output,format='PNG')
+                            output=io.BytesIO(encode_rgba(image.width,image.height,image.tobytes()))
                             role='building' if 'house' in title else 'vegetation'
                             add(prefix+'_'+title,output.getvalue(),'.png',source,title.replace('_',' '),'image',[role],theme+' '+title.replace('_',' '),size=[48,48],perspective='top_down',family='kenney_tiny',anchor='bottom_center',footprint=[3,2] if role=='building' else [2,1],animation='static',derived_from_tiles=tiles,curated=True)
                         # Tall trees are a crown over its matching trunk tile. The
@@ -108,7 +113,7 @@ def main():
                         for title,tiles in {'pine':[4,16],'autumn_tree':[3,15]}.items():
                             image=Image.new('RGBA',(16,32))
                             for y,n in enumerate(tiles):image.alpha_composite(Image.open(io.BytesIO(archive.read(f'Tiles/tile_{n:04d}.png'))).convert('RGBA'),(0,y*16))
-                            output=io.BytesIO();image.save(output,format='PNG')
+                            output=io.BytesIO(encode_rgba(image.width,image.height,image.tobytes()))
                             add('town_v2_'+title,output.getvalue(),'.png',source,title.replace('_',' '),'image',['vegetation'],theme+' tree '+title.replace('_',' '),size=[16,32],perspective='top_down',family='kenney_tiny',anchor='bottom_center',footprint=[1,1],animation='static',derived_from_tiles=[[n] for n in tiles],curated=True)
                 else:
                     for name in names:

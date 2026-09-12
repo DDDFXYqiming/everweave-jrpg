@@ -4507,9 +4507,9 @@
         "house"
       ],
       "source": "tiny_town",
-      "sha256": "612bb2c454f6700004edcc241251c847d72d4265343ce848d25cbcf7353c9446",
-      "file": "assets/library/blobs/612bb2c454f6700004edcc241251c847d72d4265343ce848d25cbcf7353c9446.png",
-      "bytes": 836,
+      "sha256": "10d05c52808a2d8808999abfa340f498e9eb5304f060ce5b61d265792fc12493",
+      "file": "assets/library/blobs/10d05c52808a2d8808999abfa340f498e9eb5304f060ce5b61d265792fc12493.png",
+      "bytes": 9332,
       "size": [
         48,
         48
@@ -4539,7 +4539,11 @@
           75
         ]
       ],
-      "curated": true
+      "curated": true,
+      "legacy_hashes": [
+        "612bb2c454f6700004edcc241251c847d72d4265343ce848d25cbcf7353c9446"
+      ],
+      "encoding": "rgba_png_stored_v1"
     },
     "town_v1_red_house": {
       "name": "red house",
@@ -4555,9 +4559,9 @@
         "house"
       ],
       "source": "tiny_town",
-      "sha256": "caafe1633db230b26900a744646f9b839e413a641b24dfc2807268a7f15272b2",
-      "file": "assets/library/blobs/caafe1633db230b26900a744646f9b839e413a641b24dfc2807268a7f15272b2.png",
-      "bytes": 830,
+      "sha256": "34044e107b3e68cb290838fb4a9f4e8c5ad1df4c8c305ba81d4b4b04969fc96c",
+      "file": "assets/library/blobs/34044e107b3e68cb290838fb4a9f4e8c5ad1df4c8c305ba81d4b4b04969fc96c.png",
+      "bytes": 9332,
       "size": [
         48,
         48
@@ -4587,7 +4591,11 @@
           79
         ]
       ],
-      "curated": true
+      "curated": true,
+      "legacy_hashes": [
+        "caafe1633db230b26900a744646f9b839e413a641b24dfc2807268a7f15272b2"
+      ],
+      "encoding": "rgba_png_stored_v1"
     },
     "town_v1_large_tree": {
       "name": "large tree",
@@ -4603,9 +4611,9 @@
         "tree"
       ],
       "source": "tiny_town",
-      "sha256": "c19803dd4439a6797ba0affeea2ac545182022b9612af08b16e3018f2579e799",
-      "file": "assets/library/blobs/c19803dd4439a6797ba0affeea2ac545182022b9612af08b16e3018f2579e799.png",
-      "bytes": 731,
+      "sha256": "3dbad6d0a02da9aa42e26d959e9e21a65a77a4cb4303ebb72c70cf825f20dc8f",
+      "file": "assets/library/blobs/3dbad6d0a02da9aa42e26d959e9e21a65a77a4cb4303ebb72c70cf825f20dc8f.png",
+      "bytes": 9332,
       "size": [
         48,
         48
@@ -4635,7 +4643,11 @@
           32
         ]
       ],
-      "curated": false
+      "curated": false,
+      "legacy_hashes": [
+        "c19803dd4439a6797ba0affeea2ac545182022b9612af08b16e3018f2579e799"
+      ],
+      "encoding": "rgba_png_stored_v1"
     },
     "town_v1_autumn_tree": {
       "name": "autumn tree",
@@ -4651,9 +4663,9 @@
         "tree"
       ],
       "source": "tiny_town",
-      "sha256": "4eeebfa8f4474fffac582906a31b7ca420a674030918018f2d3abff0bd5679e6",
-      "file": "assets/library/blobs/4eeebfa8f4474fffac582906a31b7ca420a674030918018f2d3abff0bd5679e6.png",
-      "bytes": 730,
+      "sha256": "525110110f5b2e115b364766c23cc447f467060321060c31ab7fbde5c1c55188",
+      "file": "assets/library/blobs/525110110f5b2e115b364766c23cc447f467060321060c31ab7fbde5c1c55188.png",
+      "bytes": 9332,
       "size": [
         48,
         48
@@ -4683,7 +4695,11 @@
           35
         ]
       ],
-      "curated": false
+      "curated": false,
+      "legacy_hashes": [
+        "4eeebfa8f4474fffac582906a31b7ca420a674030918018f2d3abff0bd5679e6"
+      ],
+      "encoding": "rgba_png_stored_v1"
     },
     "dungeon_v1_floor": {
       "name": "floor",
@@ -12841,9 +12857,9 @@
         "pine"
       ],
       "source": "tiny_town",
-      "sha256": "ae2e961eddc529e9560d91c93bcee99551427b7bf621b9d8357775a453e11c9d",
-      "file": "assets/library/blobs/ae2e961eddc529e9560d91c93bcee99551427b7bf621b9d8357775a453e11c9d.png",
-      "bytes": 327,
+      "sha256": "8a7887aa44b40a02573afbd64568ec2331745c56e72a8cc0cec2d503e3b6bedf",
+      "file": "assets/library/blobs/8a7887aa44b40a02573afbd64568ec2331745c56e72a8cc0cec2d503e3b6bedf.png",
+      "bytes": 2148,
       "size": [
         16,
         32
@@ -12864,7 +12880,11 @@
           16
         ]
       ],
-      "curated": true
+      "curated": true,
+      "legacy_hashes": [
+        "ae2e961eddc529e9560d91c93bcee99551427b7bf621b9d8357775a453e11c9d"
+      ],
+      "encoding": "rgba_png_stored_v1"
     },
     "town_v2_autumn_tree": {
       "name": "autumn tree",
@@ -12881,9 +12901,9 @@
         "tree"
       ],
       "source": "tiny_town",
-      "sha256": "5b414d5d762a1c87b14e5c85b4d2899505a551d915cafba214bcb3840a1325c2",
-      "file": "assets/library/blobs/5b414d5d762a1c87b14e5c85b4d2899505a551d915cafba214bcb3840a1325c2.png",
-      "bytes": 331,
+      "sha256": "edf4f1009e582e55e10c5d8a7b01cf937a7c237d02df9f4cb0d8870c558bc4ba",
+      "file": "assets/library/blobs/edf4f1009e582e55e10c5d8a7b01cf937a7c237d02df9f4cb0d8870c558bc4ba.png",
+      "bytes": 2148,
       "size": [
         16,
         32
@@ -12904,7 +12924,11 @@
           15
         ]
       ],
-      "curated": true
+      "curated": true,
+      "legacy_hashes": [
+        "5b414d5d762a1c87b14e5c85b4d2899505a551d915cafba214bcb3840a1325c2"
+      ],
+      "encoding": "rgba_png_stored_v1"
     }
   }
 }

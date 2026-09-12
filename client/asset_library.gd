@@ -15,7 +15,7 @@ static func entry(id: String, pinned: String = "", kind: String = "") -> Diction
 		push_error(last_error)
 		return {}
 	var item: Dictionary = assets[id]
-	if (not pinned.is_empty() and pinned != str(item.sha256)) or (not kind.is_empty() and kind != str(item.kind)):
+	if (not pinned.is_empty() and pinned != str(item.sha256) and not pinned in item.get("legacy_hashes",[])) or (not kind.is_empty() and kind != str(item.kind)):
 		last_error = "素材版本或类型不匹配：" + id
 		push_error(last_error)
 		return {}

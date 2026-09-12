@@ -19,6 +19,12 @@ class HybridContentTests(unittest.TestCase):
     def test_all_shipped_library_entries_are_pinned_and_available(self):
         self.assertGreater(len(catalog()),400)
         for key in catalog():self.assertEqual(resolve(key)['sha256'],catalog()[key]['sha256'])
+    def test_old_composed_image_hashes_resolve_to_pixel_equivalent_canonical_files(self):
+        entry=catalog()['town_v1_blue_house']
+        self.assertTrue(entry['legacy_hashes'])
+        for legacy in entry['legacy_hashes']:
+            self.assertEqual(resolve('town_v1_blue_house','image',legacy)['sha256'],entry['sha256'])
+        with self.assertRaises(InvalidPatch):resolve('town_v1_blue_house','image','0'*64)
     def test_one_region_mixes_library_parts_original_pixels_and_modules(self):
         raw=hybrid_patch();before=copy.deepcopy(raw);self.w.apply_patch(raw,self.w.context())
         self.assertEqual(raw,before)

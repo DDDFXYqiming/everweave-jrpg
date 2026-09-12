@@ -21,7 +21,7 @@ flowchart TD
 
 ## 第一批素材
 
-425 个索引条目，总内容大小约 7.73 MB，少量同字节条目共享文件。包含 Kenney Tiny Town / Tiny Dungeon、RPG Audio / Interface Sounds，以及 4 首 CC0 音乐。原作者、版本、许可页、下载地址、包校验值见 [来源索引](../assets/library/sources.json) 与 [署名](../assets/library/CREDITS.md)。图片与 OGG 文件按 SHA-256 命名，运行时只接受索引 ID。
+425 个索引条目，总内容大小约 7.77 MB，少量同字节条目共享文件。包含 Kenney Tiny Town / Tiny Dungeon、RPG Audio / Interface Sounds，以及 4 首 CC0 音乐。原作者、版本、许可页、下载地址、包校验值见 [来源索引](../assets/library/sources.json) 与 [署名](../assets/library/CREDITS.md)。图片与 OGG 文件按 SHA-256 命名，运行时只接受索引 ID。
 
 图像记录尺寸、俯视适配、像素家族、锚点、占地、用途和原包成员。房屋、树木大图由明确的原始瓦片数组拼接。地表还标记大面积基底、装饰点缀或墙面用途，避免模型把高对比碎石铺满整座大厅。音频记录格式、采样率、通道、时长、循环起点、作者提供的循环/节拍信息和建议增益；建议增益不等于经过响度测量。
 
@@ -77,6 +77,8 @@ flowchart TD
 少量房屋、树木是拼接配方，重建时需要 Pillow。未安装时，启动器自动用 pip 将 Pillow 12.2.0 安装到 `userdata/library-tools`，不改系统 Python 包；准备好图像后，游玩和缓存核验都不依赖 Pillow。
 
 缓存目录自动写入 `.gdignore`。客户端直接解码这些原始 PNG/OGG，Godot 编辑器不再为额外库和下载缓存重复生成导入资源。
+
+拼接图使用 `rgba_png_stored_v1` 确定性编码，避免 Windows/Linux 压缩库差异改变文件哈希。迁移时逐像素核对原图，索引仅为这六张等像素拼接图记录已知的旧哈希兼容映射；其他未知哈希仍拒绝，下载的原始文件仍严格核对原始字节。
 
 可手动预下载或只读验证：
 
