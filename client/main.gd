@@ -4,12 +4,31 @@ extends Control
 
 const WorldView = preload("res://client/world_view.gd")
 const BattleView = preload("res://client/battle_view.gd")
-const BG := Color("0c1421")
-const PANEL := Color("142235")
-const MUTED := Color("9aaac0")
-const GOLD := Color("e7c795")
-const MINT := Color("83c9be")
+const View = preload("res://client/presentation.gd")
+const Icons = preload("res://client/ui_icons.gd")
+const Fieldbook = preload("res://client/fieldbook.gd")
+const BG := Color("111815")
+const PANEL := Color("202923")
+const MUTED := Color("a3ad9d")
+const GOLD := Color("dcc79e")
+const MINT := Color("a1b38b")
 
+var inventory_filter: String = "all"
+var selected_item: String = ""
+var journal_tab: String = "active"
+var item_art: Dictionary = {}
+var home_pages: Array[Control] = []
+var home_tabs: Array[Button] = []
+var display_button: Button
+var status_summary: Label
+var diagnostics: VBoxContainer
+var diagnostics_button: Button
+var modal_scroll: ScrollContainer
+var loading_overlay: CenterContainer
+var loading_premise: Label
+var health_label: Label
+var energy_label: Label
+var previous_window_mode: int = Window.MODE_WINDOWED
 var backend_url: String = ""
 var session_token: String = ""
 var state: Dictionary = {}
@@ -74,6 +93,7 @@ var failure_signature: String = ""
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	get_window().content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
 	_configure_theme()
 	_read_connection()
 	action_http = HTTPRequest.new()
@@ -110,27 +130,31 @@ func _configure_theme() -> void:
 	var t := Theme.new()
 	t.default_font = font
 	t.default_font_size = 16
-	t.set_color("font_color", "Label", Color("e6e9e6"))
-	t.set_color("font_color", "Button", Color("e5e8e4"))
+	t.set_color("font_color", "Label", Color("e8e4d8"))
+	t.set_color("font_color", "Button", Color("e8e4d8"))
 	t.set_color("font_hover_color", "Button", Color("fff2ce"))
-	t.set_color("font_disabled_color", "Button", Color("697b90"))
-	t.set_stylebox("normal", "Button", _box(Color("20374a"), Color("395569"), 7))
-	t.set_stylebox("hover", "Button", _box(Color("2b4d5b"), MINT, 7))
-	t.set_stylebox("pressed", "Button", _box(Color("172d40"), GOLD, 7))
-	t.set_stylebox("disabled", "Button", _box(Color("152331"), Color("26394b"), 7))
-	t.set_stylebox("normal", "LineEdit", _box(Color("0e1b2b"), Color("345064"), 5))
-	t.set_stylebox("focus", "LineEdit", _box(Color("132439"), MINT, 5))
-	t.set_stylebox("normal", "TextEdit", _box(Color("0e1b2b"), Color("345064"), 5))
-	t.set_stylebox("focus", "TextEdit", _box(Color("132439"), MINT, 5))
+	t.set_color("font_disabled_color", "Button", Color("6f796c"))
+	t.set_stylebox("normal", "Button", _box(Color("28332b"), Color("465242"), 3))
+	t.set_stylebox("hover", "Button", _box(Color("364331"), MINT, 7))
+	t.set_stylebox("pressed", "Button", _box(Color("1d261f"), GOLD, 7))
+	t.set_stylebox("disabled", "Button", _box(Color("1a211c"), Color("30392e"), 3))
+	t.set_stylebox("normal", "LineEdit", _box(Color("141d17"), Color("424e3c"), 3))
+	t.set_stylebox("focus", "LineEdit", _box(Color("1b261e"), MINT, 5))
+	t.set_stylebox("normal", "TextEdit", _box(Color("141d17"), Color("424e3c"), 3))
+	t.set_stylebox("focus", "TextEdit", _box(Color("1b261e"), MINT, 5))
 	t.set_color("font_color", "LineEdit", Color("ede8d9"))
 	t.set_color("font_color", "TextEdit", Color("ede8d9"))
 	t.set_color("font_color", "CheckBox", Color("cbd6da"))
-	t.set_stylebox("panel", "PanelContainer", _box(PANEL, Color("2a4052"), 8))
-	t.set_constant("separation", "VBoxContainer", 9)
+	t.set_stylebox("panel", "PanelContainer", _box(PANEL, Color("3c4738"), 3))
+	t.set_color("font_color", "OptionButton", Color("e8e4d8"))
+	for style in ["normal", "hover", "pressed", "disabled"]:
+		t.set_stylebox(style, "OptionButton", t.get_stylebox(style,"Button"))
+	t.set_stylebox("panel", "PopupMenu", _box(PANEL, Color("465242"), 3))
+	t.set_constant("separation", "VBoxContainer", 12)
 	t.set_constant("separation", "HBoxContainer", 10)
 	theme = t
 
-func _box(fill: Color, outline: Color, radius: int = 6) -> StyleBoxFlat:
+func _box(fill: Color, outline: Color, radius: int = 3) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
 	s.bg_color = fill
 	s.border_color = outline
@@ -142,11 +166,15 @@ func _box(fill: Color, outline: Color, radius: int = 6) -> StyleBoxFlat:
 	s.content_margin_bottom = 10
 	return s
 
-func _label(parent: Node, text: String, font_size: int = 16, color: Color = Color("e6e9e6")) -> Label:
+func _label(parent: Node, text: String, font_size: int = 16, color: Color = Color("e8e4d8")) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.add_theme_font_size_override("font_size", font_size)
 	label.add_theme_color_override("font_color", color)
+	if font_size >= 24:
+		var heading_font := SystemFont.new()
+		heading_font.font_names = PackedStringArray(["Noto Serif CJK SC", "SimSun", "serif"])
+		label.add_theme_font_override("font",heading_font)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(label)
@@ -207,8 +235,7 @@ func _build_home() -> void:
 	home = Control.new()
 	add_child(home)
 	home.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var background := ColorRect.new()
-	background.color = BG
+	var background := preload("res://client/menu_backdrop.gd").new()
 	home.add_child(background)
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var scroll := ScrollContainer.new()
@@ -218,91 +245,170 @@ func _build_home() -> void:
 	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.add_child(center)
-	var margins := _margin(center, 28)
+	var margins := _margin(center,32)
+	var layout := HBoxContainer.new()
+	layout.add_theme_constant_override("separation",48)
+	margins.add_child(layout)
+	var identity := _vbox(layout)
+	identity.custom_minimum_size.x = 270
+	_label(identity,"E V E R W E A V E",13,GOLD)
+	_label(identity,"未写之境",48)
+	_label(identity,"旅途手记",20,MUTED)
+	var spacer := Control.new()
+	spacer.custom_minimum_size.y = 120
+	identity.add_child(spacer)
+	_label(identity,"写下一个地方，\n和你要扮演的人。",22,GOLD)
+	_label(identity,"移动  WASD\n交互  E    行囊  I    手记  J\n全屏  F11",13,MUTED)
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size.x = 760
-	margins.add_child(panel)
+	panel.custom_minimum_size.x = 650
+	layout.add_child(panel)
 	var box := _vbox(panel)
-	_label(box, "E V E R W E A V E", 15, MINT)
-	_label(box, "未写之境", 37, GOLD)
-	_label(box, "不是预先写好的冒险。你走过的地方成为事实，前方的世界继续被创作。", 16, MUTED)
-	_label(box, "一句话，成为你的世界", 18)
+	var tabs := HBoxContainer.new()
+	box.add_child(tabs)
+	for entry in [["旅程","compass"],["显示与声音","screen"],["连接","settings"]]:
+		var b := _button(tabs,entry[0],_home_tab.bind(home_tabs.size()))
+		b.icon = Icons.get_icon(entry[1])
+		b.add_theme_constant_override("icon_max_width",20)
+		home_tabs.append(b)
+	box.add_child(HSeparator.new())
+	for i in range(3):
+		var page := _vbox(box)
+		page.custom_minimum_size = Vector2(610,400)
+		home_pages.append(page)
+	var journey: Control = home_pages[0]
+	_label(journey,"启程",30,GOLD)
+	_label(journey,"地点、身份、一个悬而未决的故事。",15,MUTED)
 	setting_input = TextEdit.new()
-	setting_input.custom_minimum_size = Vector2(690, 79)
-	setting_input.placeholder_text = "描述世界、主角，或一个无法解释的现象……"
-	setting_input.text = "一个永远下雨的蒸汽朋克岛国，我是失忆的帝国逃兵。"
+	setting_input.custom_minimum_size = Vector2(600,164)
+	setting_input.placeholder_text = "描述这次旅程……"
+	setting_input.text = "群山间有一座建在巨树上的驿站。我是一名失去地图的信使，随身带着一封没有收件人的信。"
 	setting_input.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	box.add_child(setting_input)
-	_label(box, "世界创作服务", 16)
+	journey.add_child(setting_input)
+	_label(journey,"新旅程会在这里保存；已有进度可直接继续。",13,MUTED)
+	var buttons := HBoxContainer.new()
+	journey.add_child(buttons)
+	continue_button = _button(buttons,"继续旅程",_continue_world)
+	start_button = _button(buttons,"开始新旅程",_start_world)
+	start_button.disabled = true
+	continue_button.disabled = true
+	return_button = _button(journey,"返回当前旅程  ·  Esc",_show_game)
+	return_button.hide()
+	var display: Control = home_pages[1]
+	_label(display,"显示与声音",30,GOLD)
+	_label(display,"窗口随屏幕比例展开，画面与文字保持原有比例。",15,MUTED)
+	display_button = _button(display,"切换全屏  ·  F11",_toggle_fullscreen)
+	display_button.icon = Icons.get_icon("screen")
+	display_button.add_theme_constant_override("icon_max_width",22)
+	var volume := HSlider.new()
+	volume.min_value = 0
+	volume.max_value = 100
+	volume.value = 40
+	display.add_child(volume)
+	_label(display,"音乐音量",15,MUTED)
+	volume.value_changed.connect(func(value: float) -> void:
+		if is_instance_valid(music): music.volume_db = linear_to_db(value / 100.0)
+	)
+	_button(display,"开启 / 关闭音乐  ·  M",_toggle_music)
+	var connection: Control = home_pages[2]
+	_label(connection,"世界连接",30,GOLD)
+	_label(connection,"选择内容生成服务。更改将在下次继续旅程时应用。",14,MUTED)
 	mode_select = OptionButton.new()
-	mode_select.add_item("DeepSeek · 在线生成", 0)
-	mode_select.add_item("其他兼容服务 · 在线生成", 1)
-	mode_select.add_item("引擎自检 · 离线样例", 2)
-	mode_select.custom_minimum_size.y = 38
-	box.add_child(mode_select)
-	mode_help = _label(box, "", 13, MUTED)
-	online_settings = _vbox(box)
-	provider_summary = _label(online_settings, "DeepSeek Flash · 根据你的设定与行动持续创作", 14, MINT)
+	mode_select.add_item("DeepSeek",0)
+	mode_select.add_item("其他兼容服务",1)
+	mode_select.add_item("离线演示",2)
+	connection.add_child(mode_select)
+	mode_help = _label(connection,"",13,MUTED)
+	online_settings = _vbox(connection)
+	provider_summary = _label(online_settings,"DeepSeek Flash",14,GOLD)
 	custom_fields = GridContainer.new()
 	custom_fields.columns = 2
 	online_settings.add_child(custom_fields)
-	_label(custom_fields, "API 地址", 15, MUTED)
+	_label(custom_fields,"服务地址",14,MUTED)
 	base_input = LineEdit.new()
 	base_input.text = "https://api.deepseek.com"
-	base_input.custom_minimum_size.x = 510
+	base_input.custom_minimum_size.x = 440
 	custom_fields.add_child(base_input)
-	_label(custom_fields, "模型名", 15, MUTED)
+	_label(custom_fields,"模型",14,MUTED)
 	model_input = LineEdit.new()
 	model_input.text = "deepseek-flash"
 	custom_fields.add_child(model_input)
 	var grid := GridContainer.new()
 	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 14)
-	grid.add_theme_constant_override("v_separation", 8)
 	online_settings.add_child(grid)
-	_label(grid, "API Key", 15, MUTED)
+	_label(grid,"密钥",14,MUTED)
 	key_input = LineEdit.new()
 	key_input.secret = true
-	key_input.placeholder_text = "留空使用此服务已有的密钥"
-	key_input.custom_minimum_size.x = 510
+	key_input.custom_minimum_size.x = 440
 	grid.add_child(key_input)
-	_label(grid, "思考等级", 15, MUTED)
+	_label(grid,"思考等级",14,MUTED)
 	effort_select = OptionButton.new()
 	grid.add_child(effort_select)
-	_label(grid, "本次调用上限", 15, MUTED)
+	_label(grid,"请求额度",14,MUTED)
 	budget_input = SpinBox.new()
 	budget_input.min_value = 1
 	budget_input.max_value = 1000
 	budget_input.value = 60
 	grid.add_child(budget_input)
-	effort_help = _label(online_settings, "", 13, MUTED)
-	_label(online_settings, "后台最多同时生成两个地区；走路和已有规则在本机执行。设置会保存，密钥不会写入存档。", 13, MUTED)
+	effort_help = _label(online_settings,"",12,MUTED)
 	mode_select.item_selected.connect(_mode_changed)
-	_mode_changed(mode_select.selected)
+	_mode_changed(0)
+	_button(connection,"应用并继续旅程",_continue_world)
+	form_error = _label(box,"连接存档中……",13,MUTED)
 	replace_dialog = ConfirmationDialog.new()
-	replace_dialog.title = "重新生成世界"
-	replace_dialog.ok_button_text = "开始新世界"
-	replace_dialog.cancel_button_text = "保留当前世界"
+	replace_dialog.title = "开始另一段旅程"
+	replace_dialog.ok_button_text = "开始新旅程"
+	replace_dialog.cancel_button_text = "保留当前旅程"
 	replace_dialog.confirmed.connect(_confirm_new_world)
 	replace_dialog.canceled.connect(func() -> void: pending_world_configuration = {})
 	add_child(replace_dialog)
-	var buttons := HBoxContainer.new()
-	box.add_child(buttons)
-	start_button = _button(buttons, "创造世界  →", _start_world)
-	start_button.disabled = true
-	continue_button = _button(buttons, "应用配置并继续", _continue_world)
-	continue_button.disabled = true
-	return_button = _button(buttons, "返回游戏", _show_game)
-	return_button.hide()
-	form_error = _label(box, "正在连接本机引擎……", 14, Color("eab59e"))
-	_label(box, "WASD / 方向键移动    E 交互    I 背包    J 旅途记录    Esc 设置", 13, MUTED)
-	if backend_url.is_empty():
-		form_error.text = "先用 Start.ps1 / python launch.py 启动；编辑器调试请先运行 python -m engine.server。"
+	_home_tab(0)
+
+func _home_tab(index: int) -> void:
+	for i in range(home_pages.size()):
+		home_pages[i].visible = i == index
+		home_tabs[i].modulate = Color.WHITE if i == index else Color("899582")
+
+func _toggle_fullscreen() -> void:
+	var window := get_window()
+	if window.mode in [Window.MODE_FULLSCREEN,Window.MODE_EXCLUSIVE_FULLSCREEN]:
+		window.mode = previous_window_mode as Window.Mode
+	else:
+		previous_window_mode = window.mode
+		window.mode = Window.MODE_FULLSCREEN
+	display_button.text = "退出全屏  ·  F11" if window.mode == Window.MODE_FULLSCREEN else "切换全屏  ·  F11"
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed):
+			_toggle_fullscreen()
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_ESCAPE and home.visible and bool(state.get("started",false)) and not replace_dialog.visible:
+			_show_game()
+			get_viewport().set_input_as_handled()
+
+func _inventory_category(category: String) -> void:
+	inventory_filter = category
+	modal_signature = ""
+	_render_modal()
+
+func _select_item(id: String) -> void:
+	selected_item = id
+	modal_signature = ""
+	_render_modal()
+
+func _journal_category(category: String) -> void:
+	journal_tab = category
+	modal_signature = ""
+	_render_modal()
 
 func _build_game() -> void:
 	game = Control.new()
 	add_child(game)
 	game.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var bg := ColorRect.new()
+	bg.color = BG
+	game.add_child(bg)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var margin := _margin(game, 16)
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var all := _vbox(margin)
@@ -310,14 +416,16 @@ func _build_game() -> void:
 	all.add_child(header)
 	var heading := _vbox(header)
 	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_label = _label(heading, "未写之境", 23, GOLD)
+	title_label = _label(heading, "未写之境", 27, GOLD)
 	subtitle_label = _label(heading, "正在织出第一片土地", 13, MUTED)
 	stats_label = _label(header, "", 16)
 	stats_label.custom_minimum_size.x = 220
 	stats_label.size_flags_horizontal = Control.SIZE_SHRINK_END
-	_button(header, "I 背包", func() -> void: _toggle_panel("inventory"))
-	_button(header, "J 记录", func() -> void: _toggle_panel("journal"))
-	_button(header, "设置", _show_home)
+	for entry in [["行囊  I","bag","inventory"],["手记  J","book","journal"],["设置","settings","settings"]]:
+		var callback: Callable = _show_home if entry[2] == "settings" else _toggle_panel.bind(entry[2])
+		var b := _button(header,entry[0],callback)
+		b.icon = Icons.get_icon(entry[1])
+		b.add_theme_constant_override("icon_max_width",24)
 	var middle := HBoxContainer.new()
 	middle.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	all.add_child(middle)
@@ -326,12 +434,23 @@ func _build_game() -> void:
 	map_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	middle.add_child(map_panel)
 	var map_stack := Control.new()
-	map_stack.custom_minimum_size = Vector2(600, 440)
+	map_stack.custom_minimum_size = Vector2(520, 400)
 	map_panel.add_child(map_stack)
 	world_view = WorldView.new()
 	map_stack.add_child(world_view)
 	world_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	world_view.entity_clicked.connect(func(id: String) -> void: _send_action({"op": "interact", "id": id}))
+	loading_overlay = CenterContainer.new()
+	loading_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	map_stack.add_child(loading_overlay)
+	loading_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var loading_panel := PanelContainer.new()
+	loading_panel.custom_minimum_size.x = 490
+	loading_overlay.add_child(loading_panel)
+	var loading_text := _vbox(loading_panel)
+	_label(loading_text,"第一处落脚地",30,GOLD)
+	loading_premise = _label(loading_text,"",17)
+	_label(loading_text,"正在准备地点、人物与画面。完成后会直接进入旅程。",14,MUTED)
 	modal_overlay = Control.new()
 	map_stack.add_child(modal_overlay)
 	modal_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -344,24 +463,25 @@ func _build_game() -> void:
 	modal_overlay.add_child(modal_center)
 	modal_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var modal_panel := PanelContainer.new()
-	modal_panel.custom_minimum_size.x = 560
+	modal_panel.custom_minimum_size.x = 720
 	modal_center.add_child(modal_panel)
-	var modal_scroll := ScrollContainer.new()
-	modal_scroll.custom_minimum_size = Vector2(548, 510)
+	modal_scroll = ScrollContainer.new()
+	modal_scroll.custom_minimum_size = Vector2(692, 580)
 	modal_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	modal_panel.add_child(modal_scroll)
 	modal_stack = _vbox(modal_scroll)
 	modal_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	modal_stack.custom_minimum_size.x = 530
+	modal_stack.custom_minimum_size.x = 680
+	modal_stack.minimum_size_changed.connect(func() -> void: _fit_modal.call_deferred())
 	modal_overlay.hide()
 	var side_panel := PanelContainer.new()
-	side_panel.custom_minimum_size.x = 285
+	side_panel.custom_minimum_size.x = 300
 	middle.add_child(side_panel)
 	var side_frame := _vbox(side_panel)
 	var controls := HBoxContainer.new()
 	side_frame.add_child(controls)
-	pause_button = _button(controls, "暂停导演", _toggle_pause)
-	retry_failed_button = _button(controls, "重试失败项", func() -> void: _post("/retry", {}))
+	pause_button = _button(controls, "暂停生成", _toggle_pause)
+	retry_failed_button = _button(controls, "重试", func() -> void: _post("/retry", {}))
 	var side_scroll := ScrollContainer.new()
 	side_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	side_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -369,31 +489,46 @@ func _build_game() -> void:
 	var side := _vbox(side_scroll)
 	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	side.custom_minimum_size.x = 250
-	_label(side, "旅人状态", 17, GOLD)
-	hp_bar = _bar(side, Color("c98791"))
-	mp_bar = _bar(side, Color("81afcc"))
+	_label(side, "旅人", 14, GOLD)
+	health_label = _label(side,"生命",12,MUTED)
+	hp_bar = _bar(side, Color("b5856b"))
+	energy_label = _label(side,"魔力",12,MUTED)
+	mp_bar = _bar(side, Color("98a480"))
 	rule_label = _label(side, "", 13, MINT)
-	_label(side, "正在发生", 17, GOLD)
+	_label(side, "当前待办", 17, GOLD)
 	quest_label = _label(side, "", 14)
-	_label(side, "世界仍在生长", 17, GOLD)
-	director_label = _label(side, "", 13, MINT)
+	_label(side, "沿途", 17, GOLD)
+	status_summary = _label(side,"",13,MUTED)
+	diagnostics_button = _button(side,"生成详情  +",_toggle_diagnostics)
+	diagnostics_button.add_theme_font_size_override("font_size",12)
+	diagnostics = _vbox(side)
+	diagnostics.hide()
+	director_label = _label(diagnostics, "", 12, MUTED)
 	frontier_label = _label(side, "", 13, MUTED)
 	error_label = _label(side, "", 13, Color("e7a69d"))
 	failure_list = VBoxContainer.new()
 	side.add_child(failure_list)
-	_label(side, "最近的回声", 17, GOLD)
+	_label(side, "刚刚发生", 17, GOLD)
 	journal_label = _label(side, "", 13, MUTED)
 	var footer := HBoxContainer.new()
 	all.add_child(footer)
-	hint_label = _label(footer, "WASD 移动 · E 交互 · F 自由操作 · . 等待 · I 背包 · J 记录 · 所有进度自动保存", 13, MUTED)
-	_button(footer, "M 音乐", _toggle_music)
+	hint_label = _label(footer, "WASD  移动     E  交互     F  操作     ·  等待     F11  全屏                         自动保存", 13, MUTED)
+	_button(footer, "♫  M", _toggle_music)
+
+func _toggle_diagnostics() -> void:
+	diagnostics.visible = not diagnostics.visible
+	diagnostics_button.text = "收起详情  −" if diagnostics.visible else "生成详情  +"
 
 func _bar(parent: Node, fill: Color) -> ProgressBar:
 	var bar := ProgressBar.new()
 	bar.custom_minimum_size = Vector2(220, 15)
 	bar.show_percentage = false
-	bar.add_theme_stylebox_override("background", _box(Color("0a1624"), Color("0a1624"), 3))
+	bar.add_theme_stylebox_override("background", _box(Color("131b16"), Color("131b16"), 3))
 	bar.add_theme_stylebox_override("fill", _box(fill, fill, 3))
+	for kind in ["background","fill"]:
+		var style: StyleBoxFlat = bar.get_theme_stylebox(kind).duplicate()
+		for edge in [SIDE_LEFT,SIDE_TOP,SIDE_RIGHT,SIDE_BOTTOM]: style.set_content_margin(edge,0)
+		bar.add_theme_stylebox_override(kind,style)
 	parent.add_child(bar)
 	return bar
 
@@ -492,6 +627,9 @@ func _toggle_music() -> void:
 
 func _toggle_pause() -> void:
 	var d: Dictionary = state.get("director", {})
+	if d.get("mode") == "not_configured":
+		_post("/configure",_configuration())
+		return
 	_post("/pause", {"paused": not bool(d.get("paused", false))})
 
 func _toggle_panel(name: String) -> void:
@@ -585,10 +723,12 @@ func _accept_snapshot(data: Dictionary) -> void:
 	if str(data.get("epoch", "")) != str(state.get("epoch", "")):
 		local_panel = ""
 		modal_signature = ""
+		selected_item = ""
+		item_art.clear()
 	state = data
 	start_button.disabled = action_busy or not connection_ready
 	continue_button.disabled = action_busy or not bool(state.get("started", false)) or not connection_ready
-	start_button.text = "重新生成世界  →" if bool(state.get("started", false)) else "创造世界  →"
+	start_button.text = "开始另一段旅程" if bool(state.get("started", false)) else "开始新旅程"
 	return_button.visible = bool(state.get("started", false))
 	if first_snapshot:
 		first_snapshot = false
@@ -606,6 +746,8 @@ func _render() -> void:
 	if not bool(state.get("started", false)): return
 	world_view.update_world(state)
 	var r: Dictionary = state.region if state.get("region") is Dictionary else {}
+	loading_overlay.visible = r.is_empty()
+	loading_premise.text = str(state.get("setting",""))
 	var p: Dictionary = state.get("player", {})
 	title_label.text = str(r.get("name", "你的世界正在形成"))
 	var day: int = int(float(state.get("time", 480)) / 1440.0) + 1
@@ -617,13 +759,18 @@ func _render() -> void:
 	hp_bar.value = float(p.get("hp", 0))
 	mp_bar.max_value = float(p.get("max_mp", 1))
 	mp_bar.value = float(p.get("mp", 0))
-	var rules: Dictionary = {"normal": "常规法则", "no_magic": "静默领域：无法使用魔法", "healing_rain": "治愈之雨：步行 / 战斗缓慢回血", "volatile": "易燃世界：双方伤害增加", "echo": "回声：每第三回合攻击重复"}
+	health_label.text = "生命  %d / %d" % [int(p.get("hp",0)),int(p.get("max_hp",0))]
+	energy_label.text = "魔力  %d / %d" % [int(p.get("mp",0)),int(p.get("max_mp",0))]
+	var rules: Dictionary = {"normal": "", "no_magic": "静默领域：无法使用魔法", "healing_rain": "治愈之雨：步行 / 战斗缓慢回血", "volatile": "易燃世界：双方伤害增加", "echo": "回声：每第三回合攻击重复"}
 	rule_label.text = str(rules.get(str(r.get("rule", "normal")), ""))
+	rule_label.visible = not rule_label.text.is_empty()
 	var lines: Array[String] = []
-	for q in state.get("quests", []):
-		if str(q.region) != str(r.get("id", "")): continue
-		lines.append(("✓ " if q.status == "complete" else "◇ ") + str(q.name))
+	for q in View.objectives(state):
+		if str(q.get("region","")) != str(r.get("id", "")): continue
+		lines.append("·  " + str(q.get("name","未完的事")))
+		if lines.size() >= 3: break
 	quest_label.text = "\n".join(lines) if not lines.is_empty() else "探索四周，找到正在等待你的事。"
+	status_summary.text = View.summary(state)
 	var d: Dictionary = state.get("director", {})
 	var mode: String = str(d.get("mode", "not_configured"))
 	var mode_text: String = "离线演示 · 非 LLM" if mode == "offline_demo" else "在线 · " + str(d.get("model", ""))
@@ -654,10 +801,10 @@ func _render() -> void:
 	error_label.text = last_action_error if not last_action_error.is_empty() else (str(d.get("error", "")) if failed_tasks.is_empty() else "")
 	retry_failed_button.disabled = failed_tasks.is_empty()
 	_render_failures(failed_tasks)
-	pause_button.text = "继续导演" if bool(d.get("paused", false)) else "暂停导演"
+	pause_button.text = "继续生成" if bool(d.get("paused", false)) else "暂停生成"
 	var history: Array = state.get("journal", [])
 	lines.clear()
-	for i in range(maxi(0, history.size() - 3), history.size()):
+	for i in range(maxi(0, history.size() - 1), history.size()):
 		lines.append(str(history[i]).left(110))
 	journal_label.text = "\n\n".join(lines)
 	_render_modal()
@@ -681,8 +828,9 @@ func _render_failures(tasks: Array) -> void:
 			var field_path: String = str(details[0].get("path", "$"))
 			reason = (field_path + "\n" if field_path != "$" else "") + str(details[0].get("message", reason))
 			if details.size() > 1: reason += "\n另有 %d 项问题，重试时一并修复。" % (details.size() - 1)
-		var detail_label := _label(row, str(categories.get(str(task.get("category", "format")), "生成")) + " · " + reason.left(260), 12, MUTED)
-		detail_label.tooltip_text = JSON.stringify(details, "  ")
+		var friendly: Dictionary = {"format":"部分内容需要调整。", "reference":"物品或人物信息还需核对。", "gameplay":"道路或交互需要修复。", "provider":"生成服务暂时没有完成请求。"}
+		var detail_label := _label(row, str(friendly.get(str(task.get("category","format")),"内容准备未完成。")), 12, MUTED)
+		detail_label.tooltip_text = reason + "\n" + JSON.stringify(details, "  ")
 		_button(row, "重试此任务", _post.bind("/retry", {"target":str(task.target), "kind":str(task.kind)}))
 
 func _clear_modal() -> void:
@@ -691,11 +839,16 @@ func _clear_modal() -> void:
 		child.queue_free()
 	battle_canvas = null
 
+func _fit_modal() -> void:
+	if not is_instance_valid(modal_scroll) or not is_instance_valid(world_view): return
+	var available_height: float = maxf(160,world_view.size.y - 48)
+	modal_scroll.custom_minimum_size.y = clampf(modal_stack.get_combined_minimum_size().y + 8,100,minf(610,available_height))
+
 func _render_modal() -> void:
 	var ui: Dictionary = state.get("ui", {})
 	var battle: Dictionary = state.battle if state.get("battle") is Dictionary else {}
 	var waiting_phase: String = _exit_wait_phase(ui)
-	var signature: String = JSON.stringify([ui, battle, local_panel, state.get("inventory", []), state.get("available_actions", []), waiting_phase])
+	var signature: String = JSON.stringify([ui, battle, local_panel, state.get("inventory", []), state.get("available_actions", []), waiting_phase, inventory_filter, selected_item, journal_tab, state.get("quests", []), state.get("threads", []), state.get("journal", [])])
 	if signature == modal_signature:
 		return
 	modal_signature = signature
@@ -762,25 +915,12 @@ func _render_modal() -> void:
 			for item in ui.get("goods", []):
 				var b := _button(modal_stack, "%s  ·  %d G" % [str(item.name), int(item.price)], _send_action.bind({"op": "buy", "id": item.id}))
 				b.disabled = int(state.player.gold) < int(item.price)
-		_button(modal_stack, "继续旅途  ·  E / Esc", _send_action.bind({"op": "close"}))
+		_button(modal_stack, "返回  ·  E / Esc", _send_action.bind({"op": "close"}))
 		return
 	if local_panel == "inventory":
-		_label(modal_stack, "行囊", 25, GOLD)
-		_label(modal_stack, "点击药剂使用，点击武器 / 护符装备。", 14, MUTED)
-		for item in state.get("inventory", []):
-			var tag: String = "已装备 · " if bool(item.equipped) else ""
-			var b := _button(modal_stack, "%s%s ×%d" % [tag, str(item.name), int(item.quantity)], _send_action.bind({"op": "use", "id": item.id}))
-
-			if item.has("icon_visual"):
-				b.icon = preload("res://client/visual_compiler.gd").compile_sprite(item.icon_visual, {})
-				b.add_theme_constant_override("icon_max_width", 32)
-			b.disabled = (str(item.kind) == "key" and not item.has("use")) or bool(item.equipped)
-			_label(modal_stack, str(item.description), 13, MUTED)
+		Fieldbook.inventory(self,modal_stack)
 	else:
-		_label(modal_stack, "旅途记录", 25, GOLD)
-		for line in state.get("journal", []): _label(modal_stack, str(line), 15)
-		_label(modal_stack, "仍未写完的故事", 18, MINT)
-		for thread in state.get("threads", []): _label(modal_stack, str(thread.title) + " · " + str(thread.note), 14, MUTED)
+		Fieldbook.journal(self,modal_stack)
 	_button(modal_stack, "收起  ·  Esc", func() -> void:
 		local_panel = ""
 		modal_signature = ""
@@ -823,6 +963,15 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# Windows accessibility input can supply a valid logical key with an unrelated
 	# scan code. Hotkeys follow the logical key; physical-only input still works.
 	var key: int = event.keycode if event.keycode != 0 else event.physical_keycode
+	if not local_panel.is_empty() and key != KEY_M:
+		if key == KEY_I: _toggle_panel("inventory")
+		elif key == KEY_J: _toggle_panel("journal")
+		elif key == KEY_ESCAPE:
+			local_panel = ""
+			modal_signature = ""
+			_render_modal()
+		get_viewport().set_input_as_handled()
+		return
 	if key == KEY_M:
 		_toggle_music()
 	elif state.get("battle") is Dictionary:

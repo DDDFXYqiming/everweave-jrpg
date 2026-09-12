@@ -34,6 +34,12 @@ jobs:
           cat /tmp/smoke.log
           grep -q 'GODOT_CLIENT_SMOKE_OK' /tmp/smoke.log
           ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/smoke.log
+      - name: Frontend projections and journal presentation
+        run: |
+          timeout 45 /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/presentation_smoke.gd > /tmp/presentation.log 2>&1
+          cat /tmp/presentation.log
+          grep -q 'PRESENTATION_OK' /tmp/presentation.log
+          ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/presentation.log
       - name: Compile model-drawn pixels and execute content-driven UI contracts
         run: |
           python3 tools/build_content_fixture.py

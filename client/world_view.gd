@@ -60,6 +60,8 @@ func _process(delta: float) -> void:
 		var world_size := Vector2(float(region.width), float(region.height)) * TILE
 		var wanted := (visual_player + Vector2(0.5, 0.5)) * TILE - size * 0.5
 		camera = Vector2(clampf(wanted.x, 0.0, maxf(0.0, world_size.x - size.x)), clampf(wanted.y, 0.0, maxf(0.0, world_size.y - size.y)))
+		if world_size.x < size.x: camera.x = (world_size.x - size.x) * 0.5
+		if world_size.y < size.y: camera.y = (world_size.y - size.y) * 0.5
 	queue_redraw()
 
 func _draw_sprite(key: String, foot: Vector2, scale_factor: float = 2.0, tint: Color = Color.WHITE) -> void:
@@ -82,7 +84,7 @@ func _is_ready(target: String) -> bool:
 	return true
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), Color("111e2d"))
+	draw_rect(Rect2(Vector2.ZERO, size), Color("131d18"))
 	if region.is_empty() or sprites.is_empty():
 		for i in range(34):
 			var point := Vector2(fmod(i * 53.0 + 19.0, maxf(size.x, 1.0)), fmod(i * 97.0 + elapsed * 6.0, maxf(size.y, 1.0)))
