@@ -26,7 +26,8 @@ jobs:
         run: python3 -m engine.asset_cache --download
       - name: Obtain official Godot Standard
         run: |
-          curl --fail --location --retry 2 'https://downloads.godotengine.org/?version=4.7.2&flavor=stable&slug=linux.x86_64.zip&platform=linux.64' -o /tmp/godot.zip
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 180 'https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip' -o /tmp/godot.zip ||
+            curl --fail --location --retry 2 --retry-all-errors --connect-timeout 15 --max-time 180 'https://downloads.godotengine.org/?version=4.7.2&flavor=stable&slug=linux.x86_64.zip&platform=linux.64' -o /tmp/godot.zip
           unzip -q /tmp/godot.zip -d /tmp/godot
           chmod +x /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
       - name: Import assets and check scripts with the native engine
