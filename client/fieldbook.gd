@@ -5,7 +5,7 @@ const Compiler = preload("res://client/visual_compiler.gd")
 
 static func item_texture(main, item: Dictionary) -> Texture2D:
 	var recipe: Variant = item.get("icon_visual")
-	if recipe is Dictionary and recipe.get("size") is Array and recipe.size.size() == 2 and recipe.get("layers") is Array:
+	if recipe is Dictionary and recipe.get("size") is Array and recipe.size.size() == 2 and (recipe.get("layers") is Array or recipe.has("asset") or recipe.has("parts")):
 		var signature: String = JSON.stringify(recipe)
 		if not main.item_art.has(signature): main.item_art[signature] = Compiler.compile_sprite(recipe, {})
 		return main.item_art[signature]

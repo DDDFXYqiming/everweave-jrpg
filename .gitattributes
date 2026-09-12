@@ -6,5 +6,10 @@
 *.md text eol=lf
 *.png binary
 *.wav binary
+*.ogg binary
+*.import text eol=lf
+*.uid text eol=lf
+# Preserve the source packages' license text byte for byte.
+assets/library/licenses/*.txt -text -whitespace
 *.cmd text eol=crlf
 *.ps1 text eol=crlf

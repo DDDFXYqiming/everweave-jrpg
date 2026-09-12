@@ -6,6 +6,8 @@
 
 **当前状态：Content Runtime v2 源码原型，尚不是完整发行游戏。** 已接入统一格式纠正、按作用域解析 ID 与引用、完整错误位置和按地区重试，并完成 Windows / Godot 原生测试及真实 DeepSeek 下一地区联调。见 [最新协议与验收记录](docs/PROTOCOL_RELIABILITY.md)；最初的 v2 源码包记录保留在 [历史交付记录](docs/REFRACTOR_TEST_REPORT.md)。
 
+**混合内容分支**：新内容默认先检索本地素材和可选玩法模块，由模型选择、组合，再用绘图与规则补缺口。已收录 425 项 CC0 资产，支持地区/战斗音乐、事件音效和短乐句合成；同一对象可以混用库素材与原创绘图。连接设置可关闭“新内容优先使用本地素材库”，已生成的世界保持原样。见 [使用、协议与扩库](docs/HYBRID_CONTENT.md) 和 [本轮实测报告](docs/HYBRID_VALIDATION.md)。
+
 此前 v1 的 Windows、99 项测试与真实 DeepSeek 记录保留在 [引擎验收记录](docs/ENGINE_REVIEW.md) 和 [图形与预生成记录](docs/VISUALS_AND_PREFETCH.md)，不作为 v2 在线生成成功的证据。
 
 | 太空机械城 | 海底珊瑚城 |

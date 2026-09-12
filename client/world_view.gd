@@ -119,7 +119,7 @@ func _draw() -> void:
 			continue
 		if float(prop.y) * TILE < camera.y - 100 or float(prop.y) * TILE > camera.y + size.y + 140:
 			continue
-		objects.append({"y": float(prop.y), "x": float(prop.x), "sprite": str(prop.get("sprite", prop.kind)), "kind": "prop"})
+		objects.append({"y": float(prop.y), "x": float(prop.x), "footprint":prop.get("footprint",[1,1]), "sprite": str(prop.get("sprite", prop.kind)), "kind": "prop"})
 	for entity in region.get("entities", []):
 		var kind: String = str(entity.kind)
 		if bool(entity.get("spent", false)) and kind != "chest":
@@ -134,11 +134,12 @@ func _draw() -> void:
 		elif kind == "chest" and bool(entity.get("spent", false)):
 			key = "chest_open"
 		if not generated.is_empty() and entity.has("sprite"): key = str(entity.sprite)
-		objects.append({"y": float(entity.y), "x": float(entity.x), "sprite": key, "kind": kind, "entity": entity})
+		objects.append({"y": float(entity.y), "x": float(entity.x), "footprint":entity.get("footprint",[1,1]), "sprite": key, "kind": kind, "entity": entity})
 	objects.append({"y": visual_player.y, "x": visual_player.x, "sprite": "hero_%d" % walk_frame, "kind": "player"})
 	objects.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.y) < float(b.y))
 	for obj in objects:
-		var foot := (Vector2(float(obj.x), float(obj.y)) + Vector2(0.5, 1.0)) * TILE - camera
+		var footprint: Array = obj.get("footprint",[1,1])
+		var foot := (Vector2(float(obj.x), float(obj.y)) + Vector2(float(footprint[0])*.5, 1.0)) * TILE - camera
 		var tint := Color.WHITE
 		if generated.is_empty() and obj.kind == "prop" and obj.sprite in ["tree", "bush"]:
 			if region.biome == "snow":
@@ -204,13 +205,19 @@ func _draw_nearby_hint() -> void:
 	var p: Dictionary = snapshot.get("player", {})
 	for e in region.get("entities", []):
 		if bool(e.get("spent", false)): continue
-		if absf(float(e.x) - float(p.get("x", 0))) + absf(float(e.y) - float(p.get("y", 0))) <= 1.0:
+		if _distance_to_object(e,Vector2(float(p.get("x",0)),float(p.get("y",0)))) <= 1:
 			var text: String = "E  ·  " + str(e.name)
 			var width: float = minf(size.x - 40, font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x + 28)
 			var at := Vector2((size.x - width) / 2, size.y - 48)
 			draw_rect(Rect2(at, Vector2(width, 34)), Color(0.035, 0.075, 0.13, 0.93))
 			draw_string(font, at + Vector2(14, 23), text, HORIZONTAL_ALIGNMENT_LEFT, width - 24, 16, Color("e6dcbf"))
 			return
+
+func _distance_to_object(e: Dictionary, p: Vector2) -> float:
+	var footprint: Array = e.get("footprint",[1,1])
+	var dx: float = maxf(maxf(float(e.x)-p.x,0),p.x-(float(e.x)+float(footprint[0])-1))
+	var dy: float = maxf(maxf(float(e.y)-float(footprint[1])+1-p.y,0),p.y-float(e.y))
+	return dx+dy
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
@@ -222,7 +229,7 @@ func _gui_input(event: InputEvent) -> void:
 			return
 		var cell: Vector2 = ((event.position + camera) / TILE).floor()
 		for e in region.get("entities", []):
-			if int(e.x) == int(cell.x) and int(e.y) == int(cell.y):
+			if _distance_to_object(e,cell) == 0:
 				entity_clicked.emit(str(e.id))
 				accept_event()
 				return

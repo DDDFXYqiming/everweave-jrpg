@@ -26,8 +26,8 @@ class GameServer(ThreadingHTTPServer):
   if address[0]!='127.0.0.1': raise ValueError('Only IPv4 loopback binding is supported')
   self.token=token; self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
   self.snapshot_sequence=0
-  self.preference_keys=('offline','base_url','model','deepseek_options','reasoning_effort','max_calls')
-  self.preferences=dict(offline=False,base_url='https://api.deepseek.com',model='deepseek-flash',deepseek_options=True,reasoning_effort='low',max_calls=60)
+  self.preference_keys=('offline','base_url','model','deepseek_options','reasoning_effort','max_calls','hybrid_content')
+  self.preferences=dict(offline=False,base_url='https://api.deepseek.com',model='deepseek-flash',deepseek_options=True,reasoning_effort='low',max_calls=60,hybrid_content=True)
   self.preference_path=None if str(save_path)==':memory:' else Path(save_path).with_name('settings.json')
   if self.preference_path and self.preference_path.exists():
    try:
@@ -61,7 +61,7 @@ class Handler(BaseHTTPRequestHandler):
  def reply(self,status,value):
   body=dumps(value).encode(); self.send_response(status); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(body))); self.send_header('Cache-Control','no-store'); self.send_header('X-Content-Type-Options','nosniff'); self.end_headers()
   try: self.wfile.write(body)
-  except (BrokenPipeError,ConnectionResetError): pass
+  except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError): pass
  def authorized(self):
   expected='Bearer '+self.server.token; supplied=self.headers.get('Authorization','')
   # Web pages cannot use this API: no CORS; reject browser origins and foreign Host headers.

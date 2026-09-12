@@ -192,6 +192,13 @@ class Runtime:
             elif op == 'message':
                 message = str(self.expr(c['text'])); self.messages.append(message)
                 self.world.note(message)
+            elif op == 'sound':
+                if c['cue'] not in self.region.get('audio',{}).get('cues',{}):raise RuleError('undefined sound cue '+c['cue'])
+                self.world.queue_audio(c['cue'],self.region)
+            elif op == 'music':
+                audio=self.region.get('audio',{})
+                if c['cue']!='default' and c['cue'] not in audio.get('music',{}) and 'score' not in audio.get('cues',{}).get(c['cue'],{}):raise RuleError('undefined music cue '+c['cue'])
+                self.rt['audio_music']='' if c['cue']=='default' else c['cue'];self.changed=True
             elif op == 'emit': self.queue.append({'type': c['event']})
             elif op == 'timer':
                 timers = self.rt['timers']
@@ -333,6 +340,11 @@ def check_references(region, items):
             if 'item' in node:check_item(node['item'],location+'.item')
             if node.get('op') == 'item':check_item(node['id'],location+'.id')
             if node.get('op') == 'sprite' and node['value'] not in sprites: bad(location+'.value','undefined sprite effect',node['value'])
+            if node.get('op') in ('sound','music'):
+                group='cues' if node['op']=='sound' else 'music'
+                audio=region.get('audio',{})
+                score_as_music=node['op']=='music' and 'score' in audio.get('cues',{}).get(node.get('cue'),{})
+                if not (node['op']=='music' and node.get('cue')=='default') and not score_as_music and node.get('cue') not in audio.get(group,{}):bad(location+'.cue','undefined audio cue',node.get('cue'))
             if 'surface' in node and node['surface'] not in sprites: bad(location+'.surface','undefined surface',node['surface'])
             for key,value in node.items(): walk(value,location+'.'+key)
     walk(region.get('program', {}),'region.program')
@@ -372,8 +384,13 @@ def design_record(plan):
     geometry = {k:scene[k] for k in ('size','spawn','base','paint') if k in scene}
     shapes = []
     for recipe in plan.get('visuals',{}).get('sprites',{}).values():
-        shapes.append([recipe['size'],[c[:-1] for c in recipe['layers']]])
-    return dict(fingerprint=digest([geometry,logic,shapes]), geometry=digest(geometry),logic=digest(logic),
+        if 'asset' in recipe or 'parts' in recipe:shapes.append(recipe)
+        else:shapes.append([recipe['size'],[c[:-1] for c in recipe['layers']]])
+    result=dict(fingerprint=digest([geometry,logic,shapes]), geometry=digest(geometry),logic=digest(logic),
                 shapes=digest(shapes),name=plan['name'],space=scene.get('summary',plan['layout']),
                 gameplay=plan.get('program',{}).get('summary','legacy interaction'),
                 motifs=list(plan.get('visuals',{}).get('sprites',{}))[:20])
+    from .library import used_assets
+    used=used_assets(plan)
+    if used:result['assets']=used
+    return result

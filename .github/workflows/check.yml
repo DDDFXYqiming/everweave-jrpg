@@ -14,6 +14,8 @@ jobs:
         run: python3 -m unittest discover -s tests -v
       - name: Check private publish file selection
         run: python3 tools/publish_private.py --dry-run
+      - name: Verify pinned local content assets
+        run: python3 tools/import_library.py --verify
   godot:
     runs-on: ubuntu-latest
     steps:
@@ -59,3 +61,12 @@ jobs:
         env:
           GODOT_BIN: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
         run: python3 tools/test_native.py --content --headless
+      - name: Verify hybrid pixels, real audio samples, and module gameplay
+        env:
+          GODOT_BIN: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
+        run: |
+          timeout 45 "$GODOT_BIN" --headless --path . --script res://tests/hybrid_audio_smoke.gd > /tmp/hybrid-audio.log 2>&1
+          cat /tmp/hybrid-audio.log
+          grep -q 'HYBRID_AUDIO_OK' /tmp/hybrid-audio.log
+          ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/hybrid-audio.log
+          python3 tools/test_native.py --hybrid --headless

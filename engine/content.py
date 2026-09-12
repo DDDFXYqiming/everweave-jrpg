@@ -149,6 +149,9 @@ def effects(value, depth=0):
         elif op == 'message':
             obj(raw, op, ('op', 'text'), ('op', 'text'))
             out = dict(op=op, text=expression(raw['text']))
+        elif op in ('sound','music'):
+            obj(raw,op,('op','cue'),('op','cue'))
+            out=dict(op=op,cue=ident(raw['cue']))
         elif op == 'emit':
             obj(raw, op, ('op', 'event'), ('op', 'event'))
             out = dict(op=op, event=event_name(raw['event']))

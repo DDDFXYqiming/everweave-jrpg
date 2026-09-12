@@ -13,9 +13,16 @@ from launch import find_godot
 
 (ROOT/'userdata/e2e').mkdir(parents=True,exist_ok=True)
 content_test='--content' in sys.argv
+hybrid_test='--hybrid' in sys.argv
 if content_test:(ROOT/'userdata/content-e2e').mkdir(parents=True,exist_ok=True)
+if hybrid_test:(ROOT/'userdata/hybrid-e2e').mkdir(parents=True,exist_ok=True)
 with tempfile.TemporaryDirectory() as td:
     server=GameServer(('127.0.0.1',0),Path(td)/'world.sqlite3',secrets.token_urlsafe(32))
+    if hybrid_test:
+        sys.path.insert(0,str(ROOT/'tests'))
+        from hybrid_fixtures import hybrid_patch
+        server.world.start('Hybrid native acceptance',authored=True)
+        server.world.apply_patch(hybrid_patch(),server.world.context())
     if content_test:
         sys.path.insert(0,str(ROOT/'tests'))
         from content_fixtures import authored_patch
@@ -45,7 +52,7 @@ with tempfile.TemporaryDirectory() as td:
     server.director.start_worker()
     worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
     try:
-        script='native_content_e2e' if content_test else 'native_e2e'
+        script='native_hybrid_e2e' if hybrid_test else 'native_content_e2e' if content_test else 'native_e2e'
         command=[find_godot(None),'--path',str(ROOT),'--script',f'res://tests/{script}.gd']
         if '--headless' in sys.argv: command+=['--headless']
         command+=['--','--backend-url=http://127.0.0.1:'+str(server.server_port),'--session-token='+server.token]
@@ -56,7 +63,7 @@ with tempfile.TemporaryDirectory() as td:
                 if output:print(output.decode('utf-8',errors='replace') if isinstance(output,bytes) else output)
             raise RuntimeError('Native test exceeded its deadline; see captured output') from None
         print(result.stdout);print(result.stderr)
-        marker='NATIVE_CONTENT_E2E_OK' if content_test else 'NATIVE_E2E_OK'
+        marker='NATIVE_HYBRID_E2E_OK' if hybrid_test else 'NATIVE_CONTENT_E2E_OK' if content_test else 'NATIVE_E2E_OK'
         assert result.returncode==0 and marker in result.stdout and 'SCRIPT ERROR' not in result.stderr
         assert server.director.calls==0
     finally:

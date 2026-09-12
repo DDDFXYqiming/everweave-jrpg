@@ -125,8 +125,62 @@ class Normalizer:
         if raw.get('type')=='json_object':
             raw.pop('type')
             self.record('type','envelope_metadata','json_object',None)
-        for field in ('visuals', 'program') + (('scene',) if root == 'region' else ()):
+        for field in ('visuals', 'program','audio') + (('scene','starting_loadout') if root == 'region' else ()):
             self.move_field(raw, body, field, field, root + '.' + field)
+        # A library ID in a typed sprite/surface field is already unambiguous.
+        # Materialize its local sprite definition rather than spend a model
+        # repair asking for an otherwise redundant alias declaration.
+        from .library import catalog
+        art=body.get('visuals')
+        if isinstance(art,dict) and isinstance(art.get('sprites'),dict):
+            for name,sprite in art['sprites'].items():
+                if isinstance(sprite,dict) and not any(k in sprite for k in ('asset','parts','layers')) and isinstance(sprite.get('frames'),list) and sprite['frames'] and isinstance(sprite['frames'][0],list):
+                    sprite['layers']=copy.deepcopy(sprite['frames'][0])
+                    self.record(root+'.visuals.sprites.'+name+'.layers','first_frame',None,'frames[0]')
+            def materialize(value,path):
+                if isinstance(value,str) and value not in art['sprites'] and value in catalog() and catalog()[value]['kind']=='image':
+                    art['sprites'][value]={'asset':value}
+                    self.record(path,'library_reference',value,root+'.visuals.sprites.'+value)
+            for group in ('entities','spawns','landmarks','items','object_updates'):
+                for i,entry in enumerate(body.get(group,[]) if isinstance(body.get(group),list) else []):
+                    if isinstance(entry,dict):
+                        self.alias(entry,'sprite_id','sprite',f'{root}.{group}[{i}]')
+                        materialize(entry.get('sprite'),f'{root}.{group}[{i}].sprite')
+            def surfaces(value,path):
+                if isinstance(value,list):
+                    for i,entry in enumerate(value):surfaces(entry,f'{path}[{i}]')
+                elif isinstance(value,dict):
+                    if 'surface' in value:materialize(value['surface'],path+'.surface')
+                    if value.get('op')=='sprite':materialize(value.get('value'),path+'.value')
+                    for key,entry in value.items():
+                        if key not in ('vars','state'):surfaces(entry,path+'.'+key)
+            surfaces(body.get('scene',{}),root+'.scene')
+            surfaces(body.get('paint',[]),root+'.paint')
+            surfaces(body.get('program',{}),root+'.program')
+        audio=body.get('audio')
+        if isinstance(audio,dict):
+            def source_options(value,path):
+                if not isinstance(value,dict):return
+                for nested in ('synth','score'):
+                    if isinstance(value.get(nested),dict):
+                        for option in ('delay_ms','pitch','volume','loop'):
+                            self.move_field(value[nested],value,option,path+'.'+nested+'.'+option,path+'.'+option)
+                for i,layer in enumerate(value.get('layers',[]) if isinstance(value.get('layers'),list) else []):source_options(layer,f'{path}.layers[{i}]')
+            for group in ('music','cues'):
+                for name,value in audio.get(group,{}).items() if isinstance(audio.get(group),dict) else []:source_options(value,root+'.audio.'+group+'.'+name)
+            source_options(audio.get('ambience'),root+'.audio.ambience')
+            cues=audio.setdefault('cues',{})
+            if isinstance(cues,dict):
+                for group in ('bindings','objects'):
+                    for name,value in (audio.get(group,{}) or {}).items() if isinstance(audio.get(group,{}),dict) else []:
+                        if isinstance(value,str) and value not in cues and value in catalog() and catalog()[value]['kind']=='sfx':
+                            cues[value]={'asset':value}
+                            self.record(root+'.audio.'+group+'.'+name,'library_reference',value,root+'.audio.cues.'+value)
+            if isinstance(audio.get('music'),dict):
+                for name,value in list(audio['music'].items()):
+                    if isinstance(value,str) and value in catalog() and catalog()[value]['kind']=='music':
+                        audio['music'][name]={'asset':value}
+                        self.record(root+'.audio.music.'+name,'library_reference',value,audio['music'][name])
         for field in ('lore', 'threads'):
             self.move_field(body, raw, field, root + '.' + field, field)
         if root == 'region' and 'id' in body and isinstance(body['id'], str) and re.fullmatch(r'[a-z][a-z0-9_:]*', body['id']):
@@ -242,6 +296,17 @@ class Normalizer:
     def ref(self, scope, value, path, *, canonical=False, local_event=False):
         if not isinstance(value, str):
             return value  # The typed validator reports non-string references.
+        if scope=='sprites' and value not in self.maps[scope] and value not in self.existing[scope]:
+            from .library import catalog
+            if value in catalog() and catalog()[value]['kind']=='image' and isinstance(self.body,dict):
+                art=self.body.get('visuals')
+                identity=self.context.get('current_visual_identity')
+                if art is None and self.expected=='reaction' and isinstance(identity,dict) and identity.get('palette'):
+                    art=copy.deepcopy(identity);art['sprites']={};self.body['visuals']=art
+                if isinstance(art,dict) and isinstance(art.get('sprites'),dict):
+                    art['sprites'].setdefault(value,{'asset':value})
+                    self.maps[scope][value]=value
+                    self.record(path,'library_reference',value,self.expected+'.visuals.sprites.'+value)
         if scope=='items' and 'validation_items' in self.context and value not in self.maps[scope] and value not in self.existing[scope]:
             matches=self.local[scope].get(value,set())
             if len(matches)!=1:
@@ -295,6 +360,10 @@ class Normalizer:
 
     def expression(self, node, path):
         if not isinstance(node, dict): return
+        if set(node)=={'not'}:
+            previous=copy.deepcopy(node)
+            operand=node['not'];node.clear();node.update(op='not',args=[operand])
+            self.record(path,'expression_alias',previous,node)
         if 'item' in node: self.field_ref(node, 'item', 'items', path)
         for field in ('get', 'path'):
             value = node.get(field)
@@ -335,6 +404,9 @@ class Normalizer:
     def references(self):
         body, root = self.body, self.expected
         if not isinstance(body, dict): return
+        audio=body.get('audio')
+        if isinstance(audio,dict) and isinstance(audio.get('objects'),dict):
+            audio['objects']={self.ref('objects',name,root+'.audio.objects.'+name,local_event=True):cue for name,cue in audio['objects'].items()}
         kit=body.get('starting_loadout')
         if isinstance(kit,dict):
             for slot in ('weapon','charm'):

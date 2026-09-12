@@ -1,4 +1,5 @@
 extends RefCounted
+const Library = preload("res://client/asset_library.gd")
 ## Compile validated model-authored pixel geometry into local GPU textures.
 
 static func color(value: String, palette: Dictionary) -> Color:
@@ -9,7 +10,18 @@ static func compile_sprite(recipe: Dictionary, palette: Dictionary) -> Texture2D
 	var height: int = int(recipe.size[1])
 	var img := Image.create(width, height, false, Image.FORMAT_RGBA8)
 	img.fill(Color.TRANSPARENT)
-	for command in recipe.layers:
+	if recipe.has("asset"):
+		var base: Image = Library.get_image(str(recipe.asset),str(recipe.get("asset_hash","")))
+		_transform(base,recipe)
+		img.blend_rect(base,Rect2i(Vector2i.ZERO,base.get_size()),Vector2i.ZERO)
+	for part in recipe.get("parts",[]):
+		var layer: Image = Library.get_image(str(part.asset),str(part.get("asset_hash","")))
+		_transform(layer,part)
+		var scale: int = int(part.get("scale",1))
+		if scale != 1: layer.resize(layer.get_width()*scale,layer.get_height()*scale,Image.INTERPOLATE_NEAREST)
+		img.blend_rect(layer,Rect2i(Vector2i.ZERO,layer.get_size()),Vector2i(int(part.at[0]),int(part.at[1])))
+	if recipe.has("parts"):_transform(img,recipe)
+	for command in recipe.get("layers",[]):
 		var ink: Color = color(str(command[-1]), palette)
 		if command[0] == "poly":
 			var points := PackedVector2Array()
@@ -27,6 +39,13 @@ static func compile_sprite(recipe: Dictionary, palette: Dictionary) -> Texture2D
 					var point := Vector2((x + 0.5 - x0) / w * 2.0 - 1.0, (y + 0.5 - y0) / h * 2.0 - 1.0)
 					if command[0] == "rect" or point.length_squared() <= 1.0: img.set_pixel(x, y, ink)
 	return ImageTexture.create_from_image(img)
+
+static func _transform(img: Image, spec: Dictionary) -> void:
+	if bool(spec.get("flip_x",false)): img.flip_x()
+	if spec.has("tint"):
+		var tint := Color(str(spec.tint))
+		for y in range(img.get_height()):
+			for x in range(img.get_width()):img.set_pixel(x,y,img.get_pixel(x,y)*tint)
 
 static func compile_tiles(visuals: Dictionary, seed_value: int) -> Texture2D:
 	var img := Image.create(160, 16, false, Image.FORMAT_RGBA8)
@@ -76,11 +95,16 @@ static func compile(visuals: Dictionary, seed_value: int) -> Dictionary:
 		if recipe.has("frames"):
 			var frames: Array[Texture2D] = []
 			for layers in recipe.frames:
-				frames.append(compile_sprite({"size":recipe.size,"layers":layers}, visuals.palette))
+				var frame: Dictionary = recipe.duplicate(true)
+				frame.erase("frames")
+				frame["layers"] = layers
+				frames.append(compile_sprite(frame, visuals.palette))
 			animations[key] = {"frames":frames,"frame_ms":int(recipe.get("frame_ms",180))}
 	compiled["__animations"] = animations
 	for role in visuals.get("bindings", {}):
-		if not compiled.has(role): compiled[role] = compiled[str(visuals.bindings[role])]
+		if not compiled.has(role):
+			compiled[role] = compiled[str(visuals.bindings[role])]
+			if animations.has(str(visuals.bindings[role])):animations[role] = animations[str(visuals.bindings[role])]
 	# Exits are engine UI affordances, drawn in the region's own palette.
 	var gate := {"size":[24,32], "layers":[["rect",3,2,18,28,"shadow"],["rect",5,4,14,24,"accent"],["rect",7,6,10,22,"water"],["rect",1,28,22,3,"path"]]}
 	if not compiled.has("portal"): compiled["portal"] = compile_sprite(gate, visuals.palette)

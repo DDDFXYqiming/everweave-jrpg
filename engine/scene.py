@@ -98,6 +98,10 @@ def build(plan, rid, seed, depth, exits):
                   props=[], entities=[], spawn=list(scene['spawn']), visits=0, revision=0,
                   scene=copy.deepcopy(scene), program=copy.deepcopy(plan.get('program', {})))
     if 'visuals' in plan: region['visuals'] = copy.deepcopy(plan['visuals'])
+    if 'audio' in plan:region['audio']=copy.deepcopy(plan['audio'])
+    if 'module_sources' in plan:region['module_sources']=copy.deepcopy(plan['module_sources'])
+    from .library import usage
+    region['library_usage']=usage(plan)
     paint(region, scene['paint'])
     anchors = scene['anchors']
     occupied = set()

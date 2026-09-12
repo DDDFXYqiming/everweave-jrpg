@@ -59,6 +59,7 @@ var local_panel: String = ""
 var modal_signature: String = ""
 var hp_tint: StyleBoxFlat
 var music: AudioStreamPlayer
+var soundscape
 var music_muted: bool = false
 
 var home: Control
@@ -68,6 +69,7 @@ var base_input: LineEdit
 var model_input: LineEdit
 var key_input: LineEdit
 var mode_select: OptionButton
+var hybrid_select: CheckBox
 var online_settings: VBoxContainer
 var custom_fields: GridContainer
 var provider_summary: Label
@@ -122,13 +124,9 @@ func _ready() -> void:
 	journal_http.request_completed.connect(_journal_loaded)
 	_build_game()
 	_build_home()
-	music = AudioStreamPlayer.new()
-	music.stream = preload("res://assets/wander.wav")
-	music.volume_db = -14
-	add_child(music)
-	music.finished.connect(func() -> void:
-		if not music_muted: music.play()
-	)
+	soundscape = preload("res://client/soundscape.gd").new()
+	add_child(soundscape)
+	music = soundscape.music_players[0]
 	home.show()
 	game.hide()
 	_poll()
@@ -319,11 +317,20 @@ func _build_home() -> void:
 	var volume := HSlider.new()
 	volume.min_value = 0
 	volume.max_value = 100
-	volume.value = 40
+	volume.value = 65
 	display.add_child(volume)
 	_label(display,"音乐音量",15,MUTED)
 	volume.value_changed.connect(func(value: float) -> void:
-		if is_instance_valid(music): music.volume_db = linear_to_db(value / 100.0)
+		if is_instance_valid(soundscape): soundscape.music_gain = value / 100.0
+	)
+	var effects_volume := HSlider.new()
+	effects_volume.min_value = 0
+	effects_volume.max_value = 100
+	effects_volume.value = 70
+	display.add_child(effects_volume)
+	_label(display,"音效与环境声",15,MUTED)
+	effects_volume.value_changed.connect(func(value: float) -> void:
+		if is_instance_valid(soundscape):soundscape.effects_gain = value/100.0
 	)
 	_button(display,"开启 / 关闭音乐  ·  M",_toggle_music)
 	var connection: Control = home_pages[2]
@@ -336,6 +343,11 @@ func _build_home() -> void:
 	connection.add_child(mode_select)
 	mode_help = _label(connection,"",13,MUTED)
 	online_settings = _vbox(connection)
+	hybrid_select = CheckBox.new()
+	hybrid_select.text = "新内容优先使用本地素材库"
+	hybrid_select.button_pressed = true
+	hybrid_select.tooltip_text = "给模型提供匹配的图像、音频和能力候选，缺少的部分仍可原创。"
+	online_settings.add_child(hybrid_select)
 	provider_summary = _label(online_settings,"DeepSeek Flash",14,GOLD)
 	custom_fields = GridContainer.new()
 	custom_fields.columns = 2
@@ -616,7 +628,7 @@ func _bar(parent: Node, fill: Color) -> ProgressBar:
 
 func _configuration() -> Dictionary:
 	var custom: bool = mode_select.selected == 1
-	return {"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
+	return {"hybrid_content":hybrid_select.button_pressed,"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
 
 func _set_effort(effort: String) -> void:
 	for i in range(effort_select.item_count):
@@ -649,6 +661,7 @@ func _sync_configuration() -> void:
 	base_input.text = str(cfg.get("base_url", "https://api.deepseek.com"))
 	model_input.text = str(cfg.get("model", "deepseek-flash"))
 	budget_input.value = int(cfg.get("max_calls", 60))
+	hybrid_select.button_pressed = bool(cfg.get("hybrid_content",true))
 	var index: int = 2 if bool(cfg.get("offline", false)) else (0 if base_input.text == "https://api.deepseek.com" and model_input.text == "deepseek-flash" and bool(cfg.get("deepseek_options", true)) else 1)
 	mode_select.select(index)
 	_mode_changed(index)
@@ -699,13 +712,11 @@ func _show_game() -> void:
 	home.hide()
 	game.show()
 	get_viewport().gui_release_focus()
-	if not music_muted and not music.playing: music.play()
 	_render()
 
 func _toggle_music() -> void:
 	music_muted = not music_muted
-	music.stream_paused = music_muted
-	if not music_muted and not music.playing: music.play()
+	if is_instance_valid(soundscape):soundscape.muted = music_muted
 
 func _toggle_pause() -> void:
 	var d: Dictionary = state.get("director", {})
@@ -717,6 +728,7 @@ func _toggle_pause() -> void:
 func _toggle_panel(name: String) -> void:
 	if state.get("battle") is Dictionary or not state.get("ui", {}).is_empty(): return
 	local_panel = "" if local_panel == name else name
+	if is_instance_valid(soundscape):soundscape.play_ui()
 	if local_panel == "journal":
 		journal_generation += 1
 		journal_pages.clear()
@@ -837,6 +849,7 @@ func _connection_error(message: String) -> void:
 
 func _render() -> void:
 	if not bool(state.get("started", false)): return
+	if is_instance_valid(soundscape):soundscape.update_state(state,game.visible)
 	world_view.update_world(state)
 	var r: Dictionary = state.region if state.get("region") is Dictionary else {}
 	loading_overlay.visible = r.is_empty()
@@ -881,6 +894,9 @@ func _render() -> void:
 	director_label.text += "\n已应用 %d · 过期 %d · 失败任务 %d" % [int(d.get("accepted", 0)), int(d.get("stale", 0)), failed_tasks.size()]
 	director_label.text += "\n在途 %d · 本地纠正 %d 处\n输入 %d / 输出 %d tokens" % [int(d.get("active_requests", 0)), int(d.get("normalization_count", 0)), int(d.get("input_tokens", 0)), int(d.get("output_tokens", 0))]
 	director_label.text += "\n提前两层 · 已准备 %d / %d 区域" % [int(d.get("prefetch_ready", 0)), int(d.get("prefetch_total", 0))]
+	var library_usage: Dictionary = r.get("library_usage",{})
+	if not library_usage.is_empty():
+		director_label.text += "\n图形：引用 %d · 组合 %d · 原创 %d\n能力模块 %d" % [int(library_usage.get("referenced",0)),int(library_usage.get("composed",0)),int(library_usage.get("drawn",0)),int(library_usage.get("modules",0))]
 	lines.clear()
 	for f in state.get("frontier", []):
 		var status_text: String = "可进入" if bool(f.ready) else ("已暂停" if bool(d.get("paused", false)) else "排队中")
@@ -892,6 +908,8 @@ func _render() -> void:
 		lines.append(("● " if bool(f.ready) else "○ ") + str(f.name) + " · " + status_text)
 	frontier_label.text = "下一片土地\n" + "\n".join(lines)
 	error_label.text = last_action_error if not last_action_error.is_empty() else (str(d.get("error", "")) if failed_tasks.is_empty() else "")
+	var library_error: String = preload("res://client/asset_library.gd").last_error
+	if not library_error.is_empty():error_label.text = library_error
 	retry_failed_button.disabled = failed_tasks.is_empty()
 	_render_failures(failed_tasks)
 	pause_button.text = "继续生成" if bool(d.get("paused", false)) else "暂停生成"
