@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Restore local content from pinned manifests
+        run: python3 -m engine.asset_cache --download
       - name: Authoritative engine / HTTP / persistence tests (no cloud requests)
         run: python3 -m unittest discover -s tests -v
       - name: Check private publish file selection
@@ -20,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Restore local content from pinned manifests
+        run: python3 -m engine.asset_cache --download
       - name: Obtain official Godot Standard
         run: |
           curl --fail --location --retry 2 'https://downloads.godotengine.org/?version=4.7.2&flavor=stable&slug=linux.x86_64.zip&platform=linux.64' -o /tmp/godot.zip

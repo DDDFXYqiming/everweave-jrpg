@@ -70,13 +70,22 @@ flowchart TD
 
 ## 复现与扩库
 
-正常启动不需要 Pillow、额外服务或下载资产。验证当前库只需标准 Python：
+额外素材文件与源码解耦：Git 只跟踪 `index.json`、`sources.json`、模块定义、组合说明和许可记录；图片、音频及 Godot 导入文件放在被忽略的 `assets/library/blobs/`。这是项目本地缓存，保持原有加载路径和存档中的 ID/哈希兼容，实际文件不随后续提交上传。
+
+启动器先验证清单，只补缺失或损坏文件；首次需要联网。原始包按哈希缓存于 `userdata/library-ingest`。从 ZIP 只读取清单中的成员，不把包里的任意内容解压到项目。下载和拼接均通过哈希验证，再原子写入目标文件，失败不会替换成半个文件或改写版本。完整缓存再次启动无需网络。
+
+少量房屋、树木是拼接配方，重建时需要 Pillow。未安装时，启动器自动用 pip 将 Pillow 12.2.0 安装到 `userdata/library-tools`，不改系统 Python 包；准备好图像后，游玩和缓存核验都不依赖 Pillow。
+
+缓存目录自动写入 `.gdignore`。客户端直接解码这些原始 PNG/OGG，Godot 编辑器不再为额外库和下载缓存重复生成导入资源。
+
+可手动预下载或只读验证：
 
 ```powershell
-py -3 tools/import_library.py --verify
+py -3 -m engine.asset_cache --download
+py -3 -m engine.asset_cache --verify
 ```
 
-重建原始素材包导入需要 Pillow；使用已有缓存时运行 `tools/import_library.py`，缺包时加 `--download`。下载内容与 SHA-256 已固定，不从搜索结果自动抓取任意最新版本。缓存位于忽略上传的 `userdata/library-ingest`。
+`tools/import_library.py` 保留为维护者重新编制索引的工具。普通启动使用 `engine.asset_cache`，只读清单，不修改索引、许可证或署名。下载地址失效时明确报错，需要维护者更新可获取的来源；不会自动换成同名但内容不同的新资产。
 
 新增一批已核实 CC0 的素材时，准备 PNG 或 Vorbis OGG 以及 JSON 清单：
 
@@ -84,7 +93,7 @@ py -3 tools/import_library.py --verify
 {
   "source_id":"my_reviewed_pack_v1",
   "source":{"title":"Pack title","author":"Original author","page":"https://example.com/original-pack","version":"1","license":"CC0-1.0"},
-  "assets":[{"id":"my_pack_v1_floor","file":"floor.png","name":"Quiet stone floor","kind":"image","roles":["ground"],"tags":["dungeon","stone"],"family":"my_top_down_family","perspective":"top_down","footprint":[1,1]}]
+  "assets":[{"id":"my_pack_v1_floor","file":"floor.png","download":"https://example.com/original-pack/floor.png","name":"Quiet stone floor","kind":"image","roles":["ground"],"tags":["dungeon","stone"],"family":"my_top_down_family","perspective":"top_down","footprint":[1,1]}]
 }
 ```
 
@@ -93,8 +102,10 @@ py -3 tools/register_library.py path/to/batch.json
 py -3 tools/register_library.py path/to/batch.json --apply
 ```
 
-第一条只预览，第二条把已审核文件、索引和来源记录入库。工具不替人判断版权真实性。图像必须与现有尺寸/视角兼容；标签需对应当前检索支持的 `town/dungeon/sci_fi` 与角色用途。复杂新视角、3D 模型或全新检索题材需要适配代码，不能仅靠入库脚本自动兼容。
+第一条只预览，第二条把已审核文件写入本地缓存，并更新可提交的索引与来源记录。每项必须提供可还原相同字节的公开 HTTPS 下载地址，启动时按内容哈希验证。工具不替人判断版权真实性。图像必须与现有尺寸/视角兼容；标签需对应当前检索支持的 `town/dungeon/sci_fi` 与角色用途。复杂新视角、3D 模型或全新检索题材需要适配代码，不能仅靠入库脚本自动兼容。
 
 维护者添加新的玩法模块时，应提供有界 DSL 模板、完整参数定义与实际数值/空间回归测试。运行时不下载或执行第三方脚本。
 
 新世界建议使用独立 `-DataDir`。默认启用混合内容；取消连接设置中的复选框只影响后续生成，不删资产、不改变已存世界。项目当前按源码启动；如制作独立 PCK 发行包，需要将库中的原始 PNG/OGG、JSON 纳入导出文件，源码启动测试不等于发行包验收。
+
+此次采用追加提交移除 Git 跟踪，本机缓存保留。此前提交中的二进制仍存在 Git 历史中；普通完整克隆仍可能取到历史体积。需要仅取当前版本时可以浅克隆；彻底清理历史需要另行协调历史重写，本次没有执行。

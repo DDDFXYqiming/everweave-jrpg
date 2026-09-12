@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch Godot and its local state helper as one application. Python 3.11+, no pip.
+"""Launch Godot and its local state helper, preparing missing local asset caches.
 The paid API credential is entered in the game (or supplied by DEEPSEEK_API_KEY).
 The only command-line token is a per-launch local loopback session credential.
 """
@@ -82,6 +82,11 @@ def main(argv: list[str] | None = None) -> int:
     runtime_file = args.data_dir / 'runtime.json'
     code = 0
     try:
+        # Resolve the versioned manifests before opening a world. Existing
+        # verified assets take an offline fast path; no repository metadata changes.
+        from engine.asset_cache import prepare
+        result = prepare(download=True, progress=lambda message: print(message, flush=True))
+        print(f'Local asset cache ready: {result["assets"]} entries.', flush=True)
         token = secrets.token_urlsafe(32)
         server = GameServer(('127.0.0.1', 0), args.data_dir / 'world.sqlite3', token)
         url = f'http://127.0.0.1:{server.server_port}'

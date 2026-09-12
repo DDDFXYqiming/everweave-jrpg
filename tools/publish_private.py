@@ -31,6 +31,7 @@ def source_files():
         if not file.is_file():continue
         rel=file.relative_to(ROOT)
         if any(p in SKIP_DIRS for p in rel.parts):continue
+        if rel.parts[:3]==('assets','library','blobs'):continue
         if rel.parts[0] not in ALLOWED_ROOTS and str(rel) not in ALLOWED_FILES:continue
         if file.name in ('runtime.json','instance.lock') or file.suffix.lower() in ('.sqlite3','.sqlite','.db','.key','.pem','.exe','.zip','.log','.pyc'):
             continue

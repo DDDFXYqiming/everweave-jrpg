@@ -28,7 +28,7 @@
 
 ## 启动（Windows）
 
-需要 **Godot 4 Standard**（目标版本 4.7.2）和 **Python 3.11+**。正常游玩不需要 pip、Node、Docker、数据库安装或其他 AI 服务。运行游戏只需要这两个程序；Godot 安装包没有放进项目里。
+需要 **Godot 4 Standard**（目标版本 4.7.2）和 **Python 3.11+**。首次启动按仓库中的清单下载缺失的额外素材，核对 SHA-256 后缓存；如需重建拼接图且未安装 Pillow，会通过 pip 将该工具安装到项目内被忽略的工具缓存，不改全局 Python 环境。资源齐全后的启动可离线进行，不需要 Node、Docker 或数据库安装。Godot 安装包没有放进项目里。
 
 解压后，将官方 Godot `.exe` 放到本目录，双击 `Start.cmd`。也可以在 PowerShell 7 里指定路径：
 
@@ -136,7 +136,14 @@ godot --headless --path . --script res://tests/client_smoke.gd
 python launch.py --server-only
 ```
 
-开发时才需要 Pillow 来重建素材或预览；正常游玩已附全部成品素材：
+额外素材库只提交索引、来源、许可和组合说明，PNG/OGG 及其导入缓存不提交。启动器自动准备资源，也可提前准备或只读验证：
+
+```text
+python -m engine.asset_cache --download
+python -m engine.asset_cache --verify
+```
+
+开发时重建项目基础素材或预览：
 
 ```text
 python -m pip install pillow

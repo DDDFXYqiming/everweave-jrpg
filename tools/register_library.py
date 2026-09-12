@@ -1,7 +1,7 @@
 """Register a reviewed CC0 asset batch without changing engine code.
 
 Manifest: {source_id, source:{title,author,page,version,license:"CC0-1.0"},
- assets:[{id,file,name,kind,roles,tags,family?,perspective?,footprint?,loop?}]}.
+ assets:[{id,file,download,name,kind,roles,tags,family?,perspective?,footprint?,loop?}]}.
 Files must be PNG or Vorbis OGG beneath the manifest's folder. This tool does not
 download or determine copyright ownership; verify the original license first.
 Default is a dry-run; use --apply after reviewing the reported entries.
@@ -37,9 +37,10 @@ def register(path,apply=False):
         data=file.read_bytes();sha=hashlib.sha256(data).hexdigest()
         if key in index['assets']:assert index['assets'][key]['sha256']==sha,'Use a new versioned ID when bytes change'
         kind=spec['kind'];assert kind in ('image','sfx','music')
+        assert isinstance(spec.get('download'),str) and spec['download'].startswith('https://'),'Each asset needs a reproducible public HTTPS download URL'
         entry={k:spec[k] for k in ('name','kind','roles','tags')}
         assert isinstance(entry['roles'],list) and isinstance(entry['tags'],list)
-        entry.update(source=source_id,sha256=sha,file=f'assets/library/blobs/{sha}{file.suffix.lower()}',bytes=len(data),curated=True)
+        entry.update(source=source_id,download=spec['download'],sha256=sha,file=f'assets/library/blobs/{sha}{file.suffix.lower()}',bytes=len(data),curated=True)
         if kind=='image':
             assert file.suffix.lower()=='.png'
             img=Image.open(io.BytesIO(data));assert 8<=img.width<=96 and 8<=img.height<=96
