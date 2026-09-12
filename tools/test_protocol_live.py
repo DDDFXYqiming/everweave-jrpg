@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--max-calls',type=int,default=4)
     parser.add_argument('--retry-from',type=Path,help='Repair a recorded failed response for the same saved world')
+    parser.add_argument('--regions-only',action='store_true',help='Isolate region generation from optional world reactions in this test copy')
     args=parser.parse_args()
     if not args.live or not os.environ.get('DEEPSEEK_API_KEY'):
         parser.error('--live and DEEPSEEK_API_KEY are required')
@@ -72,6 +73,7 @@ def main():
             else:raise RuntimeError('Recorded response already validates; no paid repair is needed')
         with patch.object(ChatProvider,'generate',traced):
             while d.calls<args.max_calls and not w.state['topology'][target]['ready']:
+                if args.regions_only:w.reaction_needed=False
                 if not d.step():break
                 if ('region',target) in d.failed:break
         status=d.status()

@@ -151,7 +151,7 @@ def _parse_patch(raw,expected,context=None):
   out['region']=reg
  elif expected=='reaction':
   if 'region' in p: raise InvalidPatch('reaction cannot replace visited maps')
-  r=obj(p.get('reaction'),'reaction',('text','weather','rule','npc_lines','spawns','items','quests','locations','visuals','paint','program','object_updates'),('text',)); out['reaction']=dict(text=text(r['text'],'reaction text',450),npc_lines=[],spawns=[],items=[],quests=[],locations=[])
+  r=obj(p.get('reaction'),'reaction',('text','weather','rule','npc_lines','spawns','items','quests','locations','visuals','paint','program','object_updates','future_updates'),('text',)); out['reaction']=dict(text=text(r['text'],'reaction text',450),npc_lines=[],spawns=[],items=[],quests=[],locations=[])
   for key,choices in (('weather',C.WEATHERS),('rule',C.RULES)):
    if key in r: out['reaction'][key]=enum(r[key],choices,key)
   for update in arr(r.get('npc_lines',[]),'npc_lines',3):
@@ -184,6 +184,13 @@ def _parse_patch(raw,expected,context=None):
    entity_extensions(u,up)
    if 'remove' in u:up['remove']=boolean(u['remove'])
    out['reaction']['object_updates'].append(up)
+  out['reaction']['future_updates']=[]
+  for index,update in enumerate(checked('reaction.future_updates',arr,r.get('future_updates',[]),'future updates',2)):
+   loc=f'reaction.future_updates[{index}]'
+   checked(loc,obj,update,'future update',('id','name','description'),('id','description'))
+   entry=dict(id=checked(loc+'.id',reference,update['id']),description=checked(loc+'.description',text,update['description'],'future description',300))
+   if 'name' in update:entry['name']=checked(loc+'.name',text,update['name'],'future name',48)
+   out['reaction']['future_updates'].append(entry)
  else: raise InvalidPatch('unsupported kind')
  return out
 

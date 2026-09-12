@@ -8,6 +8,7 @@ import math
 import re
 
 from .schema import InvalidPatch, obj, text, ident, arr
+from .diagnostics import checked
 
 OPS = {
     'add': (2, 8), 'sub': (2, 2), 'mul': (2, 8), 'div': (2, 2),
@@ -167,13 +168,14 @@ def program(value):
     result = dict(summary=text(value.get('summary', '交互规则'), 'program summary', 300),
                   vars=state_values(value.get('vars', {})), actions=[], hooks=[], objectives=[])
     for raw in arr(value.get('actions', []), 'actions', 32):
-        obj(raw, 'action', ('id', 'label', 'target', 'scope', 'when', 'effects', 'once', 'description'), ('id', 'label', 'effects'))
+        obj(raw, 'action', ('id', 'label', 'target', 'scope', 'when', 'effects', 'once', 'description', 'blocked_hint'), ('id', 'label', 'effects'))
         scope = raw.get('scope', 'explore')
         if scope not in ('explore', 'combat'): raise InvalidPatch('scope must be explore or combat')
         result['actions'].append(dict(id=ident(raw['id']), label=text(raw['label'], 'action label', 64),
             description=text(raw.get('description', raw['label']), 'action description', 200),
             target=target(raw.get('target', 'player')), scope=scope, when=expression(raw.get('when', True)),
             effects=effects(raw['effects']), once=boolean(raw.get('once', False))))
+        if 'blocked_hint' in raw:result['actions'][-1]['blocked_hint']=text(raw['blocked_hint'],'blocked hint',200)
     for raw in arr(value.get('hooks', []), 'hooks', 32):
         obj(raw, 'hook', ('id', 'on', 'target', 'when', 'effects', 'once'), ('id', 'on', 'effects'))
         result['hooks'].append(dict(id=ident(raw['id']), on=event_name(raw['on']), target=target(raw.get('target', 'player')), when=expression(raw.get('when', True)),
@@ -197,6 +199,8 @@ def program(value):
 
 def tile(value):
     if isinstance(value, str) and value in TILES: return TILES[value]
+    if isinstance(value,str):
+        raise InvalidPatch('unsupported tile type',value=value,expected='ground/path/water/wall/bridge; material belongs in visuals.terrain or a surface recipe')
     return integer(value, 0, 4, 'tile')
 
 
@@ -231,6 +235,16 @@ def paint_commands(value, width, height):
 
 def scene(value):
     obj(value, 'scene', ('size', 'spawn', 'base', 'paint', 'anchors', 'summary'), ('size', 'spawn', 'paint', 'anchors'))
+    # Report independent tile mistakes together instead of consuming a complete
+    # model repair just to reveal the next material/collision-type mix-up.
+    errors=[]
+    tile_fields=[('base',value.get('base','ground'))]
+    if isinstance(value['paint'],list):
+        tile_fields.extend((f'paint[{i}].tile',command['tile']) for i,command in enumerate(value['paint']) if isinstance(command,dict) and 'tile' in command)
+    for location,raw in tile_fields:
+        try:checked(location,tile,raw)
+        except InvalidPatch as exc:errors.extend(exc.issues)
+    if errors:raise InvalidPatch(issues=errors)
     size = arr(value['size'], 'scene size', 2, 2)
     w, h = integer(size[0], 16, 96), integer(size[1], 12, 72)
     anchors = value['anchors']

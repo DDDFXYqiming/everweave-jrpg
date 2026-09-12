@@ -122,6 +122,9 @@ class Normalizer:
         other = 'reaction' if root == 'region' else 'region'
         if other in raw:
             return
+        if raw.get('type')=='json_object':
+            raw.pop('type')
+            self.record('type','envelope_metadata','json_object',None)
         for field in ('visuals', 'program') + (('scene',) if root == 'region' else ()):
             self.move_field(raw, body, field, field, root + '.' + field)
         for field in ('lore', 'threads'):
@@ -343,6 +346,14 @@ class Normalizer:
                 if group == 'items' and isinstance(entry, dict): self.program_refs(entry.get('use'), path + '.use')
         for i, entry in enumerate(body.get('npc_lines', []) if isinstance(body.get('npc_lines'), list) else []):
             self.field_ref(entry, 'id', 'objects', f'{root}.npc_lines[{i}]', canonical=True)
+        for i,entry in enumerate(body.get('future_updates',[]) if isinstance(body.get('future_updates'),list) else []):
+            if not isinstance(entry,dict) or not isinstance(entry.get('id'),str):continue
+            value=entry['id'];frontier=self.context.get('frontier',[])
+            if any(f.get('id')==value for f in frontier):continue
+            matches=[f['id'] for f in frontier if (f.get('outline') or {}).get('id')==value]
+            if len(matches)==1:
+                entry['id']=matches[0];self.record(f'{root}.future_updates[{i}].id','reference_id',value,matches[0])
+            elif len(matches)>1:self.error(f'{root}.future_updates[{i}].id','ambiguous future destination reference',value)
         for i, entry in enumerate(body.get('quests', []) if isinstance(body.get('quests'), list) else []):
             if isinstance(entry, dict):
                 self.field_ref(entry, 'target', 'items' if entry.get('goal') == 'collect' else 'objects', f'{root}.quests[{i}]')

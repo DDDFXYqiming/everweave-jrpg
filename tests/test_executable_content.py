@@ -59,6 +59,17 @@ class ExecutableTests(unittest.TestCase):
     def test_distant_actions_cannot_be_invoked(self):
         self.w.state['player'].update(x=20,y=14)
         with self.assertRaises(RuleError):self.invoke()
+    def test_disabled_actions_explain_public_resources_without_puzzle_state(self):
+        a=self.w.region()['program']['actions'][0]
+        a['when']=expr('ge',get('player.gold'),50)
+        option=Runtime(self.w,self.w.region()).available()[0]
+        self.assertFalse(option['enabled']);self.assertIn('金币 ×50',option['blocked_reason'])
+        self.assertIn('当前 35',option['blocked_reason'])
+        a['when']=expr('eq',get('vars.presses'),17)
+        option=Runtime(self.w,self.w.region()).available()[0]
+        self.assertNotIn('17',option['blocked_reason']);self.assertNotIn('presses',option['blocked_reason'])
+        a['blocked_hint']='先寻找控制器上的刻度线索。'
+        self.assertEqual(Runtime(self.w,self.w.region()).available()[0]['blocked_reason'],a['blocked_hint'])
     def test_custom_combat_replaces_fixed_spell(self):
         self.w.state['player'].update(x=19,y=8)
         self.w.action({'op':'interact','id':'r0:foe'})

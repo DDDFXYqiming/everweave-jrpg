@@ -95,7 +95,21 @@ func _run() -> void:
 	assert(main.state.battle.hp == 30 and main.state.player.mp == 21 and main.state.player.hp == 89)
 	await _tap(KEY_ESCAPE)
 	assert(main.state.battle == null)
+	for n in range(8): await _tap(KEY_S)
+	for n in range(4): await _tap(KEY_D)
+	assert(main.state.player.x == 23 and main.state.player.y == 16)
+	await _tap(KEY_E)
+	assert(main.state.ui.kind == "pending_exit" and not main.state.ui.ready)
+	var previous_region: String = main.state.region.id
+	await _capture("pending-exit")
+	phase = "background region arrives at pending exit"
+	while not main.state.ui.get("ready", false): await process_frame
+	assert(main.state.region.id == previous_region)
+	assert(main._exit_wait_phase(main.state.ui) == "ready")
+	await _capture("ready-exit")
+	await _tap(KEY_E)
+	assert(main.state.region.id != previous_region and main.state.ui.is_empty())
 	main.queue_free()
 	await create_timer(0.15).timeout
-	print("NATIVE_CONTENT_E2E_OK targeted_retry=true logical_keys=true short_taps=true dynamic_actions=true causal_door=true objective=true custom_combat=true cloud_calls=0")
+	print("NATIVE_CONTENT_E2E_OK targeted_retry=true logical_keys=true short_taps=true dynamic_actions=true causal_door=true objective=true custom_combat=true pending_exit_live_update=true ready_exit_key=true cloud_calls=0")
 	quit(0)

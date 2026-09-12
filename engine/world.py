@@ -17,10 +17,16 @@ class GameError(ValueError): pass
 class World:
  def __init__(self,store):
   self.store=store; self.lock=threading.RLock(); self.state=store.load_state(); self.cache=OrderedDict(); self.reaction_needed=bool(self.state and self.state.get("director_reaction_pending",False))
+  if self.state and self.state.get('prefetch_policy',1)<2:
+   # Earlier versions marked every draft dirty after any player story event.
+   # Keep prepared maps; only explicit outline changes request a full refresh.
+   for node in self.state['topology'].values():
+    if not node.get('refresh_reason'):node['needs_refresh']=False
+   self.state['prefetch_policy']=2
  def start(self,setting):
   if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
   self.cache.clear(); self.reaction_needed=False
-  self.state=dict(schema_version=2,director_reaction_pending=False,epoch=uuid.uuid4().hex,version=1,story_revision=0,setting=setting.strip(),title='未写之境 · Everweave',current='r0',time=480,steps=0,
+  self.state=dict(schema_version=2,prefetch_policy=2,director_reaction_pending=False,epoch=uuid.uuid4().hex,version=1,story_revision=0,setting=setting.strip(),title='未写之境 · Everweave',current='r0',time=480,steps=0,
    player=dict(x=26,y=31,facing=[0,-1],hp=90,max_hp=90,mp=24,max_mp=24,level=1,xp=0,gold=35,inventory=dict(potion=3,ether=1,wayfarer_blade=1),weapon='wayfarer_blade',charm=''),
    topology={'r0':dict(parent=None,depth=0,ready=False,visited=False,name='最初的落脚处',children=[])},items=copy.deepcopy(C.BASE_ITEMS),quests={},lore={},threads={},facts={},battle=None,ui={},journal=['你的一句话，正在成为一个可以走进去的世界。'])
   self.store.commit(self.state,reset=True)
@@ -45,9 +51,6 @@ class World:
   self.state['journal'].append(t); self.state['journal']=self.state['journal'][-80:]
  def story(self,kind,text,data=None):
   s=self.state; s['story_revision']+=1; self.reaction_needed=True; s['director_reaction_pending']=True; self.note(text); discarded=[]
-  for rid in s['topology'][s['current']]['children']:
-   n=s['topology'][rid]
-   if n['ready'] and not n['visited']: n['needs_refresh']=True
   return dict(type=kind,text=text,data=data or {},region=s['current'],revision=s['story_revision'],time=s['time']),discarded
  def prefetch_targets(self,depth=2):
   if not self.state: return []
@@ -65,12 +68,28 @@ class World:
   s=self.state; rid=target or s['current']; r=self.region(); n=s['topology'][rid]
   parent=self.region(n['parent']) if n['parent'] else None
   art=(parent or r or {}).get('visuals',{})
-  return dict(content_version=2,design_history=s.get('design_history',[])[-12:],hero_visual=s.get('hero_visual'),current_program=(r or {}).get('program',{}),current_runtime=(r or {}).get('runtime',{}),current_scene=(r or {}).get('scene',{}),known_sprites=list((r or {}).get('visuals',{}).get('sprites',{})),epoch=s['epoch'],kind=kind,setting=s['setting'],world_title=s['title'],target=rid,target_depth=n['depth'],destination=n.get('outline'),refresh=bool(n.get('needs_refresh')),existing_destinations=[s['topology'][ch].get('outline') for ch in n['children'] if s['topology'][ch].get('outline')],visual_identity={k:art[k] for k in ('style','terrain','palette') if k in art},planned_parent={k:parent[k] for k in ('id','name','description','biome','rule')} if parent else None,story_revision=s['story_revision'],
+  return dict(content_version=2,design_history=s.get('design_history',[])[-12:],hero_visual=s.get('hero_visual'),current_program=(r or {}).get('program',{}),current_runtime=(r or {}).get('runtime',{}),current_scene=(r or {}).get('scene',{}),known_sprites=list((r or {}).get('visuals',{}).get('sprites',{})),epoch=s['epoch'],kind=kind,setting=s['setting'],world_title=s['title'],target=rid,target_depth=n['depth'],target_revision=n.get('generation_revision',0),target_parent=n.get('parent'),destination=n.get('outline'),refresh=bool(n.get('needs_refresh')),existing_destinations=[s['topology'][ch].get('outline') for ch in n['children'] if s['topology'][ch].get('outline')],visual_identity={k:art[k] for k in ('style','terrain','palette') if k in art},planned_parent={k:parent[k] for k in ('id','name','description','biome','rule')} if parent else None,story_revision=s['story_revision'],
    player={k:s['player'][k] for k in ('level','hp','gold')},current_region={k:r[k] for k in ('id','name','description','biome','rule','entities')} if r else {},
    available_items=[i for k,i in s['items'].items() if k in C.BASE_ITEMS or k.startswith(s['current']+':') or k in s['player']['inventory']],
    frontier=[dict(id=k,name=s['topology'][k]['name'],outline=s['topology'][k].get('outline'),visited=s['topology'][k]['visited']) for k in s['topology'][s['current']]['children']],
    known_locations=[dict(id=k,name=v['name'],visited=v['visited']) for k,v in list(s['topology'].items())[-18:]],
    facts=dict(list(s['facts'].items())[-35:]),lore=list(s['lore'].values())[-16:],threads=list(s['threads'].values())[-10:],quests=list(s['quests'].values())[-10:],recent_events=self.store.recent_events(12))
+ def context_is_current(self,context):
+  s=self.state
+  if not s or context.get('epoch')!=s['epoch']:return False
+  node=s['topology'].get(context.get('target'))
+  if node is None:return False
+  if context.get('kind')=='region':
+   return (not node.get('visited') and context.get('target_revision',0)==node.get('generation_revision',0)
+           and context.get('target_parent',node.get('parent'))==node.get('parent'))
+  return (context.get('story_revision')==s['story_revision'] and context.get('target')==s['current']
+          and context.get('current_region',{}).get('id')==s['current'])
+ def _update_outline(self,node,outline):
+  if node.get('outline')==outline:return
+  node['outline']=copy.deepcopy(outline)
+  node['generation_revision']=node.get('generation_revision',0)+1
+  node['needs_refresh']=bool(node['ready'])
+  node['refresh_reason']='outline_update'
  def _merge_lore(self,lore,threads):
   for f in lore: self.state['lore'].setdefault(f['id'],f)
   for t in threads: self.state['threads'].setdefault(t['id'],t)
@@ -79,7 +98,7 @@ class World:
   if rid not in s['topology']:
    s['topology'][rid]=dict(parent=parent,depth=s['topology'][parent]['depth']+1,ready=False,visited=False,name=spec['name'],outline=copy.deepcopy(spec),children=[])
   elif not s['topology'][rid]['visited']:
-   s['topology'][rid]['outline']=copy.deepcopy(spec)
+   self._update_outline(s['topology'][rid],spec)
   return rid
  def _enter_content(self,r):
   s=self.state; rid=r['id']
@@ -95,7 +114,7 @@ class World:
    if r.get('program') and any(x.get('logic')==record['logic'] for x in previous):self.note('设计提示：这一地区的交互结构与过去相似，导演将在后续创作中避免重复。')
    gameplay.register_objectives(self,r)
    self._merge_lore(r.get('pending_lore',[]),r.get('pending_threads',[])); s['facts']['visited:'+rid]=r['name']
-  s['topology'][rid]['visited']=True; s['topology'][rid]['needs_refresh']=False; r['visits']+=1
+  s['topology'][rid]['visited']=True;s['topology'][rid]['name']=r['name']; s['topology'][rid]['needs_refresh']=False; r['visits']+=1
  def _discard_draft(self,rid):
   node=self.state['topology'].get(rid)
   if not node: return []
@@ -154,7 +173,7 @@ class World:
   return gameplay.transaction(self,lambda:self._apply_patch(raw,context,source))
  def _apply_patch(self,raw,context,source='llm',_validated=None):
   s=self.state
-  if not s or context['epoch']!=s['epoch'] or context['story_revision']!=s['story_revision']: return False
+  if not self.context_is_current(context): return False
   p=self.validate_patch(raw,context) if _validated is None else _validated
   before=copy.deepcopy(s); cache_before=copy.deepcopy(self.cache)
   try:
@@ -174,7 +193,7 @@ class World:
      for n,child in enumerate(node['children']): s['topology'][child]=dict(parent=rid,depth=node['depth']+1,ready=False,visited=False,name='远处的灯火' if n==0 else '尚未命名的道路',children=[])
     exits=[dict(target=ch,direction='forward',label='前往 '+s['topology'][ch]['name']) for ch in node['children']]
     if node['parent']: exits.append(dict(target=node['parent'],direction='back',label='返回 '+s['topology'][node['parent']]['name']))
-    r=build_region(p['region'],rid,C.stable_seed(s['setting'],rid),node['depth'],exits); r.update(plan=p['region'],source=source,pending_lore=p['lore'],pending_threads=p['threads'],normalizations=p['_corrections'][-128:]); node.update(ready=True,name=r['name'],needs_refresh=False)
+    r=build_region(p['region'],rid,C.stable_seed(s['setting'],rid),node['depth'],exits); r.update(plan=p['region'],source=source,pending_lore=p['lore'],pending_threads=p['threads'],normalizations=p['_corrections'][-128:],generated_story_revision=context['story_revision']); node.update(ready=True,name=r['name'],needs_refresh=False,refresh_reason=None)
     if r.get('visuals'):
      if rid=='r0' and 'hero' not in r['visuals']['sprites']:raise InvalidPatch('opening region requires hero sprite')
      if rid=='r0':s['hero_visual']=freeze_sprite(r['visuals']['sprites']['hero'],r['visuals']['palette'])
@@ -243,8 +262,17 @@ class World:
      occupied.add(pos); occupied.add((pos[0],pos[1]-1)); children.append(target)
      r['entities'].append(dict(id=prefix+'gate_'+spec['id'],kind='exit',name='前往 '+spec['name'],target=target,direction='forward',x=pos[0],y=pos[1],spent=False))
     gameplay.reaction(self,r,re)
+    for index,update in enumerate(re.get('future_updates',[])):
+     target=update['id'];node=s['topology'].get(target)
+     if node is None or target not in s['topology'][rid]['children'] or node['visited']:
+      raise InvalidPatch('future update must target an unvisited direct exit',path=f'reaction.future_updates[{index}].id',category='reference',value=target)
+     outline=dict(node.get('outline') or {'id':target,'name':node['name']})
+     outline['description']=update['description']
+     if 'name' in update:outline['name']=update['name']
+     self._update_outline(node,outline)
+     if not node['ready']:node['name']=outline['name']
     r['normalizations']=(r.get('normalizations',[])+p['_corrections'])[-128:]
-    self._merge_lore(p['lore'],p['threads']); s['director_reaction_pending']=False; r['revision']+=1; self.note('世界回应：'+re['text']); self.persist(r)
+    self._merge_lore(p['lore'],p['threads']); s['director_reaction_pending']=False;self.reaction_needed=False; r['revision']+=1; self.note('世界回应：'+re['text']); self.persist(r)
   except Exception:
    self.state=before; self.cache=cache_before; raise
   return True
@@ -260,8 +288,14 @@ class World:
     if e['kind']=='exit': e['name']=('返回 ' if e['direction']=='back' else '前往 ')+s['topology'][e['target']]['name']
   inv=[dict(s['items'][k],quantity=n,equipped=k in (p['weapon'],p['charm'])) for k,n in p['inventory'].items() if n>0 and k in s['items']]
   generated_actions=Runtime(self,r).available(scope='combat' if s['battle'] else 'explore') if r and r.get('program') else []
+  ui=copy.deepcopy(s['ui'])
+  if ui.get('kind')=='pending_exit':
+   node=s['topology'].get(ui.get('target'),{})
+   ui['ready']=bool(node.get('ready'));ui['name']=node.get('name','下一个地区')
+   ui['title']='下一地区已准备好' if ui['ready'] else '地区正在后台准备'
+   ui['lines']=['可以进入 '+ui['name']+'。'] if ui['ready'] else ['这条道路尚未准备好。你可以继续探索，后台会提前生成。']
   return copy.deepcopy(dict(available_actions=generated_actions,content_version=2,started=True,version=s['version'],epoch=s['epoch'],title=s['title'],setting=s['setting'],story_revision=s['story_revision'],time=s['time'],
-   region={k:v for k,v in r.items() if k not in ('plan','pending_lore','pending_threads')} if r else None,player=p,inventory=inv,quests=list(s['quests'].values())[-20:],threads=list(s['threads'].values())[-10:],journal=s['journal'][-10:],battle=s['battle'],ui=s['ui'],map_count=sum(n['visited'] for n in s['topology'].values()),
+   region={k:v for k,v in r.items() if k not in ('plan','pending_lore','pending_threads')} if r else None,player=p,inventory=inv,quests=list(s['quests'].values())[-20:],threads=list(s['threads'].values())[-10:],journal=s['journal'][-10:],battle=s['battle'],ui=ui,map_count=sum(n['visited'] for n in s['topology'].values()),
    frontier=[dict(id=rid,name=s['topology'][rid]['name'],ready=s['topology'][rid]['ready']) for rid in s['topology'][s['current']]['children']]))
  def action(self,a):
   return gameplay.action(self,a)
@@ -272,6 +306,12 @@ class World:
   if op=='close':
    if s['battle']: raise GameError('请先结束战斗或撤离。')
    s['ui']={}; self.persist(); return
+  if op=='enter_exit':
+   if s['battle'] or s['ui'].get('kind')!='pending_exit':raise GameError('当前没有等待进入的出口。')
+   gate=next((e for e in r['entities'] if e['id']==s['ui'].get('entity') and e['kind']=='exit'),None)
+   if gate is None or gameplay.distance(gate,p)>1:raise GameError('请先走到出口附近。')
+   if not s['topology'][gate['target']]['ready']:raise GameError('这条道路尚未准备好。')
+   s['ui']={};self.interact(gate);return gate['id']
   if s['battle']:
    if op!='combat': raise GameError('战斗中不能这样做。')
    self.combat(a.get('move','')); return
@@ -330,7 +370,7 @@ class World:
   s=self.state; p=s['player']; r=self.region(); kind=e['kind']
   if kind=='exit':
    target=e['target']; node=s['topology'][target]
-   if not node['ready']: s['ui']=dict(kind='message',title='世界仍在生长',lines=['这条道路还在生成。可以先探索周围，或在右侧查看生成状态。']); self.persist(); return
+   if not node['ready']: s['ui']=dict(kind='pending_exit',target=target,entity=e['id'],title='地区正在后台准备',lines=[]); self.persist(); return
    old=s['current']; new=self.region(target); self._enter_content(new); s['current']=target
    back=next((g for g in new['entities'] if g['kind']=='exit' and g['target']==old),None)
    p['x'],p['y']=(back['x'],back['y']) if back and 'scene' in new else ((back['x'],back['y']-1) if back else new['spawn']); s['ui']={}; s['time']+=10; self.note('抵达：'+new['name']); self.note(new['description'])

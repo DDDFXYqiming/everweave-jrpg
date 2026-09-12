@@ -254,6 +254,24 @@ class Runtime:
             event, _ = self.world.story('objective', ('完成：' if status == 'complete' else '未能完成：')+q['name'])
             self.world.persist(self.region, event=event)
 
+    def _resource_hint(self, condition):
+        """Explain only public inventory/stat shortages, never hidden puzzle state."""
+        if not isinstance(condition,dict):return ''
+        args=condition.get('args',[])
+        if condition.get('op')=='and':
+            return '；'.join(filter(None,(self._resource_hint(c) for c in args)))
+        if condition.get('op') not in ('ge','gt') or len(args)!=2:return ''
+        left,threshold=args
+        if not isinstance(left,dict) or type(threshold) is not int:return ''
+        needed=threshold+int(condition['op']=='gt')
+        labels={'player.gold':'金币','player.mp':'魔力','player.hp':'生命值'}
+        if left.get('get') in labels:
+            name=labels[left['get']];current=self.s['player'][left['get'].split('.')[1]]
+        elif 'item' in left:
+            key=self.item_id(left['item']);name=self.s['items'][key]['name'];current=self.s['player']['inventory'].get(key,0)
+        else:return ''
+        return f'需要 {name} ×{needed}（当前 {current}）' if current<needed else ''
+
     def available(self, target=None, scope=None):
         result = []; p = self.s['player']
         for a in self.region.get('program', {}).get('actions', []):
@@ -267,7 +285,10 @@ class Runtime:
                     if min(abs(x-p['x'])+abs(y-p['y']) for x, y in cells_for(obj)) > 1: continue
                 if a['scope'] == 'combat' and not self.s.get('battle'): continue
                 enabled = bool(self.expr(a['when']))
-                result.append(dict(id=a['id'], label=a['label'], description=a['description'], enabled=enabled, scope=a['scope'], target=canonical))
+                reason=''
+                if not enabled:
+                    reason=a.get('blocked_hint') or self._resource_hint(a['when']) or (a['description'] if a['description']!=a['label'] else '当前条件尚未满足。请留意附近人物和物件提供的线索。')
+                result.append(dict(id=a['id'], label=a['label'], description=a['description'], enabled=enabled, blocked_reason=reason, scope=a['scope'], target=canonical))
             except RuleError:
                 continue
         self.actor = 'player'

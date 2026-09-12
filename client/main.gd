@@ -276,7 +276,7 @@ func _build_home() -> void:
 	budget_input.value = 60
 	grid.add_child(budget_input)
 	effort_help = _label(online_settings, "", 13, MUTED)
-	_label(online_settings, "模型串行生成；走路和普通战斗不额外请求。设置会保存，密钥不会写入存档。", 13, MUTED)
+	_label(online_settings, "后台最多同时生成两个地区；走路和已有规则在本机执行。设置会保存，密钥不会写入存档。", 13, MUTED)
 	mode_select.item_selected.connect(_mode_changed)
 	_mode_changed(mode_select.selected)
 	replace_dialog = ConfirmationDialog.new()
@@ -357,9 +357,15 @@ func _build_game() -> void:
 	var side_panel := PanelContainer.new()
 	side_panel.custom_minimum_size.x = 285
 	middle.add_child(side_panel)
+	var side_frame := _vbox(side_panel)
+	var controls := HBoxContainer.new()
+	side_frame.add_child(controls)
+	pause_button = _button(controls, "暂停导演", _toggle_pause)
+	retry_failed_button = _button(controls, "重试失败项", func() -> void: _post("/retry", {}))
 	var side_scroll := ScrollContainer.new()
+	side_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	side_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	side_panel.add_child(side_scroll)
+	side_frame.add_child(side_scroll)
 	var side := _vbox(side_scroll)
 	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	side.custom_minimum_size.x = 250
@@ -375,10 +381,6 @@ func _build_game() -> void:
 	error_label = _label(side, "", 13, Color("e7a69d"))
 	failure_list = VBoxContainer.new()
 	side.add_child(failure_list)
-	var controls := HBoxContainer.new()
-	side.add_child(controls)
-	pause_button = _button(controls, "暂停导演", _toggle_pause)
-	retry_failed_button = _button(controls, "重试失败项", func() -> void: _post("/retry", {}))
 	_label(side, "最近的回声", 17, GOLD)
 	journal_label = _label(side, "", 13, MUTED)
 	var footer := HBoxContainer.new()
@@ -627,7 +629,13 @@ func _render() -> void:
 	var mode_text: String = "离线演示 · 非 LLM" if mode == "offline_demo" else "在线 · " + str(d.get("model", ""))
 	if mode == "not_configured": mode_text = "尚未配置导演"
 	if mode == "live_llm": mode_text += " · 思考 " + str(d.get("reasoning_effort", "low"))
-	director_label.text = mode_text + "\n" + (str(d.busy) if not str(d.get("busy", "")).is_empty() else ("导演已暂停" if bool(d.get("paused", false)) else "等待重要事件 · 不按帧调用"))
+	var active_lines: Array[String] = []
+	for task in d.get("active_tasks", []):
+		var purpose: String = "世界变化" if str(task.kind) == "reaction" else ("更新草案" if str(task.get("source", "")) == "refresh" else "自动预生成")
+		var stage: String = " · 修复中" if str(task.get("phase", "")) == "repairing" else (" · 校验中" if str(task.get("phase", "")) == "validating" else "")
+		active_lines.append("%s %s · %.0f 秒%s" % [purpose, str(task.name), float(task.get("elapsed_seconds", 0)), stage])
+	var activity: String = "\n".join(active_lines) if not active_lines.is_empty() else str(d.get("busy", ""))
+	director_label.text = mode_text + "\n" + (activity if not activity.is_empty() else ("导演已暂停" if bool(d.get("paused", false)) else "等待重要事件 · 不按帧调用"))
 	var failed_tasks: Array = d.get("failed_tasks", [])
 	director_label.text += "\n请求 %d / %d · 其中修复 %d" % [int(d.get("calls", 0)), int(d.get("max_calls", 60)), int(d.get("repair_calls", 0))]
 	director_label.text += "\n已应用 %d · 过期 %d · 失败任务 %d" % [int(d.get("accepted", 0)), int(d.get("stale", 0)), failed_tasks.size()]
@@ -635,7 +643,13 @@ func _render() -> void:
 	director_label.text += "\n提前两层 · 已准备 %d / %d 区域" % [int(d.get("prefetch_ready", 0)), int(d.get("prefetch_total", 0))]
 	lines.clear()
 	for f in state.get("frontier", []):
-		lines.append(("● " if bool(f.ready) else "○ ") + str(f.name))
+		var status_text: String = "可进入" if bool(f.ready) else ("已暂停" if bool(d.get("paused", false)) else "排队中")
+		for failure in failed_tasks:
+			if str(failure.target) == str(f.id) and str(failure.kind) == "region" and not bool(f.ready): status_text = "生成失败"
+		for task in d.get("active_tasks", []):
+			if str(task.target) == str(f.id) and str(task.kind) == "region":
+				status_text = ("可进入，后台更新" if bool(f.ready) else "修复中" if str(task.get("phase", "")) == "repairing" else "生成中") + " · %.0f秒" % float(task.get("elapsed_seconds", 0))
+		lines.append(("● " if bool(f.ready) else "○ ") + str(f.name) + " · " + status_text)
 	frontier_label.text = "下一片土地\n" + "\n".join(lines)
 	error_label.text = last_action_error if not last_action_error.is_empty() else (str(d.get("error", "")) if failed_tasks.is_empty() else "")
 	retry_failed_button.disabled = failed_tasks.is_empty()
@@ -680,7 +694,8 @@ func _clear_modal() -> void:
 func _render_modal() -> void:
 	var ui: Dictionary = state.get("ui", {})
 	var battle: Dictionary = state.battle if state.get("battle") is Dictionary else {}
-	var signature: String = JSON.stringify([ui, battle, local_panel, state.get("inventory", []), state.get("available_actions", [])])
+	var waiting_phase: String = _exit_wait_phase(ui)
+	var signature: String = JSON.stringify([ui, battle, local_panel, state.get("inventory", []), state.get("available_actions", []), waiting_phase])
 	if signature == modal_signature:
 		return
 	modal_signature = signature
@@ -710,6 +725,7 @@ func _render_modal() -> void:
 				var b := _button(buttons, str(index + 1) + " " + str(entry.label), _send_action.bind({"op":"combat","move":"rule:"+str(entry.id)}))
 				b.disabled = not bool(entry.enabled)
 				b.tooltip_text = str(entry.description)
+				if b.disabled: _label(modal_stack, str(entry.label) + "：" + str(entry.get("blocked_reason", entry.description)), 13, MUTED)
 			_button(buttons, "撤離 · Esc", _send_action.bind({"op":"combat","move":"flee"}))
 			return
 		for entry in [["1 攻击", "attack"], ["2 星火术 · 5MP", "skill"], ["3 防御", "defend"], ["4 药剂", "potion"], ["5 撤离", "flee"]]:
@@ -718,14 +734,28 @@ func _render_modal() -> void:
 			if entry[1] == "potion": b.disabled = int(state.player.inventory.get("potion", 0)) < 1
 		return
 	if not ui.is_empty():
+		if ui.get("kind") == "pending_exit":
+			_label(modal_stack, "可以进入下一地区了" if waiting_phase == "ready" else "正在准备 " + str(ui.get("name", "下一地区")), 24, GOLD)
+			var explanation: String = "地图由后台自动提前准备，无需反复触发出口。你也可以先回去探索。"
+			if waiting_phase == "failed": explanation = "这个地区的生成未通过校验，可重试此任务；其他地区会继续准备。"
+			elif waiting_phase == "paused": explanation = "后台已暂停追加请求，可在右侧继续导演。"
+			elif waiting_phase == "ready": explanation = "地图已准备好，按 E 或点击下方按钮即可进入。"
+			_label(modal_stack, explanation, 18)
+			if waiting_phase == "ready": _button(modal_stack, "进入 " + str(ui.get("name", "下一地区")) + " · E", _send_action.bind({"op":"enter_exit"}))
+			elif waiting_phase == "failed": _button(modal_stack, "重试这个地区", _post.bind("/retry", {"target":str(ui.target),"kind":"region"}))
+			_button(modal_stack, "继续探索当前地区 · Esc", _send_action.bind({"op":"close"}))
+			return
 		_label(modal_stack, str(ui.get("title", "")), 24, GOLD)
 		var message_lines: Array[String] = []
 		for line in ui.get("lines", []): message_lines.append(str(line))
 		_label(modal_stack, "\n\n".join(message_lines), 18)
+		if ui.get("kind") == "actions" and ui.get("actions", []).is_empty():
+			_label(modal_stack, "这里暂时没有可用的自定义操作。走近人物或物件后按 E 交互，或继续探索其他位置。", 16, MUTED)
 		for entry in ui.get("actions", []):
 			var b := _button(modal_stack, str(entry.label), _send_action.bind({"op":"content_action","id":entry.id}))
 			b.disabled = not bool(entry.enabled)
 			b.tooltip_text = str(entry.description)
+			if b.disabled: _label(modal_stack, str(entry.get("blocked_reason", entry.description)), 14, MUTED)
 		for ch in ui.get("choices", []):
 			_button(modal_stack, str(ch.text), _send_action.bind({"op": "choice", "id": ch.id}))
 		if ui.get("kind") == "shop":
@@ -756,6 +786,16 @@ func _render_modal() -> void:
 		modal_signature = ""
 		_render_modal()
 	)
+
+func _exit_wait_phase(ui: Dictionary) -> String:
+	if ui.get("kind") != "pending_exit": return ""
+	if bool(ui.get("ready", false)): return "ready"
+	var director: Dictionary = state.get("director", {})
+	for task in director.get("failed_tasks", []):
+		if str(task.kind) == "region" and str(task.target) == str(ui.get("target", "")): return "failed"
+	for task in director.get("active_tasks", []):
+		if str(task.kind) == "region" and str(task.target) == str(ui.get("target", "")): return "generating"
+	return "paused" if bool(director.get("paused", false)) else "queued"
 
 func _process(delta: float) -> void:
 	poll_clock += delta
@@ -797,7 +837,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		var moves: Dictionary = {KEY_1: "attack", KEY_2: "skill", KEY_3: "defend", KEY_4: "potion", KEY_5: "flee"}
 		if moves.has(key): _send_action({"op": "combat", "move": moves[key]})
 	elif not state.get("ui", {}).is_empty():
-		if key in [KEY_E, KEY_ESCAPE, KEY_SPACE]: _send_action({"op": "close"})
+		if key in [KEY_E, KEY_SPACE] and _exit_wait_phase(state.ui) == "ready": _send_action({"op":"enter_exit"})
+		elif key in [KEY_E, KEY_ESCAPE, KEY_SPACE]: _send_action({"op": "close"})
 	elif key == KEY_ESCAPE:
 		if local_panel.is_empty():
 			_show_home()

@@ -8,7 +8,8 @@ def make_patch(c,kind):
  if kind=='reaction':
   t='你的决定让远方的道路改变了方向。' if not rescue else '被你帮助的人点起一盏灯。迷雾中多了一条通向避难所的道路。'
   updates=[dict(id=e['id'],dialogue=['我听说了你的决定。这个地方不会再与从前一样。']) for e in c.get('current_region',{}).get('entities',[]) if e['kind']=='npc'][:1]
-  return dict(kind='reaction',reaction=dict(text=t,weather=rng.choice(('rain','fog','fireflies')),rule=rng.choice(('normal','healing_rain','echo')),npc_lines=updates),threads=[dict(id=f'echo_{revision}',title='选择的回声',note=t)])
+  future=[dict(id=f['id'],description=t) for f in c.get('frontier',[]) if not f.get('visited')][:2] if rescue else []
+  return dict(kind='reaction',reaction=dict(text=t,weather=rng.choice(('rain','fog','fireflies')),rule=rng.choice(('normal','healing_rain','echo')),npc_lines=updates,future_updates=future),threads=[dict(id=f'echo_{revision}',title='选择的回声',note=t)])
  depth=c.get('target_depth',0)
  if depth==0:
   biome='industrial' if any(x in setting.lower() for x in ('蒸汽','steam','机械','赛博')) else 'snow' if any(x in setting for x in ('冰','雪')) else 'coast' if any(x in setting for x in ('海','岛','港')) else 'forest'; layout='village'

@@ -134,6 +134,13 @@ class ModelProtocolTests(unittest.TestCase):
         self.assertEqual(normalized,parse_patch(authored_patch(),'region'))
         self.assertEqual({c['operation'] for c in changes},{'field_location','field_alias'})
 
+    def test_echoed_json_format_metadata_is_removed_only_in_exact_envelope(self):
+        raw=authored_patch();raw['type']='json_object';changes=[]
+        self.assertEqual(parse_patch(raw,'region',corrections=changes),parse_patch(authored_patch(),'region'))
+        self.assertEqual(changes[0]['operation'],'envelope_metadata')
+        raw['type']='unrecognized_gameplay_type'
+        with self.assertRaises(InvalidPatch):parse_patch(raw,'region')
+
     def test_conflicting_alias_values_are_not_guessed(self):
         raw=authored_patch();raw['region']['entities'][0]['sprite_id']='enemy'
         with self.assertRaisesRegex(InvalidPatch,'conflicting'):parse_patch(raw,'region')
@@ -222,6 +229,14 @@ class DirectorDiagnosticTests(unittest.TestCase):
         with self.assertRaises(ProviderError):self.d.retry(kind='region')
         with self.assertRaises(ProviderError):self.d.retry(target='r0')
 
+    def test_budget_exhaustion_keeps_original_validation_diagnosis(self):
+        self.d.cfg['max_calls']=1
+        with patch.object(ChatProvider,'generate',return_value=('{}',{})):self.d.step()
+        self.assertEqual(self.d.calls,1)
+        failure=self.d.status()['failed_tasks'][0]
+        self.assertEqual(failure['category'],'format')
+        self.assertEqual(failure['attempts'],1)
+
     def test_stale_failure_does_not_pollute_the_new_world_failure_list(self):
         def answer(provider,ctx,kind,repair=''):
             self.w.start('已经开始的新世界')
@@ -232,7 +247,14 @@ class DirectorDiagnosticTests(unittest.TestCase):
         self.assertEqual(self.d.error,'')
 
     def test_changed_story_does_not_spend_a_repair_on_stale_invalid_json(self):
+        self.w.apply_patch(authored_patch(),self.w.context())
+        # Only reactions depend on the whole current story. A changed target
+        # outline, tested separately, invalidates a region request.
+        for target in self.w.state['topology']['r0']['children']:
+            self.w.state['topology'][target]['ready']=True
+        self.w.reaction_needed=True
         def answer(provider,ctx,kind,repair=''):
+            self.assertEqual(kind,'reaction')
             self.w.state['story_revision']+=1
             return 'invalid JSON',{'input_tokens':1,'output_tokens':1}
         with patch.object(ChatProvider,'generate',answer) as model:self.d.step()

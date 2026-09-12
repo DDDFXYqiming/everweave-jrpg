@@ -4,6 +4,7 @@ import json
 import os
 import threading
 import time
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -12,6 +13,7 @@ from .demo import make_patch
 from .schema import InvalidPatch,parse_patch
 from .visuals import VISUAL_PROMPT
 from .diagnostics import as_issues, validation_report
+from .audit import NullAudit
 
 SYSTEM = '''You are the live content director of Everweave, a playable 2D pixel JRPG, not a chatbot.
 Return ONE JSON object matching the requested kind. No markdown, code, paths or URLs.
@@ -96,8 +98,9 @@ class ChatProvider:
   if kind=='reaction':
    payload['messages'][0]['content']+='\nReturn only a valid JSON object using this exact envelope. Replace example text as appropriate; keep array types. Example: {"kind":"reaction","reaction":{"text":"世界随玩家的选择发生变化。","weather":"fog","npc_lines":[],"spawns":[{"id":"new_lantern","kind":"shrine","name":"新亮起的灯龛","zone":"south"}]},"lore":[],"threads":[]}. No region data or extra top-level fields. Keep reaction.text under 250 Chinese characters.'
   if context.get('content_version')==2:
-   from .content_prompt import prompt
+   from .content_prompt import prompt,model_context
    payload['messages'][0]['content']=prompt(kind)
+   payload['messages'][1]['content']=json.dumps(dict(requested_kind=kind,world_context=model_context(context,kind),validation_error=repair),ensure_ascii=False,separators=(',',':'))
   if repair and context.get('rejected_response'):
    payload['messages'][0]['content']+='\nRepair world_context.rejected_response using validation_error. Preserve its valid scene, art, IDs and mechanics; return the complete corrected JSON object, not a replacement design or a diff.'
   effort=reasoning_effort(cfg)
@@ -114,6 +117,10 @@ class ChatProvider:
    # DeepSeek's 64K thinking allowance without increasing the reasoning effort.
    minimum=65536 if thinking and context.get('content_version')==2 else 24576 if context.get('content_version')==2 else 16384
    payload['max_tokens']=max(payload['max_tokens'],minimum)
+  elif context.get('content_version')==2:
+   # A v2 reaction can author rules and new art too; 8K combined reasoning and
+   # JSON truncated real responses. This is a ceiling, not a requested length.
+   payload['max_tokens']=max(payload['max_tokens'],32768 if thinking else 8192)
   base=validate_url(cfg['base_url']); url=base if base.endswith('/chat/completions') else base+'/chat/completions'
   req=urllib.request.Request(url,data=json.dumps(payload,ensure_ascii=False).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+cfg['api_key']},method='POST')
   opener=urllib.request.build_opener(NoRedirect)
@@ -149,6 +156,8 @@ class Director:
   self.threads=[]; self.in_flight={}
   self.failures={}; self.failed_payloads={}; self.repair_calls=0
   self.normalized_responses=0; self.normalization_count=0; self.recent_corrections=[]
+  self.task_metrics={}; self.task_history=[];self.task_sequence=0
+  self.audit=NullAudit()
  def configure(self,cfg):
   offline=bool(cfg.get('offline',True)); base=validate_url(cfg.get('base_url','https://api.deepseek.com')); model=str(cfg.get('model','deepseek-flash')).strip()
   if not model or len(model)>150: raise ProviderError('请输入有效模型名。')
@@ -160,6 +169,8 @@ class Director:
   if not 1<=limit<=1000: raise ProviderError('调用上限应为 1～1000。')
   effort=reasoning_effort(cfg)
   self.cfg=dict(offline=offline,base_url=base,model=model,api_key=key,deepseek_options=bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
+  self.audit.add_secret(key)
+  self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit)
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
   self.generation+=1; self.failed.clear(); self.failures.clear(); self.failed_payloads.clear(); self.error=''; self.deferred=None; self.paused=False; self.wake.set()
  def start_worker(self):
@@ -177,11 +188,34 @@ class Director:
   if target is not None and not selected:raise ProviderError('这个生成任务已经不再处于失败状态。')
   for key in selected:
    self.failed.discard(key); self.failures.pop(key,None)
+  self.audit.emit('generation.retry',tasks=[{'kind':k,'target':t} for k,t in sorted(selected)])
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
   self.error=next((entry['message'] for entry in reversed(list(self.failures.values()))),'')
   self.paused=False; self.wake.set()
  def _title(self,target):
   return ((self.world.state or {}).get('topology',{}).get(target) or {}).get('name',target)
+ def _audit_task(self,event,**data):
+  sink=getattr(self,'audit',None)
+  if sink is not None:sink.emit(event,**data)
+ def _begin_task(self,key,ctx):
+  self.task_sequence+=1
+  source='reaction' if ctx['kind']=='reaction' else 'refresh' if ctx.get('refresh') else 'initial' if ctx['target']==self.world.state['current'] else 'prefetch'
+  data=dict(task_id=self.task_sequence,kind=ctx['kind'],target=ctx['target'],name=self._title(ctx['target']),source=source,
+            started_at=time.time(),started_steps=self.world.state['steps'],started_story_revision=ctx['story_revision'],
+            target_revision=ctx.get('target_revision',0),phase='generating',attempts=0,request_seconds=0.0,validation_seconds=0.0,
+            _start=time.monotonic())
+  self.task_metrics[key]=data
+  self._audit_task('generation.started',**{k:v for k,v in data.items() if not k.startswith('_')})
+ def _finish_task(self,key,outcome):
+  data=self.task_metrics.pop(key,None)
+  if data is None:return
+  elapsed=time.monotonic()-data.pop('_start')
+  data.update(status=outcome,elapsed_seconds=round(elapsed,3),finished_steps=(self.world.state or {}).get('steps'))
+  data['request_seconds']=round(data['request_seconds'],3);data['validation_seconds']=round(data['validation_seconds'],3)
+  self.task_history.append(data);self.task_history=self.task_history[-24:]
+  self._audit_task('generation.finished',**data)
+ def _current(self,ctx,generation):
+  return generation==self.generation and self.world.context_is_current(ctx)
  def _failure(self,error,ctx,raw=None,attempts=1):
   key=(ctx['kind'],ctx['target'])
   category='provider' if isinstance(error,ProviderError) else None
@@ -189,6 +223,8 @@ class Director:
   entry=dict(kind=key[0],target=key[1],name=self._title(key[1]),category=issues[0]['category'],
              message=str(error)[:1600],issues=issues[:20],attempts=attempts)
   self.failed.add(key);self.failures[key]=entry;self.error=entry['message'][:260]
+  self.audit.emit('generation.failed',level=logging.WARNING if isinstance(error,(InvalidPatch,ProviderError)) else logging.ERROR,
+    exception=error,**entry)
   if isinstance(error,InvalidPatch) and raw is not None:
    self.failed_payloads[key]=dict(raw=raw,context=copy.deepcopy(ctx),error=error,generation=self.generation)
   else:self.failed_payloads.pop(key,None)
@@ -197,15 +233,27 @@ class Director:
   self.normalized_responses+=1;self.normalization_count+=len(changes)
   self.recent_corrections.append(dict(target=ctx['target'],name=self._title(ctx['target']),kind=ctx['kind'],changes=changes[:128]))
   self.recent_corrections=self.recent_corrections[-6:]
+  self.audit.emit('generation.normalized',target=ctx['target'],kind=ctx['kind'],changes=changes[:128])
  def _record_usage(self,usage):
   self.tokens_in+=usage.get('input_tokens',0); self.tokens_out+=usage.get('output_tokens',0)
   self.tokens_reasoning+=usage.get('reasoning_tokens',0); self.reasoning_responses+=int(usage.get('reasoning_observed',False))
  def status(self):
+  for kind,target in list(self.failed):
+   node=((self.world.state or {}).get('topology') or {}).get(target)
+   if node is None or (kind=='region' and (node.get('visited') or (node.get('ready') and not node.get('needs_refresh')))):
+    self.failed.discard((kind,target));self.failures.pop((kind,target),None);self.failed_payloads.pop((kind,target),None)
+  if not self.failed and self.error and not self.paused:
+   if not self.cfg or self.calls<self.cfg['max_calls']:self.error=''
   horizon=self.world.prefetch_targets()
   ready=sum(self.world.state['topology'][rid]['ready'] for rid,distance in horizon)
   failed_tasks=[self.failures.get((kind,target),dict(kind=kind,target=target,name=self._title(target),category='format',message=self.error,issues=[],attempts=0)) for kind,target in sorted(self.failed)]
-  active_tasks=[dict(kind=kind,target=target,name=self._title(target)) for epoch,kind,target in self.in_flight]
-  return copy.deepcopy(dict(failed_tasks=failed_tasks,active_tasks=active_tasks,repair_calls=self.repair_calls,normalized_responses=self.normalized_responses,normalization_count=self.normalization_count,recent_corrections=self.recent_corrections,
+  active_tasks=[]
+  for key in self.in_flight:
+   epoch,kind,target=key;metrics=self.task_metrics.get(key,{})
+   active_tasks.append(dict(kind=kind,target=target,name=self._title(target),phase=metrics.get('phase','generating'),
+     source=metrics.get('source','prefetch'),started_at=metrics.get('started_at'),started_steps=metrics.get('started_steps'),
+     elapsed_seconds=round(time.monotonic()-metrics.get('_start',time.monotonic()),1),attempts=metrics.get('attempts',0)))
+  return copy.deepcopy(dict(failed_tasks=failed_tasks,active_tasks=active_tasks,task_history=self.task_history,repair_calls=self.repair_calls,normalized_responses=self.normalized_responses,normalization_count=self.normalization_count,recent_corrections=self.recent_corrections,
    prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
  def _next_job(self):
   w=self.world; s=w.state
@@ -245,34 +293,51 @@ class Director:
    if not job: return False
    ctx,cfg,generation=job; kind=ctx['kind']; target=ctx['target']; job_key=(ctx['epoch'],kind,target)
    self.in_flight[job_key]=('续写 ' if kind=='reaction' else '生成 ')+self._title(target)
+   self._begin_task(job_key,ctx)
    self.busy=' / '.join(self.in_flight.values()); self.last_request=time.monotonic()
   raw=None; error=None;attempts=0
   cached=self.failed_payloads.get((kind,target))
-  if cached and cached['generation']==generation and all(cached['context'].get(k)==ctx.get(k) for k in ('epoch','story_revision','target','kind','refresh')):
+  cache_fields=('epoch','target','kind','refresh','target_revision')+(('story_revision',) if kind=='reaction' else ())
+  if cached and cached['generation']==generation and all(cached['context'].get(k)==ctx.get(k) for k in cache_fields):
    raw=cached['raw'];error=cached['error']
   for attempt in range(2):
+   request_number=None;request_started=None
    try:
     with self.world.lock:
-     if generation!=self.generation or not self.world.state or ctx['epoch']!=self.world.state['epoch'] or ctx['story_revision']!=self.world.state['story_revision']: break
+     if not self._current(ctx,generation): break
     if cfg['offline']: raw=make_patch(ctx,kind)
     else:
      with self.world.lock:
-      if self.calls>=cfg['max_calls']: raise ProviderError('达到本次进程调用上限。')
+      if self.calls>=cfg['max_calls']:
+       if error is not None:break  # Keep the actionable rejected-patch diagnosis.
+       raise ProviderError('达到本次进程调用上限。')
       self.calls+=1
+      request_number=self.calls
       self.repair_calls+=int(error is not None and raw is not None)
      attempts+=1
+     with self.world.lock:self.task_metrics[job_key].update(attempts=attempts,phase='repairing' if error and raw is not None else 'generating')
      request_ctx=dict(ctx,rejected_response=raw,validation_errors=as_issues(error)) if error and raw is not None else ctx
      repair=validation_report(error) if isinstance(error,InvalidPatch) else str(error) if error else ''
-     raw,usage=ChatProvider(cfg).generate(request_ctx,kind,repair)
+     request_started=time.monotonic()
+     self.audit.emit('model.request',kind=kind,target=target,call=request_number,repair=bool(repair),model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
+     model_started=time.monotonic()
+     try:raw,usage=ChatProvider(cfg).generate(request_ctx,kind,repair)
+     finally:
+      with self.world.lock:self.task_metrics[job_key]['request_seconds']+=time.monotonic()-model_started
+     self.audit.emit('model.response',kind=kind,target=target,call=request_number,seconds=round(time.monotonic()-request_started,3),usage=usage,response_chars=len(raw))
      with self.world.lock:
       self._record_usage(usage)
     changes=[]
     with self.world.lock:
-     if generation!=self.generation or not self.world.state or ctx['epoch']!=self.world.state['epoch'] or ctx['story_revision']!=self.world.state['story_revision']:break
+     if not self._current(ctx,generation):break
      identities=self.world.validation_context(ctx)
+     self.task_metrics[job_key]['phase']='validating'
+    validation_started=time.monotonic()
     try:parsed=parse_patch(raw,kind,identities,changes)
     finally:
-     with self.world.lock:self._record_corrections(changes,ctx)
+     with self.world.lock:
+      self._record_corrections(changes,ctx)
+      self.task_metrics[job_key]['validation_seconds']+=time.monotonic()-validation_started
     if not cfg['offline'] and kind=='region' and not parsed['region'].get('destinations'):
      raise InvalidPatch('region.destinations is required for live generation: supply 1..2 {id,name,description} new place outlines')
     if not cfg['offline'] and kind=='region' and not parsed['region'].get('visuals'):
@@ -281,14 +346,18 @@ class Director:
      if not parsed['region'].get('scene') or not parsed['region'].get('program'):
       raise InvalidPatch('content v2 requires region.scene and region.program: author the spatial plan and executable interactions, not legacy templates')
     with self.world.lock:
-     if self.world.state and ctx['epoch']==self.world.state['epoch'] and ctx['story_revision']==self.world.state['story_revision']:
-      self.world.validate_patch(raw,ctx)
+     if self._current(ctx,generation):
+      validation_started=time.monotonic()
+      try:self.world.validate_patch(raw,ctx)
+      finally:self.task_metrics[job_key]['validation_seconds']+=time.monotonic()-validation_started
     error=None; break
    except InvalidPatch as exc:
+    self.audit.emit('generation.rejected',level=logging.WARNING,kind=kind,target=target,call=request_number,attempt=attempt+1,issues=exc.issues)
     error=exc
     with self.world.lock: self.rejected+=1
     if cfg['offline']: break
    except ProviderError as exc:
+    self.audit.emit('model.failed',level=logging.WARNING,kind=kind,target=target,call=request_number,seconds=round(time.monotonic()-request_started,3) if request_started else None,error=str(exc),usage=exc.usage,finish_reason=exc.finish_reason)
     error=exc
     with self.world.lock:
      self._record_usage(exc.usage)
@@ -298,38 +367,47 @@ class Director:
     error=exc; break  # Network failures never trigger an automatic retry storm.
   with self.world.lock:
    self.in_flight.pop(job_key,None); self.busy=' / '.join(self.in_flight.values())
-   if self.stop_event.is_set():return True
+   if self.stop_event.is_set():self._finish_task(job_key,'stopped');return True
    state=self.world.state
    node=(state or {}).get('topology',{}).get(target)
-   stale=(generation!=self.generation or not state or ctx['epoch']!=state['epoch'] or ctx['story_revision']!=state['story_revision']
-          or node is None or (kind=='region' and node.get('visited')))
+   stale=not self._current(ctx,generation)
    if stale:
+    self.audit.emit('generation.stale',kind=kind,target=target,epoch=ctx['epoch'],story_revision=ctx['story_revision'])
     if raw is not None or attempts:self.stale+=1
     if state and ctx['epoch']==state['epoch'] and kind=='reaction':self.world.reaction_needed=True
+    self._finish_task(job_key,'stale')
     return True
    if error:
     if kind=='reaction': self.world.reaction_needed=True
-    self._failure(error,ctx,raw,attempts); return True
+    self._failure(error,ctx,raw,attempts);self._finish_task(job_key,'failed'); return True
    self.failed_payloads.pop((kind,target),None)
    source='offline_demo' if cfg['offline'] else 'llm'
-   if kind=='reaction' and (self.world.state['battle'] or self.world.state['ui']): self.deferred=(raw,ctx,source,generation)
-   else: self._deliver(raw,ctx,source)
+   if kind=='reaction' and (self.world.state['battle'] or self.world.state['ui']):
+    self.deferred=(raw,ctx,source,generation);outcome='deferred'
+   else:outcome=self._deliver(raw,ctx,source)
+   self._finish_task(job_key,outcome)
   return True
  def _deliver(self,raw,ctx,source):
   try:
    if self.world.apply_patch(raw,ctx,source):
+    self.audit.emit('generation.applied',kind=ctx['kind'],target=ctx['target'],source=source,story_revision=ctx['story_revision'])
     self.accepted+=1;self.failed.discard((ctx['kind'],ctx['target']));self.failures.pop((ctx['kind'],ctx['target']),None)
     self.error=next((entry['message'] for entry in reversed(list(self.failures.values()))),'')[:260]
+    return 'ready' if ctx['kind']=='region' else 'applied'
    else:
+    self.audit.emit('generation.stale',kind=ctx['kind'],target=ctx['target'],epoch=ctx['epoch'],story_revision=ctx['story_revision'])
     self.stale+=1
     if ctx['kind']=='reaction': self.world.reaction_needed=True
+    return 'stale'
   except Exception as exc:
    if ctx['kind']=='reaction': self.world.reaction_needed=True
    self.rejected+=1; self._failure(exc,ctx,raw)
+   return 'failed'
  def _loop(self):
   while not self.stop_event.is_set():
    try: did_work=self.step()
    except Exception as exc:
+    self.audit.emit('director.error',level=logging.ERROR,exception=exc)
     with self.world.lock: self.error='导演停止本次请求：'+type(exc).__name__; self.busy=''; self.paused=True
     did_work=False
    if not did_work: self.wake.wait(.15); self.wake.clear()

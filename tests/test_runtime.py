@@ -237,9 +237,11 @@ class RuntimeTests(unittest.TestCase):
         e=at_entity(self.w,'witness');self.w.action({'op':'interact','id':e['id']})
         self.w.action({'op':'choice','id':'mercy'})
         self.assertTrue(self.w.state['topology']['r0a']['ready'])
-        self.assertTrue(self.w.state['topology']['r0a']['needs_refresh'])
+        self.assertFalse(self.w.state['topology']['r0a'].get('needs_refresh',False))
         self.w.action({'op':'close'})
-        for _ in range(4):self.d.step()
+        self.d.step()  # The reaction explicitly changes the unseen outline.
+        self.assertTrue(self.w.state['topology']['r0a']['needs_refresh'])
+        for _ in range(3):self.d.step()
         self.assertEqual(original,self.w.region()['tiles'])
         self.assertIn('归人避难所',self.w.region('r0a')['name'])
         self.assertEqual(self.w.state['story_revision'],1)
@@ -251,7 +253,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_stale_patch_is_discarded(self):
         ctx=self.w.context('r0aa');raw=make_patch(ctx,'region')
-        self.w.state['story_revision']+=1
+        self.w.state['topology']['r0aa']['generation_revision']=ctx['target_revision']+1
         self.assertFalse(self.w.apply_patch(raw,ctx))
         self.assertTrue(self.w.state['topology']['r0aa']['ready'])
 
@@ -338,7 +340,7 @@ class RuntimeTests(unittest.TestCase):
         e=next(e for e in self.w.region()['entities'] if e.get('target')==target)
         at_entity(self.w,e['id']);self.w.action({'op':'interact','id':e['id']})
         self.assertEqual(self.w.state['current'],'r0')
-        self.assertEqual(self.w.state['ui']['kind'],'message')
+        self.assertEqual(self.w.state['ui']['kind'],'pending_exit')
 
     def test_map_cache_is_bounded(self):
         for _ in range(10):
@@ -510,6 +512,10 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertEqual(MockChatHandler.last['max_tokens'],65536)
         self.assertEqual(MockChatHandler.last['reasoning_effort'],'low')
         self.assertEqual(MockChatHandler.last['thinking'],{'type':'enabled'})
+    def test_v2_reaction_has_room_for_both_rules_and_thinking(self):
+        ChatProvider(self.cfg).generate({'setting':SETTING,'target':'r0','content_version':2},'reaction')
+        self.assertEqual(MockChatHandler.last['max_tokens'],32768)
+        self.assertEqual(MockChatHandler.last['reasoning_effort'],'low')
     def test_truncated_usage_is_counted_without_applying_or_auto_retrying(self):
         MockChatHandler.mode='truncated'
         w=World(Store(':memory:'));w.start(SETTING);d=Director(w)

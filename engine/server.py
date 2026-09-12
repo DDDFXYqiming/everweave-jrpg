@@ -5,12 +5,15 @@ import json
 import os
 import secrets
 import threading
+import logging
+import time
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from .world import World,GameError
 from .storage import Store,dumps
 from .director import Director,ProviderError,official_deepseek
+from .audit import AuditLog,NullAudit
 
 def data_dir():
  if os.name=='nt': return Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'EverweaveJRPG'
@@ -31,6 +34,13 @@ class GameServer(ThreadingHTTPServer):
     if isinstance(saved,dict): self.preferences.update({k:saved[k] for k in self.preference_keys if k in saved})
    except (OSError,ValueError): pass
   super().__init__(address,Handler)
+  self.audit=NullAudit() if str(save_path)==':memory:' else AuditLog(Path(save_path).parent/'logs')
+  self.audit.add_secret(token);self.director.audit=self.audit
+  self.audit.emit('server.started',port=self.server_port,world_loaded=bool(self.world.state))
+ def server_close(self):
+  super().server_close()
+  if hasattr(self,'audit'):
+   self.audit.emit('server.stopped');self.audit.close()
  def remember_configuration(self):
   self.preferences={k:self.director.cfg[k] for k in self.preference_keys}
   if self.preference_path:
@@ -81,10 +91,16 @@ class Handler(BaseHTTPRequestHandler):
    if not isinstance(data,dict): raise ValueError('expected object')
   except (ValueError,UnicodeError,TimeoutError,OSError): self.reply(400,dict(error='Invalid request')); return
   server=self.server; w=server.world; d=server.director
+  started=time.monotonic()
+  action={key:data[key] for key in ('op','id','dx','dy','move','target','kind') if key in data}
+  before={}
   try:
    with w.lock:
+    before={key:(w.state or {}).get(key) for key in ('current','steps','story_revision')}
+    before['player']={key:(w.state or {}).get('player',{}).get(key) for key in ('x','y','hp','mp','gold')}
     request_id=self.headers.get('X-Request-ID','')
     if request_id and request_id in server.seen:
+     server.audit.emit('request.duplicate',route=self.path,request_id=request_id[:96])
      self.reply(200,server.snapshot()); return
     if self.path=='/start':
      if w.state and not data.get('replace_save',False): raise GameError('新世界会覆盖当前存档，请明确确认。')
@@ -101,9 +117,19 @@ class Handler(BaseHTTPRequestHandler):
      server.seen[request_id]=True
      while len(server.seen)>512: server.seen.popitem(last=False)
     self.reply(200,server.snapshot())
+    if self.path!='/state':
+     after={key:(w.state or {}).get(key) for key in ('current','steps','story_revision')}
+     after['player']={key:(w.state or {}).get('player',{}).get(key) for key in ('x','y','hp','mp','gold')}
+     server.audit.emit('action.completed' if self.path=='/action' else 'request.completed',
+       route=self.path,request_id=request_id[:96],action=action,before=before,after=after,
+       ui_kind=(w.state or {}).get('ui',{}).get('kind'),milliseconds=round((time.monotonic()-started)*1000,2))
    d.wake.set()
-  except (GameError,ProviderError,ValueError,TypeError,KeyError) as exc: self.reply(400,dict(error=str(exc)[:260]))
-  except Exception: self.reply(500,dict(error='Local engine error. Save remains on this computer.'))
+  except (GameError,ProviderError,ValueError,TypeError,KeyError) as exc:
+   server.audit.emit('action.rejected',level=logging.WARNING,exception=exc,route=self.path,action=action,error=str(exc),before=before)
+   self.reply(400,dict(error=str(exc)[:260]))
+  except Exception as exc:
+   server.audit.emit('action.error',level=logging.ERROR,exception=exc,route=self.path,action=action,before=before)
+   self.reply(500,dict(error='Local engine error. Save remains on this computer.'))
 
 def main():
  p=argparse.ArgumentParser(); p.add_argument('--port',type=int,default=8765); p.add_argument('--data-dir',type=Path,default=data_dir()); args=p.parse_args()

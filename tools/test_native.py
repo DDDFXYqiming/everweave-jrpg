@@ -26,6 +26,22 @@ with tempfile.TemporaryDirectory() as td:
         target=server.world.state['topology']['r0']['children'][0]
         server.director._failure(InvalidPatch('ambiguous item identity',path='region.items[2].id',category='reference'),server.world.context(target))
         server.director._failure(ProviderError('test-only unavailable provider'),server.world.context(kind='reaction'))
+    fixture_stop=threading.Event()
+    fixture_worker=None
+    if content_test:
+        def ready_waiting_exit():
+            # Simulate a model response arriving while the native wait panel is
+            # open. No test-only HTTP endpoint and no cloud/provider request.
+            while not fixture_stop.wait(.02):
+                with server.world.lock:
+                    waiting=server.world.state['ui'].get('kind')=='pending_exit'
+                if waiting:
+                    if fixture_stop.wait(.6):return
+                    with server.world.lock:
+                        server.world.apply_patch(authored_patch(),server.world.context(target),'test_fixture')
+                    return
+        fixture_worker=threading.Thread(target=ready_waiting_exit,daemon=True)
+        fixture_worker.start()
     server.director.start_worker()
     worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
     try:
@@ -44,4 +60,6 @@ with tempfile.TemporaryDirectory() as td:
         assert result.returncode==0 and marker in result.stdout and 'SCRIPT ERROR' not in result.stderr
         assert server.director.calls==0
     finally:
+        fixture_stop.set()
+        if fixture_worker:fixture_worker.join(timeout=2)
         server.director.stop();server.shutdown();worker.join();server.server_close();server.world.store.close()

@@ -3,6 +3,7 @@ import copy
 from . import catalog as C
 from .schema import InvalidPatch
 from .content import paint_commands
+from .diagnostics import issue
 
 
 def cells_for(obj):
@@ -73,13 +74,20 @@ def validate_space(region, player=None, full=False):
     if gates and not any((g['x'], g['y']) in area for g in gates):
         raise InvalidPatch('scene leaves no structurally reachable exit')
     if full:
-        for obj in region['entities']:
-            x, y = obj['x'], obj['y']
-            if not any(p in area for p in ((x, y), (x+1, y), (x-1, y), (x, y+1), (x, y-1))):
-                raise InvalidPatch('no approach to object ' + obj['id'])
+        errors=[]
+        for index,obj in enumerate(region['entities']):
+            footprint=set(cells_for(obj))
+            approach={(x+dx,y+dy) for x,y in footprint for dx,dy in ((1,0),(-1,0),(0,1),(0,-1))}-footprint
+            if not obj.get('solid'):approach |= footprint
+            if not area.intersection(approach):
+                loc=f'region.entities[{index}].at' if 'at' in obj else 'region.scene.anchors.'+obj.get('anchor_key',obj.get('local_id',obj['id']))
+                errors.append(issue(loc,'no approach to object '+obj['id'],category='gameplay',
+                    value={'anchor':[obj['x'],obj['y']],'footprint':obj.get('footprint',[1,1])},
+                    expected='at least one reachable cell along the object footprint boundary'))
         for obj in region.get('props', []):
             if obj.get('solid') and any((g['x'], g['y']) in cells_for(obj) for g in gates):
                 raise InvalidPatch('scenery covers an exit')
+        if errors:raise InvalidPatch(issues=errors)
 
 
 def build(plan, rid, seed, depth, exits):
@@ -113,10 +121,14 @@ def build(plan, rid, seed, depth, exits):
         key = 'back' if link['direction'] == 'back' else f'forward_{forward}'
         if link['direction'] != 'back': forward += 1
         pos = anchors.get(key)
-        if pos is None: raise InvalidPatch('scene needs exit anchor ' + key)
-        if tuple(pos) in occupied: raise InvalidPatch('exit overlaps another entity')
+        if pos is None: raise InvalidPatch('scene needs exit anchor '+key,path='region.scene.anchors.'+key,
+                                           expected=f'a free reachable [x,y] for {link["label"]}, within {w}x{h}')
+        if tuple(pos) in occupied:
+            collision=next(e['id'] for e in region['entities'] if [e['x'],e['y']]==list(pos))
+            raise InvalidPatch('exit overlaps another entity '+collision,path='region.scene.anchors.'+key,
+                               category='gameplay',value=pos,expected='a distinct free portal cell')
         occupied.add(tuple(pos))
         region['entities'].append(dict(id=f'{rid}:gate_{n}', kind='exit', name=link['label'],
-            x=pos[0], y=pos[1], target=link['target'], direction=link['direction'], spent=False, solid=False))
+            x=pos[0], y=pos[1], target=link['target'], direction=link['direction'], anchor_key=key, spent=False, solid=False))
     validate_space(region, full=True)
     return region

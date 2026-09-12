@@ -1,4 +1,5 @@
 """The live model authors an executable region, not a fixed quest template."""
+import copy
 from .visuals import VISUAL_PROMPT
 
 COMMON = '''You are Everweave's live game designer. Return ONE JSON object, never code or markdown.
@@ -38,9 +39,11 @@ Operations (effects is an array, max32; nesting max5):
  {op:"timer",id:ID,after:1..1000,event:"signal_NAME"}; action-ticks, not wall-clock seconds.
  {op:"end_battle",result:"victory" or "escape"}; only in a battle, condition earned through actions.
 program = {summary:design intent <=300 chars,vars:{KEY:SCALAR},actions:[],hooks:[],objectives:[]}.
-An action: {id,label,description?,target:OBJECT_ID or "player",scope:"explore" or "combat",
+An action: {id,label,description?,blocked_hint?,target:OBJECT_ID or "player",scope:"explore" or "combat",
  when:EXPR,effects:[EFFECTS],once:bool}. Explore actions on objects require player adjacency;
  player-target explore actions are available through F; '.' waits one tick. Max32 actions.
+blocked_hint is an optional short player-facing prerequisite clue displayed when disabled; do not expose
+internal variable names or reveal a hidden puzzle answer. Explain required items/resources when appropriate.
 A hook: {id,on:EVENT,target:OBJECT_ID or "player",when:EXPR,effects:[EFFECTS],once:bool}.
 Hook target binds self; it is NOT an event filter: compare event.target explicitly when needed.
 EVENT: enter,move,wait,interact,choice,victory,turn_start,enemy_turn,turn_end,tick,invoke,use,signal_NAME.
@@ -63,6 +66,9 @@ Optional biome/layout are artistic labels with scene; weather is clear/rain/snow
 rule normal/no_magic/healing_rain/volatile/echo (normally normal: new rules belong in program).
 scene = {size:[16..96,12..72],spawn:[x,y],base:TILE,summary:<=300,
  paint:[COMMANDS],anchors:{ID:[x,y],forward_0:[x,y],back:[x,y],...}}.
+TILE is ONLY ground/path/water/wall/bridge. Ground, path and bridge are walkable;
+water and wall are blocked. Metal/wood/grass describe visuals.terrain, never tile/base values.
+Use base:ground with your own surface recipe for a metal or wooden floor.
 A paint command has one of {rect:[x,y,w,h],tile:TILE,surface?:SPRITE_ID},
 {room:[x,y,w,h],tile:INTERIOR_TILE,doors:[[x,y],...],surface?:SPRITE_ID},
 {line:[[x,y],...],width:1..6,tile:TILE,surface?:SPRITE_ID}.
@@ -73,6 +79,8 @@ A door may be a solid object with a programmed unlock condition. Leave escape ac
 Use surface sprites as tile-sized original textures to avoid the legacy terrain patterns.
 Required anchors: one for every entity and landmark without at; forward_0..N for destinations;
 back when target is not r0. Exit tiles themselves are valid arrival positions. Do not overlap exits.
+Never emit kind=exit entities. For one destination provide forward_0; for two provide forward_0 and
+forward_1. The engine creates those portals and the back portal from anchors, so do not duplicate them.
 An entity: {id,kind:"object"/"npc"/"enemy"/"chest"/"shrine",name,zone?:north/south/east/west/center,
  at?:[x,y],sprite?:ID,solid?:BOOL,footprint?:[1..8,1..8],state?:{KEY:SCALAR},description?:STRING}.
 Footprints extend right and UP from the anchor; bottom-left is the logical cell. Object is a generic
@@ -101,11 +109,19 @@ Generation success requires both an authored scene and an executable program, no
 REACTION = '''
 Envelope {kind:"reaction",reaction:{text:STRING,...},lore:[],threads:[]}.
 React causally to actual player events, do not retcon past events or award results directly.
+Resolve the immediate local aftermath of the latest recorded events, in one compact patch.
+Existing program already executes the player's actions and rewards: do not reimplement it or repeat
+completed outcomes. Add new rules, art, objectives or destinations ONLY if this aftermath needs them.
+Do not design another whole region or a new multi-stage quest merely to acknowledge a routine action.
 Optional reaction fields:
  weather,rule; npc_lines:[{id:CANONICAL_NPC,dialogue:[strings]}];
  spawns <=2 new entities (same entity schema, bare id; optional at and unique sprite),
  items <=2 new items; quests <=2 legacy tasks (prefer program.objectives),
- locations <=2 {id,name,description} new destinations (total <=4 exits),
+locations <=2 {id,name,description} new destinations (total <=4 exits),
+future_updates <=2 {id:EXISTING_FRONTIER_REGION_ID,description:STRING,name?:STRING} changes an
+unvisited direct exit's promised outline ONLY when the player's action meaningfully changes that place.
+Routine dialogue, looting and victory do not require rebuilding every prepared region. Keep unchanged
+future outlines intact. Never update a visited region through future_updates.
  paint:[scene paint commands] changes current terrain,
  object_updates:[{id:EXISTING_CANONICAL,sprite?:ID,at?:[x,y],solid?:BOOL,remove?:BOOL}],
  program:{summary,vars,actions,hooks,objectives} adds NEW rules with NEW IDs; cannot rewrite installed ones.
@@ -119,7 +135,36 @@ run after their committed player-action conditions are satisfied. Geometry must 
 
 
 def prompt(kind):
-    return (COMMON + (REGION if kind == 'region' else REACTION + REGION.split('An entity:')[1].split('landmarks <=')[0])
+    focus=('Create only the requested region; following destinations need short outlines, not their complete rules or art. '
+           'Use a small coherent set of mechanics and individually authored shapes; do not simulate a whole campaign in this response.'
+           if kind=='region' else 'Return only the smallest complete causal reaction; omit unchanged content and unused optional fields.')
+    return (COMMON + (REGION if kind == 'region' else REACTION + '\nAn entity:' + REGION.split('An entity:')[1].split('landmarks <=')[0])
             + '\n' + VISUAL_PROMPT
+            + '\nEmit compact JSON. Omit default when:true, once:false, scope:explore, fail_when:false and empty optional lists. '
+              'Do not repeat labels in descriptions unless there is new player-facing information. '
+            + focus
             + f'\nEnvelope reminder: visuals belongs INSIDE {kind}.visuals, never at the top level. '
               'Only kind, world_title, region OR reaction, lore and threads are top-level keys.')
+
+
+def model_context(context,kind):
+    """Keep internal validation context complete; project only relevant model input."""
+    if kind!='region' or context.get('content_version')!=2:
+        return copy.deepcopy(context)
+    keep=('content_version','setting','world_title','target','target_depth','destination','refresh',
+          'existing_destinations','visual_identity','planned_parent','story_revision','player','facts',
+          'lore','threads','known_locations','frontier','rejected_response','validation_errors')
+    result={key:copy.deepcopy(context[key]) for key in keep if key in context}
+    hero=context.get('hero_visual')
+    result['hero_visual']={'reuse_canonical_identity':True,'sprite':'hero'} if hero else None
+    current=context.get('current_region') or {}
+    result['current_region']={k:copy.deepcopy(current[k]) for k in ('id','name','description','biome','rule') if k in current}
+    result['current_region']['entities']=[{k:copy.deepcopy(e[k]) for k in ('id','local_id','name','kind','role','description') if k in e}
+                                           for e in current.get('entities',[]) if e.get('kind')!='exit']
+    result['available_items']=[{k:copy.deepcopy(i[k]) for k in ('id','local_id','origin','name','kind','description') if k in i}
+                               for i in context.get('available_items',[])]
+    result['design_history']=[{k:copy.deepcopy(record[k]) for k in ('name','space','gameplay','motifs') if k in record}
+                              for record in context.get('design_history',[])]
+    result['recent_events']=[{k:copy.deepcopy(e[k]) for k in ('type','text','data','region','revision') if k in e}
+                             for e in context.get('recent_events',[])]
+    return result
