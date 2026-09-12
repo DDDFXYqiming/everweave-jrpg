@@ -72,6 +72,7 @@ func _button(label: String) -> Button:
 	return null
 
 func _run() -> void:
+	load("res://client/i18n.gd").set_language("zh",false)
 	main = load("res://client/main.tscn").instantiate()
 	root.add_child(main)
 	while not main.connection_ready: await process_frame

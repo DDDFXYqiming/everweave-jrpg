@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     executable = find_godot(args.godot)
     if not executable and not args.server_only:
         print('Godot 4 Standard was not found. Download it from the official Godot site.', file=sys.stderr)
-        print('Then: python launch.py --godot "Godot.exe"', file=sys.stderr)
+        print('Then: python launch.py --godot "./tools/Godot.exe"', file=sys.stderr)
         print('Or set GODOT_BIN / place the official executable in this project folder.', file=sys.stderr)
         return 2
     args.data_dir = args.data_dir.expanduser().resolve()

@@ -1,4 +1,5 @@
 extends Control
+const L = preload("res://client/i18n.gd")
 ## Stable diagram of known roads. Positions and route marks are local UI state.
 signal place_selected(id: String)
 var data: Dictionary = {}
@@ -172,7 +173,7 @@ func _texture(id: String, thumbnail: Dictionary) -> Texture2D:
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO,size),Color("151f19"))
 	if nodes.is_empty():
-		draw_string(get_theme_default_font(),Vector2(24,48),"到访第一处地点后，旅图会从这里展开。",HORIZONTAL_ALIGNMENT_LEFT,-1,16,Color("b4bda8"))
+		draw_string(get_theme_default_font(),Vector2(24,48),L.t("到访第一处地点后，旅图会从这里展开。"),HORIZONTAL_ALIGNMENT_LEFT,-1,16,Color("b4bda8"))
 		return
 	draw_set_transform(pan,0,Vector2(zoom,zoom))
 	for edge in data.get("edges",[]):
@@ -198,8 +199,8 @@ func _draw() -> void:
 		var title: String = str(node.name)
 		draw_string(font,rect.position+Vector2(77,31),title.left(9),HORIZONTAL_ALIGNMENT_LEFT,136,14,Color("e6d9bb"))
 		if title.length()>9: draw_string(font,rect.position+Vector2(77,52),title.substr(9,8)+("…" if title.length()>17 else ""),HORIZONTAL_ALIGNMENT_LEFT,136,14,Color("e6d9bb"))
-		var status: String = "你在这里" if id == str(data.current) else "已到访" if visited else "尚未到访"
-		if collapsed.has(id): status += "  +%d处" % descend(id).size()
+		var status: String = L.t("你在这里") if id == str(data.current) else L.t("已到访") if visited else L.t("尚未到访")
+		if collapsed.has(id): status += L.t("  +%d处") % descend(id).size()
 		draw_string(font,rect.position+Vector2(77,81),status,HORIZONTAL_ALIGNMENT_LEFT,140,12,Color("b9ba98"))
 		if not node.get("tasks",[]).is_empty(): draw_rect(Rect2(rect.end-Vector2(14,96),Vector2(5,15)),Color("d1b477"))
 		if id == str(data.current):draw_circle(center-Vector2(0,59),5,Color("ebd193"))

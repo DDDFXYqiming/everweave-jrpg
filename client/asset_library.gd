@@ -1,4 +1,5 @@
 extends RefCounted
+const L = preload("res://client/i18n.gd")
 ## Only manifest IDs resolve; model text never becomes a resource path.
 static var assets: Dictionary = {}
 static var images: Dictionary = {}
@@ -11,17 +12,17 @@ static func entry(id: String, pinned: String = "", kind: String = "") -> Diction
 		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://assets/library/index.json"))
 		if parsed is Dictionary: assets = parsed.get("assets",{})
 	if not assets.has(id):
-		last_error = "素材库缺少：" + id
+		last_error = L.t("素材库缺少：") + id
 		push_error(last_error)
 		return {}
 	var item: Dictionary = assets[id]
 	if (not pinned.is_empty() and pinned != str(item.sha256) and not pinned in item.get("legacy_hashes",[])) or (not kind.is_empty() and kind != str(item.kind)):
-		last_error = "素材版本或类型不匹配：" + id
+		last_error = L.t("素材版本或类型不匹配：") + id
 		push_error(last_error)
 		return {}
 	var file: String = str(item.file)
 	if not file.begins_with("assets/library/blobs/") or file.contains(".."):
-		last_error = "素材索引路径无效。"
+		last_error = L.t("素材索引路径无效。")
 		push_error(last_error)
 		return {}
 	if not checked_files.has(file):
@@ -30,7 +31,7 @@ static func entry(id: String, pinned: String = "", kind: String = "") -> Diction
 		hash.start(HashingContext.HASH_SHA256)
 		hash.update(data)
 		if hash.finish().hex_encode() != str(item.sha256):
-			last_error = "素材文件缺失或损坏：" + id
+			last_error = L.t("素材文件缺失或损坏：") + id
 			push_error(last_error)
 			return {}
 		checked_files[file] = true

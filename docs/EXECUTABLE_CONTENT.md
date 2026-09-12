@@ -50,7 +50,7 @@ python tools/build_content_fixture.py
 godot --headless --path . --script res://tests/content_smoke.gd
 ```
 
-Python 测试覆盖实际操作开门、历史位置跟随、非枚举目标、自定义战斗、计时器、动态绘图与地表、越界拒绝、级联预算、原子回滚、读档与在线协议拒绝降级。原生验收检查真实 Godot 中的动画像素、模型地图、动作面板和战斗 UI。随包 CI 配置包含这些检查；本轮实际执行结果见 [REFRACTOR_TEST_REPORT.md](REFRACTOR_TEST_REPORT.md)，不将旧提交的 CI 结果冒充新版验证。
+Python 测试覆盖实际操作开门、历史位置跟随、非枚举目标、自定义战斗、计时器、动态绘图与地表、越界拒绝、级联预算、原子回滚、读档与在线协议拒绝降级。原生验收检查真实 Godot 中的动画像素、模型地图、动作面板和战斗 UI。仓库 CI 包含这些检查。早期验证记录见 [Content Runtime v2 验证](REFRACTOR_TEST_REPORT.md)，当前结果应查看对应提交的 Actions。
 
 ## 仍然存在的边界
 

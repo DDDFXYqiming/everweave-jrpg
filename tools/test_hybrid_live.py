@@ -25,6 +25,7 @@ def main():
     parser.add_argument('--scene',choices=SCENES,default='town')
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--baseline',action='store_true')
+    parser.add_argument('--language',choices=('zh','en'),default='zh')
     parser.add_argument('--max-calls',type=int,default=2)
     parser.add_argument('--retry-from',type=Path,help='Repair the last recorded response for the same opening premise')
     args=parser.parse_args()
@@ -33,8 +34,8 @@ def main():
     out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
     db=out/'world.sqlite3'
     if db.exists():parser.error('Use a fresh output directory')
-    w=World(Store(db));w.start(SCENES[args.scene],authored=True);d=Director(w)
-    d.configure(dict(offline=False,hybrid_content=not args.baseline,max_calls=args.max_calls,reasoning_effort='low'))
+    w=World(Store(db));w.start(SCENES[args.scene],authored=True,language=args.language);d=Director(w)
+    d.configure(dict(language=args.language,offline=False,hybrid_content=not args.baseline,max_calls=args.max_calls,reasoning_effort='low'))
     d.cfg['cooldown']=0
     if args.retry_from:
         from engine.schema import InvalidPatch

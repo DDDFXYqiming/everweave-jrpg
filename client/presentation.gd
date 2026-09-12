@@ -1,4 +1,5 @@
 extends RefCounted
+const L = preload("res://client/i18n.gd")
 ## Read-only projections of the existing snapshot. Never repairs engine content,
 ## evaluates rules, changes IDs, or sends synthesized actions to the backend.
 const KINDS := {"consumable":"补给", "weapon":"武器", "charm":"饰物", "key":"要物", "tool":"工具"}
@@ -18,14 +19,15 @@ static func inventory(snapshot: Dictionary, category: String = "all") -> Array[D
 		if category != "all" and kind != category: continue
 		var item: Dictionary = raw.duplicate(true)
 		item["kind"] = kind
-		item["type_label"] = KINDS.get(kind, "物品")
+		item["type_label"] = L.t(str(KINDS.get(kind, "物品")))
 		var use: Dictionary = raw.get("use", {}) if raw.get("use") is Dictionary else {}
 		item["can_use"] = not bool(raw.get("equipped", false)) and (not use.is_empty() or kind in ["consumable", "weapon", "charm"])
-		item["action_label"] = str(use.get("label", "装备" if kind in ["weapon", "charm"] else "使用"))
+		item["action_label"] = str(use.get("label", L.t("装备") if kind in ["weapon", "charm"] else L.t("使用")))
 		if raw.get("usable") is Dictionary:
 			item["enabled"] = bool(raw.usable.get("enabled",false))
-			item["blocked_reason"] = str(raw.usable.get("blocked_reason",""))
+			item["blocked_reason"] = L.system_text(str(raw.usable.get("blocked_reason","")))
 			item["action_label"] = str(raw.usable.get("label",item.action_label))
+			if use.is_empty():item["action_label"]=L.t(item["action_label"])
 		result.append(item)
 	return result
 
@@ -55,9 +57,9 @@ static func history(snapshot: Dictionary) -> Array[String]:
 static func summary(snapshot: Dictionary) -> String:
 	var d: Dictionary = snapshot.get("director", {})
 	var failed: int = records(d.get("failed_tasks", [])).size()
-	if bool(d.get("paused", false)): return "已暂停准备新内容"
-	if failed > 0: return "%d 处内容需要重试" % failed
-	if bool(snapshot.get("started",false)) and not snapshot.get("region") is Dictionary: return "正在准备第一处落脚地"
-	if int(d.get("active_requests", 0)) > 0: return "正在准备沿途的新内容"
-	if d.get("mode") == "not_configured": return "继续旅程后准备新内容"
-	return "沿途内容已就绪"
+	if bool(d.get("paused", false)): return L.t("已暂停准备新内容")
+	if failed > 0: return L.t("%d 处内容需要重试") % failed
+	if bool(snapshot.get("started",false)) and not snapshot.get("region") is Dictionary: return L.t("正在准备第一处落脚地")
+	if int(d.get("active_requests", 0)) > 0: return L.t("正在准备沿途的新内容")
+	if d.get("mode") == "not_configured": return L.t("继续旅程后准备新内容")
+	return L.t("沿途内容已就绪")

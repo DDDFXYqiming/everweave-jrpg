@@ -1,9 +1,9 @@
 # 授权说明
 
-本项目自有代码暂不附带对外开源许可证，默认用于拥有者的私密仓库。原有 assets/atlas.png、tiles.png 与 wander.wav 为项目自建。
+项目自有代码和文档采用 [MIT License](LICENSE)。项目自建的 `assets/atlas.png`、`assets/tiles.png` 和 `assets/wander.wav` 随项目按同一许可提供。
 
-混合内容分支另行收录 CC0 第三方图像与音频。它们保留各自许可，不属于本项目独占原创内容。作者、来源页、版本、文件校验值与组合说明见 [素材署名清单](assets/library/CREDITS.md)、`assets/library/sources.json` 及 `assets/library/licenses/`。代码许可不会限制这些 CC0 素材的原有使用权。
+本地素材库中的第三方图像与音频保留各自许可。当前收录的外部素材为 CC0，作者、来源和版本见 [素材署名](assets/library/CREDITS.md)、`assets/library/sources.json` 及 `assets/library/licenses/`。这些素材的使用条件不因项目代码许可而改变。
 
-Godot、Python 及可选的素材开发工具 Pillow 由各自项目授权；本包没有重新分发这些程序的安装文件。字体通过操作系统的系统字体接口使用，包内没有字体文件。项目中的上游文档链接仅作为接口依据。
+Godot、Python 和可选的素材开发工具 Pillow 由各自项目授权，本仓库不分发这些程序的安装文件。字体从操作系统读取，仓库不包含字体文件。
 
-未来公开或商业发行时，请根据实际加入的素材、插件和运行时分发方式补充对应许可与版权声明。
+示例截图包含引擎生成的游戏画面及已署名素材。新增素材时，应同时记录来源和许可；制作独立发行包时也应保留相应声明。

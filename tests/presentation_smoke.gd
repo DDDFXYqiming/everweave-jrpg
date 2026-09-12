@@ -7,6 +7,7 @@ func _initialize() -> void:
 
 func _run() -> void:
 	create_timer(25).timeout.connect(func() -> void: quit(1))
+	load("res://client/i18n.gd").set_language("zh",false)
 	main = load("res://client/main.tscn").instantiate()
 	main.backend_url = "http://127.0.0.1:1"
 	main.session_token = "presentation-test-only"

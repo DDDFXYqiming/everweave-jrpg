@@ -14,7 +14,7 @@ import sys
 
 ROOT=Path(__file__).resolve().parents[1]
 ALLOWED_ROOTS={'engine','client','assets','docs','tests','tools','.github'}
-ALLOWED_FILES={'project.godot','README.md','LICENSE-NOTICE.md','launch.py','Start.ps1','Start.cmd','Publish-Private.ps1','.gitignore','.gitattributes','.editorconfig'}
+ALLOWED_FILES={'project.godot','README.md','LICENSE','LICENSE-NOTICE.md','launch.py','Start.ps1','Start.cmd','Publish-Private.ps1','.gitignore','.gitattributes','.editorconfig'}
 SKIP_DIRS={'.git','.godot','__pycache__','.pytest_cache','.venv','venv','saves','userdata','build','dist','exports'}
 
 

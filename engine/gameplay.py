@@ -153,7 +153,7 @@ def action(world, a):
             vm = Runtime(world, r)
             if op == 'actions':
                 options = vm.available(scope='explore')
-                s['ui'] = dict(kind='actions', title='此刻可以做什么', lines=[], actions=options)
+                s['ui'] = dict(kind='actions', title='此刻可以做什么', system_title=True, lines=[], actions=options)
                 world.persist(); return
             if op == 'invoke':
                 definition = vm.invoke(a.get('id'), 'explore')
@@ -203,7 +203,7 @@ def action(world, a):
 
 def show_messages(world, vm):
     if vm.messages and not world.state.get('battle') and not world.state['ui']:
-        world.state['ui'] = dict(kind='message', title='世界发生了变化', lines=vm.messages[-6:])
+        world.state['ui'] = dict(kind='message', title='世界发生了变化', system_title=True, lines=vm.messages[-6:])
 
 
 def interact(world, entity):

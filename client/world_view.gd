@@ -1,4 +1,5 @@
 extends Control
+const L = preload("res://client/i18n.gd")
 ## Atlas-backed pixel renderer. Only validated runtime data reaches this layer.
 ## All scene placement is data; the LLM never supplies GDScript or resource paths.
 
@@ -220,7 +221,7 @@ func _draw_minimap() -> void:
 		if e.kind == "exit":
 			draw_rect(Rect2(origin + Vector2(float(e.x), float(e.y)) * map_scale - Vector2.ONE, Vector2(3, 3)), Color("c1a9ef"))
 	draw_rect(Rect2(origin + target_player * map_scale - Vector2.ONE, Vector2(4, 4)), Color("f7e0a4"))
-	draw_string(font,origin+Vector2(3,89),"旅图 · 点击展开",HORIZONTAL_ALIGNMENT_LEFT,104,11,Color("d7c59d"))
+	draw_string(font,origin+Vector2(3,89),L.t("旅图 · 点击展开"),HORIZONTAL_ALIGNMENT_LEFT,104,11,Color("d7c59d"))
 
 func _draw_nearby_hint() -> void:
 	var p: Dictionary = snapshot.get("player", {})

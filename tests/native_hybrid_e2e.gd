@@ -47,6 +47,7 @@ func _run() -> void:
 		push_error("Hybrid native timeout: "+phase)
 		quit(1)
 	)
+	load("res://client/i18n.gd").set_language("zh",false)
 	main = load("res://client/main.tscn").instantiate()
 	root.add_child(main)
 	while not main.connection_ready:await process_frame

@@ -8,6 +8,7 @@ func _initialize() -> void:
 func _run() -> void:
 	var snapshots = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/generated_content.json"))
 	assert(snapshots is Array and snapshots.size() == 4)
+	load("res://client/i18n.gd").set_language("zh",false)
 	var main = load("res://client/main.tscn").instantiate()
 	main.backend_url = "http://127.0.0.1:1"
 	main.session_token = "content-smoke-only"
