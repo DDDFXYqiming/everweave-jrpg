@@ -79,6 +79,9 @@ def unique_ids(values,name):
  if len({v['id'] for v in values})!=len(values): raise InvalidPatch('duplicate '+name+' IDs')
 
 def parse_patch(raw,expected,context=None,corrections=None):
+ if expected=='campaign':
+  from .campaign import validate
+  return dict(kind='campaign',campaign=validate(raw,not (context or {}).get('game_spec')))
  from .normalization import normalize_patch,decode
  from .modules import expand
  expanded,module_sources=expand(decode(raw),expected)

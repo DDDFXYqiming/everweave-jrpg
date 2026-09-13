@@ -88,6 +88,14 @@ class Runtime:
     def access(self, name, write=False):
         path(name, write)
         bits = name.split('.')
+        if bits[0]=='chapter':
+            from .campaign import chapter
+            c=chapter(self.s,self.region['id'])
+            if not c or bits[1] not in c['flags']:raise RuleError('undefined chapter flag '+bits[1])
+            return c['flags'],bits[1]
+        if bits[0]=='resources':
+            from .game_spec import value
+            return {bits[1]:value(self.s,bits[1])},bits[1]
         if bits[0] == 'vars': return self.rt['vars'], bits[1]
         if bits[0] == 'self':
             obj = self.entity(self.actor)
@@ -154,12 +162,17 @@ class Runtime:
                 self.changed |= obj.get(key) != value; obj[key] = value
             elif op == 'if': self.run(c['then'] if self.expr(c['when']) else c['else'])
             elif op == 'stat':
+                from .game_spec import active
+                if c['target']=='player' and not active(self.s,c['name']):raise RuleError('disabled player resource '+c['name'])
                 target = self.s['player'] if c['target'] == 'player' else self.s.get('battle')
                 if target is None: raise RuleError('stat requires battle')
                 value = self.expr(c['delta'])
                 if type(value) not in (int, float): raise RuleError('stat delta must be numeric')
                 delta = max(-2000, min(2000, int(value))); name = c['name']
                 cap = target.get('max_'+name, 1_000_000)
+                if c['target']=='player' and self.s.get('game_spec'):
+                    from .game_spec import resource
+                    cap=resource(self.s,name)['max']
                 target[name] = max(0, min(cap, target.get(name, 0)+delta)); self.changed = True
             elif op == 'item':
                 key = self.item_id(c['id']); amount = self.expr(c['count'])
@@ -184,6 +197,14 @@ class Runtime:
                     obj['solid'] = value
                 else: obj['spent'] = True
                 self.changed = True
+            elif op == 'chapter':
+                from .campaign import chapter
+                cdata=chapter(self.s,self.region['id']);key=c['key'];value=self.expr(c['value'])
+                if not cdata or key not in cdata['flags'] or type(value) is not type(cdata['flags'][key]):raise RuleError('chapter flag type/identity mismatch')
+                cdata['flags'][key]=value;self.changed=True
+            elif op == 'resource':
+                from .game_spec import change
+                change(self.s,c['id'],self.expr(c['delta']));self.changed=True
             elif op == 'paint':
                 spec = dict(rect=[self.expr(v) for v in c['rect']], tile=c['tile'])
                 if 'surface' in c: spec['surface'] = c['surface']
@@ -272,8 +293,11 @@ class Runtime:
         if not isinstance(left,dict) or type(threshold) is not int:return ''
         needed=threshold+int(condition['op']=='gt')
         labels={'player.gold':'金币','player.mp':'魔力','player.hp':'生命值'}
+        for r in self.s.get('game_spec',{}).get('resources',[]):
+            labels['resources.'+r['id']]=r['label']
+            if r['id'] in ('hp','mp','gold'):labels['player.'+r['id']]=r['label']
         if left.get('get') in labels:
-            name=labels[left['get']];current=self.s['player'][left['get'].split('.')[1]]
+            name=labels[left['get']];source,key=self.access(left['get']);current=source[key]
         elif 'item' in left:
             key=self.item_id(left['item']);name=self.s['items'][key]['name'];current=self.s['player']['inventory'].get(key,0)
         else:return ''

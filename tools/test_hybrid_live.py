@@ -25,16 +25,24 @@ def main():
     parser.add_argument('--scene',choices=SCENES,default='town')
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--baseline',action='store_true')
+    parser.add_argument('--campaign',action='store_true')
+    parser.add_argument('--steps',type=int,default=1)
+    parser.add_argument('--setting')
+    parser.add_argument('--plan-from',type=Path,help='Replay an already generated campaign response before region tests')
     parser.add_argument('--language',choices=('zh','en'),default='zh')
     parser.add_argument('--max-calls',type=int,default=2)
     parser.add_argument('--retry-from',type=Path,help='Repair the last recorded response for the same opening premise')
     args=parser.parse_args()
     if not args.live or not os.environ.get('DEEPSEEK_API_KEY'):parser.error('--live and an existing DEEPSEEK_API_KEY are required')
-    if not 1<=args.max_calls<=4:parser.error('budget must be 1..4 calls')
+    if not 1<=args.max_calls<=8 or not 1<=args.steps<=5:parser.error('budget must be 1..8 calls and 1..5 steps')
     out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
     db=out/'world.sqlite3'
     if db.exists():parser.error('Use a fresh output directory')
-    w=World(Store(db));w.start(SCENES[args.scene],authored=True,language=args.language);d=Director(w)
+    w=World(Store(db));w.start(args.setting or SCENES[args.scene],authored=True,language=args.language,planned=args.campaign);d=Director(w)
+    if args.plan_from:
+        record=json.loads(args.plan_from.read_text(encoding='utf-8'))[0]
+        if not args.campaign or record['context']['setting']!=w.state['setting']:parser.error('A campaign plan with the same setting is required')
+        w.apply_patch(record['raw'],w.context(kind='campaign'))
     d.configure(dict(language=args.language,offline=False,hybrid_content=not args.baseline,max_calls=args.max_calls,reasoning_effort='low'))
     d.cfg['cooldown']=0
     if args.retry_from:
@@ -61,12 +69,15 @@ def main():
             print(json.dumps({k:record[k] for k in ('seconds','usage','error') if k in record}),flush=True)
     started=time.monotonic()
     try:
-        with patch.object(ChatProvider,'generate',generate):d.step()
+        with patch.object(ChatProvider,'generate',generate):
+            for _ in range(args.steps):
+                if not d.step() or d.failed:break
         region=w.region() or {};sprites=region.get('visuals',{}).get('sprites',{})
         referenced=sum('asset' in s or 'parts' in s for s in sprites.values())
         mixed=sum(('asset' in s or 'parts' in s) and ('layers' in s or 'parts' in s) for s in sprites.values())
         materials=sum('material' in s for s in sprites.values())
-        summary=dict(scene=args.scene,baseline=args.baseline,ready=bool(region),seconds=round(time.monotonic()-started,3),
+        summary=dict(scene=args.scene,baseline=args.baseline,reused_plan=str(args.plan_from) if args.plan_from else None,ready=bool(region),seconds=round(time.monotonic()-started,3),
+            chapters=len(w.state.get('campaign',{}).get('chapters',{})),planned_regions=len(w.state['topology']),ready_regions=sum(n['ready'] for n in w.state['topology'].values()),
             calls=d.calls,repair_calls=d.repair_calls,input_tokens=d.tokens_in,output_tokens=d.tokens_out,reasoning_tokens=d.tokens_reasoning,
             sprites=len(sprites),library_sprites=referenced,composed_sprites=mixed,material_sprites=materials,original_sprites=len(sprites)-referenced-materials,
             modules=len(region.get('module_sources',[])),used_assets=used_assets(region.get('plan',{})),

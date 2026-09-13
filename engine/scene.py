@@ -96,6 +96,8 @@ def dress(region):
         if e.get('spent'):continue
         for x,y in cells_for(e):
             reserved.update((x+dx,y+dy) for dy in range(-1,2) for dx in range(-1,2))
+    for key,(x,y) in region.get('scene',{}).get('anchors',{}).items():
+        if key.startswith('link_') or key=='chapter_gate':reserved.update((x+dx,y+dy) for dy in range(-1,2) for dx in range(-1,2))
     candidates=[]
     for y in range(h):
         for x in range(w):
@@ -184,7 +186,7 @@ def build(plan, rid, seed, depth, exits):
         occupied.add(tuple(pos)); region['entities'].append(e)
     forward = 0
     for n, link in enumerate(exits):
-        key = 'back' if link['direction'] == 'back' else f'forward_{forward}'
+        key = link.get('anchor') or ('back' if link['direction'] == 'back' else f'forward_{forward}')
         if link['direction'] != 'back': forward += 1
         pos = anchors.get(key)
         if pos is None: raise InvalidPatch('scene needs exit anchor '+key,path='region.scene.anchors.'+key,
@@ -196,6 +198,7 @@ def build(plan, rid, seed, depth, exits):
         occupied.add(tuple(pos))
         region['entities'].append(dict(id=f'{rid}:gate_{n}', kind='exit', name=link['label'],
             x=pos[0], y=pos[1], target=link['target'], direction=link['direction'], anchor_key=key, spent=False, solid=False))
+        if 'link_id' in link:region['entities'][-1]['link_id']=link['link_id']
     validate_space(region, full=True)
     dress(region)
     return region

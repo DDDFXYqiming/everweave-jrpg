@@ -18,10 +18,12 @@ static func header(main, parent: Node, title: String, detail: String) -> void:
 	parent.add_child(HSeparator.new())
 
 static func inventory(main, parent: Node) -> void:
-	header(main,parent,L.t("行囊"), L.t("%d 种随身物品   /   %d 金币") % [View.inventory(main.state).size(),int(main.state.get("player",{}).get("gold",0))])
+	var spec: Variant = main.state.get("game_spec")
+	header(main,parent,str(spec.inventory_label) if spec is Dictionary else L.t("行囊"),str(View.inventory(main.state).size()) if spec is Dictionary else L.t("%d 种随身物品   /   %d 金币") % [View.inventory(main.state).size(),int(main.state.get("player",{}).get("gold",0))])
 	var filters := HFlowContainer.new()
 	parent.add_child(filters)
 	for entry in [["all",L.t("全部")],["consumable",L.t("补给")],["weapon",L.t("武器")],["charm",L.t("饰物")],["key",L.t("要物")],["tool",L.t("工具")]]:
+		if spec is Dictionary and not bool(spec.systems.equipment) and entry[0] in ["weapon","charm"]:continue
 		var b: Button = main._button(filters,entry[1],main._inventory_category.bind(entry[0]))
 		b.modulate = Color.WHITE if main.inventory_filter == entry[0] else Color("999e92")
 	var content := HBoxContainer.new()
@@ -85,7 +87,8 @@ static func inventory(main, parent: Node) -> void:
 	else: main._label(detail,L.t("随身保管。在相关人物或物件处使用。"),14,main.MUTED)
 
 static func journal(main, parent: Node) -> void:
-	header(main,parent,L.t("旅途手记"),L.t("记下未完的事，也记下已经发生的事。"))
+	var spec: Variant = main.state.get("game_spec")
+	header(main,parent,str(spec.journal_label) if spec is Dictionary else L.t("旅途手记"),L.t("记下未完的事，也记下已经发生的事。"))
 	var tabs := HBoxContainer.new()
 	parent.add_child(tabs)
 	for entry in [["active",L.t("待办")],["threads",L.t("线索")],["history",L.t("经历")],["complete",L.t("已完成")]]:

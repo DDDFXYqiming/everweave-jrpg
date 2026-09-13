@@ -11,6 +11,7 @@ from .visuals import freeze_sprite,resolve_sprite
 from . import gameplay
 from .runtime import Runtime, install
 from .scene import solid_at, cells_for
+from . import campaign,game_spec
 
 class GameError(ValueError): pass
 
@@ -23,7 +24,7 @@ class World:
    for node in self.state['topology'].values():
     if not node.get('refresh_reason'):node['needs_refresh']=False
    self.state['prefetch_policy']=2
- def start(self,setting,*,authored=False,language='zh'):
+ def start(self,setting,*,authored=False,language='zh',planned=False):
   if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
   self.cache.clear(); self.reaction_needed=False
   self.state=dict(schema_version=2,prefetch_policy=2,director_reaction_pending=False,epoch=uuid.uuid4().hex,version=1,story_revision=0,setting=setting.strip(),title='未写之境 · Everweave',current='r0',time=480,steps=0,
@@ -36,18 +37,22 @@ class World:
   if authored:
    self.state.update(item_policy='authored',loadout_applied=False,items={})
    self.state['player'].update(inventory={},weapon='',charm='')
+  if planned:self.state['campaign']=dict(chapters={},active='',pending=True,revision=0)
   self.store.commit(self.state,reset=True)
  def region(self,rid=None):
   rid=rid or self.state['current']
-  if rid in self.cache: self.cache.move_to_end(rid); return self.cache[rid]
+  if rid in self.cache:
+   self.cache.move_to_end(rid);campaign.sync_gates(self,self.cache[rid]);return self.cache[rid]
   r=self.store.load_region(rid)
   if r:
+   campaign.sync_gates(self,r)
    from .scene import dress
    dress(r)
    self.cache[rid]=r
    while len(self.cache)>6: self.cache.popitem(last=False)
   return r
  def persist(self,*regions,event=None,delete=()):
+  campaign.refresh(self)
   from .scene import dress
   for r in regions:dress(r)
   self.state['version']+=1
@@ -87,12 +92,17 @@ class World:
    rid,distance=queue.popleft()
    if distance>=depth: continue
    node=s['topology'][rid]
-   for neighbor in node['children']+([node['parent']] if node['parent'] else []):
+   for neighbor in (campaign.neighbors(s,rid) if campaign.book(s) else node['children']+([node['parent']] if node['parent'] else [])):
     if neighbor in seen or neighbor not in s['topology']: continue
     seen.add(neighbor); queue.append((neighbor,distance+1))
     if not s['topology'][neighbor]['visited']: targets.append((neighbor,distance+1))
   return targets
  def context(self,target=None,kind='region'):
+  if kind=='campaign':
+   s=self.state;b=s['campaign']
+   return dict(kind=kind,target=s['current'],epoch=s['epoch'],story_revision=s['story_revision'],content_version=2,
+    setting=s['setting'],campaign_revision=b['revision'],chapter_number=len(b['chapters'])+1,game_spec=s.get('game_spec'),
+    previous_chapter=copy.deepcopy(b['chapters'].get(b.get('active'))),recent_events=self.store.recent_events(12))
   s=self.state; rid=target or s['current']; r=self.region(); n=s['topology'][rid]
   parent=self.region(n['parent']) if n['parent'] else None
   art=(parent or r or {}).get('visuals',{})
@@ -101,10 +111,11 @@ class World:
    available_items=[i for k,i in s['items'].items() if k in C.BASE_ITEMS or k.startswith(s['current']+':') or k in s['player']['inventory']],
    frontier=[dict(id=k,name=s['topology'][k]['name'],outline=s['topology'][k].get('outline'),visited=s['topology'][k]['visited']) for k in s['topology'][s['current']]['children']],
    known_locations=[dict(id=k,name=v['name'],visited=v['visited']) for k,v in list(s['topology'].items())[-18:]],
-   facts=dict(list(s['facts'].items())[-35:]),lore=list(s['lore'].values())[-16:],threads=list(s['threads'].values())[-10:],quests=list(s['quests'].values())[-10:],recent_events=self.store.recent_events(12))
+   facts=dict(list(s['facts'].items())[-35:]),lore=list(s['lore'].values())[-16:],threads=list(s['threads'].values())[-10:],quests=list(s['quests'].values())[-10:],recent_events=self.store.recent_events(12),**campaign.context(self,rid))
  def context_is_current(self,context):
   s=self.state
   if not s or context.get('epoch')!=s['epoch']:return False
+  if context.get('kind')=='campaign':return bool(campaign.book(s) and s['campaign']['pending'] and context.get('campaign_revision')==s['campaign']['revision'])
   node=s['topology'].get(context.get('target'))
   if node is None:return False
   if context.get('kind')=='region':
@@ -158,10 +169,38 @@ class World:
   current=self.region() or {}
   return dict(context,validation_items=list(self.state['items'].values()),validation_quests=list(self.state['quests'].values()),validation_props=current.get('props',[]),validation_bindings=current.get('visuals',{}).get('bindings',{}))
  def validate_patch(self,raw,context):
+  if context['kind']=='campaign':return dict(kind='campaign',campaign=campaign.validate(raw,not self.state.get('game_spec')))
   identities=self.validation_context(context)
   changes=[]
   p=parse_patch(raw,context['kind'],identities,changes)
   p['_corrections']=changes
+  game_spec.check_plan(self.state,p[p['kind']])
+  c=campaign.chapter(self.state,context['target'])
+  if c:
+   def check_shared(v):
+    if isinstance(v,list):
+     for x in v:check_shared(x)
+    elif isinstance(v,dict):
+     key=v.get('key') if v.get('op')=='chapter' else str(v.get('get','')).split('.',1)[1] if str(v.get('get','')).startswith('chapter.') else None
+     if key is not None and key not in c['flags']:raise InvalidPatch('undefined chapter flag '+str(key))
+     for x in v.values():check_shared(x)
+   check_shared(p[p['kind']].get('program',{}))
+   if p['kind']=='reaction' and (p['reaction'].get('locations') or p['reaction'].get('future_updates')):raise InvalidPatch('chapter routes are planned centrally; update shared flags or await the next chapter')
+  if campaign.chapter(self.state,context['target']) and p['kind']=='region':
+   if p['region'].get('destinations'):raise InvalidPatch('chapter locations use planned_routes; omit region.destinations')
+   c=campaign.chapter(self.state,context['target'])
+   writes=set()
+   def inspect(v):
+    if isinstance(v,list):
+     for x in v:inspect(x)
+    elif isinstance(v,dict):
+     if v.get('op')=='chapter':writes.add(v['key'])
+     for x in v.values():inspect(x)
+   inspect(p['region'].get('program',{}))
+   required={k for k,v in c['flag_sources'].items() if v==context['target']}
+   if not required<=writes:raise InvalidPatch('region must implement chapter flag producers: '+', '.join(sorted(required-writes)))
+   if context['target']==c['continuation']['from']:
+    if 'chapter_gate' not in p['region'].get('scene',{}).get('anchors',{}):raise InvalidPatch('reserve scene.anchors.chapter_gate for the next chapter')
   if p['kind']=='region':
    if context['target']=='r0' and not context.get('hero_visual') and p['region'].get('visuals'):
     resolve_sprite('hero',p['region']['visuals'])
@@ -195,8 +234,13 @@ class World:
    specs=p['region'].get('destinations',[])
    links=[dict(target='preview_'+str(i),direction='forward',label=v['name']) for i,v in enumerate(specs)]
    if node['parent']:links.append(dict(target=node['parent'],direction='back',label='return'))
+   if campaign.chapter(self.state,rid):links=campaign.routes(self.state,rid)
    preview=build_region(p['region'],rid,C.stable_seed(self.state['setting'],rid),node['depth'],links);preview['plan']=p['region']
+   if campaign.chapter(self.state,rid):preview['chapter_id']=node['chapter_id']
    gameplay.definitions(self,preview)
+   if context.get('reserve_chapter_gate'):
+    pos=preview['scene']['anchors']['chapter_gate']
+    if tuple(pos) not in reachable(preview['tiles'],preview['spawn']) or any(tuple(pos) in cells_for(e) for e in preview['entities']+preview['props']):raise InvalidPatch('chapter_gate must reserve a free reachable cell')
   if p['kind']=='reaction':
    # Validate registration, executable references and causal geometry together
    # on an isolated copy so semantic failures enter the same bounded repair.
@@ -214,13 +258,16 @@ class World:
   s=self.state
   if not self.context_is_current(context): return False
   p=self.validate_patch(raw,context) if _validated is None else _validated
+  if p['kind']=='campaign':campaign.apply(self,p['campaign']);return True
   before=copy.deepcopy(s); cache_before=copy.deepcopy(self.cache)
   try:
    if p['kind']=='region':
     rid=context['target']; node=s['topology'].get(rid)
     if node is None or node['visited'] or (node['ready'] and not node.get('needs_refresh')): return False
     discarded=[]
-    if p['region'].get('destinations'):
+    planned=campaign.chapter(s,rid)
+    if planned:pass
+    elif p['region'].get('destinations'):
      children=[self._register_destination(rid,spec) for spec in p['region']['destinations']]
      # The parent has never been visited: its unused outlines are still provisional.
      for old in node['children']:
@@ -232,7 +279,9 @@ class World:
      for n,child in enumerate(node['children']): s['topology'][child]=dict(parent=rid,depth=node['depth']+1,ready=False,visited=False,name='远处的灯火' if n==0 else '尚未命名的道路',children=[])
     exits=[dict(target=ch,direction='forward',label='前往 '+s['topology'][ch]['name']) for ch in node['children']]
     if node['parent']: exits.append(dict(target=node['parent'],direction='back',label='返回 '+s['topology'][node['parent']]['name']))
+    if planned:exits=campaign.routes(s,rid)
     r=build_region(p['region'],rid,C.stable_seed(s['setting'],rid),node['depth'],exits); r.update(plan=p['region'],source=source,pending_lore=p['lore'],pending_threads=p['threads'],normalizations=p['_corrections'][-128:],generated_story_revision=context['story_revision']); node.update(ready=True,name=r['name'],needs_refresh=False,refresh_reason=None)
+    if planned:r['chapter_id']=node['chapter_id'];campaign.sync_gates(self,r)
     if r.get('visuals'):
      if rid=='r0' and not s.get('hero_visual'):s['hero_visual']=freeze_sprite(r['visuals']['sprites'][resolve_sprite('hero',r['visuals'])],r['visuals']['palette'])
      if s.get('hero_visual'):r['visuals']['sprites']['hero']=copy.deepcopy(s['hero_visual'])
@@ -322,20 +371,21 @@ class World:
   if not self.state: return dict(started=False,version=0)
   s=self.state; r=copy.deepcopy(self.region()); p=s['player']
   if r:
+   if campaign.book(s):r['entities']=[e for e in r['entities'] if not (e['kind']=='exit' and e.get('spent'))]
    for e in r['entities']:
     if e['kind']=='exit': e['name']=('返回 ' if e['direction']=='back' else '前往 ')+s['topology'][e['target']]['name']
   inv=[dict(s['items'][k],quantity=n,equipped=k in (p['weapon'],p['charm'])) for k,n in p['inventory'].items() if n>0 and k in s['items']]
   for item in inv:item['usable']=gameplay.item_availability(self,item)
-  generated_actions=Runtime(self,r).available(scope='combat' if s['battle'] else 'explore') if r and r.get('program') else []
+  generated_actions=Runtime(self,r).available(scope='combat' if s['battle'] else 'explore') if r and r.get('program') and not s.get('game_over') else []
   ui=copy.deepcopy(s['ui'])
   if ui.get('kind')=='pending_exit':
    node=s['topology'].get(ui.get('target'),{})
    ui['ready']=bool(node.get('ready'));ui['name']=node.get('name','下一个地区')
    ui['title']='下一地区已准备好' if ui['ready'] else '地区正在后台准备'
    ui['lines']=['可以进入 '+ui['name']+'。'] if ui['ready'] else ['这条道路尚未准备好。你可以继续探索，后台会提前生成。']
-  return copy.deepcopy(dict(audio_seq=s.get('audio_seq',0),audio_events=s.get('audio_events',[]),available_actions=generated_actions,content_version=2,started=True,version=s['version'],epoch=s['epoch'],title=s['title'],setting=s['setting'],story_revision=s['story_revision'],time=s['time'],
+  return copy.deepcopy(dict(game_over=bool(s.get('game_over')),game_spec=game_spec.snapshot(s),campaign=campaign.overview(s),audio_seq=s.get('audio_seq',0),audio_events=s.get('audio_events',[]),available_actions=generated_actions,content_version=2,started=True,version=s['version'],epoch=s['epoch'],title=s['title'],setting=s['setting'],story_revision=s['story_revision'],time=s['time'],
    region={k:v for k,v in r.items() if k not in ('plan','pending_lore','pending_threads')} if r else None,player=p,inventory=inv,quests=list(s['quests'].values())[-20:],threads=list(s['threads'].values())[-10:],journal=s['journal'][-10:],battle=s['battle'],ui=ui,map_count=sum(n['visited'] for n in s['topology'].values()),
-   frontier=[dict(id=rid,name=s['topology'][rid]['name'],ready=s['topology'][rid]['ready']) for rid in s['topology'][s['current']]['children']]))
+   frontier=[dict(id=rid,name=s['topology'][rid]['name'],ready=s['topology'][rid]['ready']) for rid in (campaign.neighbors(s,s['current'],True) if campaign.book(s) else s['topology'][s['current']]['children'])]))
  def action(self,a):
   return gameplay.action(self,a)
  def _action(self,a):
@@ -369,7 +419,7 @@ class World:
    p['x'],p['y']=x,y; s['steps']+=1
    self.sound_event('move')
    if s['steps']%4==0: s['time']+=1
-   if r['rule']=='healing_rain' and s['steps']%12==0: p['hp']=min(p['max_hp'],p['hp']+1)
+   if r['rule']=='healing_rain' and game_spec.active(s,'hp') and s['steps']%12==0: p['hp']=min(p['max_hp'],p['hp']+1)
    self.persist(); return
   if op=='interact':
    if s['ui']: return
@@ -406,6 +456,8 @@ class World:
    self.persist(); return
   raise GameError('不支持的动作。')
  def interact(self,e):
+  if e['kind']=='exit' and (e.get('spent') or e.get('locked')):raise GameError(e.get('blocked_reason','这条道路还未发现。'))
+  if e['kind']=='enemy' and not game_spec.enabled(self.state,'combat'):raise GameError('当前世界没有战斗系统。')
   self.sound_event('interact',e['id'])
   if gameplay.interact(self,e):return
   s=self.state; p=s['player']; r=self.region(); kind=e['kind']
@@ -413,10 +465,11 @@ class World:
    target=e['target']; node=s['topology'][target]
    if not node['ready']: s['ui']=dict(kind='pending_exit',target=target,entity=e['id'],title='地区正在后台准备',lines=[]); self.persist(); return
    old=s['current']; new=self.region(target); self._enter_content(new); s['current']=target
-   back=next((g for g in new['entities'] if g['kind']=='exit' and g['target']==old),None)
+   back=next((g for g in new['entities'] if g['kind']=='exit' and g['target']==old and (not e.get('link_id') or g.get('link_id')==e['link_id'])),None)
    p['x'],p['y']=(back['x'],back['y']) if back and 'scene' in new else ((back['x'],back['y']-1) if back else new['spawn']); s['ui']={}; s['time']+=10; self.note('抵达：'+new['name']); self.note(new['description'])
    self.persist(new,event=dict(type='arrival',text=new['name'],region=target,revision=s['story_revision'])); return
   if kind=='npc':
+   if e['role']=='merchant' and not (game_spec.enabled(s,'inventory') and game_spec.active(s,'gold')):raise GameError('此世界未启用普通货币商店，请使用自定义交互。')
    self.check_quests('talk',e['id'])
    if e['role']=='merchant':
     defaults=[key for key in ('potion','ether') if key in s['items']] if s.get('item_policy')!='authored' else []
@@ -478,11 +531,24 @@ class World:
  def _win_battle(self):
   s=self.state;p=s['player'];b=s['battle'];r=self.region()
   self.sound_event('victory')
-  e=next(e for e in r['entities'] if e['id']==b['id']); e['spent']=True; reward=8+b['level']*5+b['tier']*4; p['gold']+=reward; p['xp']+=18+b['tier']*10
-  while p['xp']>=p['level']*45:
-   p['xp']-=p['level']*45; p['level']+=1; p['max_hp']+=9; p['max_mp']+=3; p['hp']=p['max_hp']; p['mp']=p['max_mp']; self.note(f'提升至等级 {p["level"]}！')
-  s['facts']['defeated:'+e['id']]=True; self.check_quests('defeat',e['id']); event,delete=self.story('victory','击败 '+e['name']+f'，获得 {reward} 金币。',dict(enemy=e['id'])); s['battle']=None; s['ui']=dict(kind='message',title='战斗胜利',system_title=True,lines=[event['text'],'胜利正在影响接下来生成的内容。']); self.persist(r,event=event,delete=delete); return
+  e=next(e for e in r['entities'] if e['id']==b['id']); e['spent']=True; reward=(8+b['level']*5+b['tier']*4) if game_spec.active(s,'gold') else 0; p['gold']+=reward
+  if game_spec.resource(s,'gold'):p['gold']=min(p['gold'],game_spec.resource(s,'gold')['max'])
+  if game_spec.enabled(s,'progression'):p['xp']+=18+b['tier']*10
+  while game_spec.enabled(s,'progression') and p['xp']>=p['level']*45:
+   p['xp']-=p['level']*45;p['level']+=1
+   for key,amount in (('hp',9),('mp',3)):
+    if game_spec.active(s,key) and not s.get('game_spec'):p['max_'+key]+=amount;p[key]=p['max_'+key]
+   self.note(f'提升至等级 {p["level"]}！')
+  reward_text=('，获得 '+str(reward)+' '+str((game_spec.resource(s,'gold') or {}).get('label','金币'))+'。') if reward else ''
+  s['facts']['defeated:'+e['id']]=True; self.check_quests('defeat',e['id']); event,delete=self.story('victory','击败 '+e['name']+reward_text,dict(enemy=e['id'])); s['battle']=None; s['ui']=dict(kind='message',title='战斗胜利',system_title=True,lines=[event['text'],'胜利正在影响接下来生成的内容。']); self.persist(r,event=event,delete=delete); return
 
  def _defeat(self):
   s=self.state;p=s['player'];r=self.region()
+  if s.get('game_spec'):
+   mode=s['game_spec'].get('failure_mode','checkpoint')
+   if mode=='none':return
+   if mode=='end':
+    s['game_over']=True;s['battle']=None;s['ui']=dict(kind='message',title='行动结束',lines=['你没能继续这次行动。可以在设置中开始新的世界。']);return
+   p['hp']=p['max_hp'];p['x'],p['y']=r['spawn'];s['battle']=None
+   s['ui']=dict(kind='message',title='行动受挫',lines=['你退回了当前地区的入口。']);self.note('你退回了入口。');return
   loss=min(p['gold'],max(5,p['gold']//5)); p['gold']-=loss; p['hp']=p['max_hp']; p['mp']=p['max_mp']; p['x'],p['y']=r['spawn']; s['battle']=None; s['ui']=dict(kind='message',title='从灯火中醒来',system_title=True,lines=[f'你回到入口，遗失 {loss} 金币。敌人仍在原处。']); self.note('你在失去意识后回到入口。')

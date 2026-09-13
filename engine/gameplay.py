@@ -15,6 +15,10 @@ def transaction(world, operation):
     world._batch = dict(regions={}, events=[], delete=set())
     try:
         result = operation()
+        if world.state.get('game_spec') and world.region() and not world.state.get('game_over'):
+            from .game_spec import active
+            if active(world.state,'hp') and world.state['player']['hp']<=0 and world.state['game_spec']['failure_mode']!='none':
+                world._defeat();world.persist(world.region())
         batch = world._batch
         if batch['regions'] or batch['events'] or world.state != before:
             world.store.commit(world.state, list(batch['regions'].values()), batch['events'],
@@ -118,7 +122,8 @@ def item_availability(world,item):
     p=world.state['player'];r=world.region();use=item.get('use')
     label=(use or {}).get('label','装备' if item.get('kind') in ('weapon','charm') else '使用')
     reason=''
-    if p['inventory'].get(item.get('id'),0)<1:reason='背包里没有这件物品。'
+    if world.state.get('game_over'):reason='这次行动已经结束。'
+    elif p['inventory'].get(item.get('id'),0)<1:reason='背包里没有这件物品。'
     elif world.state['battle']:reason='请先结束战斗。'
     elif world.state['ui']:reason='先结束当前交互。'
     elif use:
@@ -147,6 +152,15 @@ def action(world, a):
             from .world import GameError
             raise GameError('世界未就绪，或动作格式无效。')
         r = world.region(); s = world.state; op = a.get('op')
+        if s.get('game_over') and op!='close':raise RuleError('这次行动已经结束，请开始新的世界。')
+        from .game_spec import enabled,active
+        if op=='combat' and not enabled(s,'combat'):raise RuleError('当前世界没有战斗系统。')
+        if op in ('buy','use') and not enabled(s,'inventory'):raise RuleError('当前世界没有物品系统。')
+        if op=='buy' and not active(s,'gold'):raise RuleError('当前世界没有货币交易。')
+        if op=='use':
+            item=s['items'].get(a.get('id'),{})
+            if item.get('kind') in ('weapon','charm') and not enabled(s,'equipment'):raise RuleError('当前世界没有装备系统。')
+            if item.get('kind')=='consumable' and not item.get('use') and not active(s,'hp' if item.get('effect')=='heal' else 'mp'):raise RuleError('此资源未启用。')
         previous = (s['current'], s['steps'], bool(s['battle']), copy.deepcopy(s['ui']))
         if op in ('invoke', 'actions', 'wait'):
             if s['battle'] or s['ui']: raise RuleError('先结束当前交互。')

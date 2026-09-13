@@ -102,6 +102,10 @@ class ChatProvider:
    hybrid=bool(cfg.get('hybrid_content',True))
    payload['messages'][0]['content']=prompt(kind,hybrid=hybrid)
    payload['messages'][1]['content']=json.dumps(dict(requested_kind=kind,world_context=model_context(context,kind,hybrid=hybrid),validation_error=repair),ensure_ascii=False,separators=(',',':'))
+  if kind=='campaign':
+   from .campaign_prompt import PROMPT
+   payload['messages'][0]['content']=PROMPT
+   payload['messages'][1]['content']=json.dumps(dict(world_context=context,validation_error=repair),ensure_ascii=False,separators=(',',':'))
   if repair and context.get('rejected_response'):
    payload['messages'][0]['content']+='\nRepair world_context.rejected_response using validation_error. Preserve its valid scene, art, IDs and mechanics; return the complete corrected JSON object, not a replacement design or a diff.'
   if cfg.get('language','zh')=='en':
@@ -190,7 +194,7 @@ class Director:
  def retry(self,target=None,kind=None,mode='repair'):
   if mode not in ('repair','redesign'):raise ProviderError('无效重试方式。')
   if mode=='redesign' and (not target or kind!='region'):raise ProviderError('重新创作需指定一个失败地区。')
-  if (target is None)!=(kind is None) or (target is not None and (not isinstance(target,str) or kind not in ('region','reaction'))):
+  if (target is None)!=(kind is None) or (target is not None and (not isinstance(target,str) or kind not in ('region','reaction','campaign'))):
    raise ProviderError('重试需要地区 ID 和任务类型。')
   selected={key for key in self.failed if target is None or key==(kind,target)}
   if target is not None and not selected:raise ProviderError('这个生成任务已经不再处于失败状态。')
@@ -266,12 +270,17 @@ class Director:
    prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
  def _next_job(self):
   w=self.world; s=w.state
+  if s and s.get('game_over'):return None
   if not s or not self.cfg or self.paused or len(self.in_flight)>=2: return None
   if not self.cfg['offline'] and self.calls>=self.cfg['max_calls']:
    self.error='本次进程的模型调用已达上限。现有地图仍可玩；设置里可提高上限。'; return None
   if time.monotonic()-self.last_request<self.cfg['cooldown']: return None
   def available(kind,rid):return (s['epoch'],kind,rid) not in self.in_flight and (kind,rid) not in self.failed
+  if s.get('campaign',{}).get('pending'):
+   if not available('campaign',s['current']) or any(k[1]=='campaign' for k in self.in_flight):return None
+   return w.context(s['current'],'campaign'),copy.deepcopy(self.cfg),self.generation
   pending=[(rid,distance) for rid,distance in w.prefetch_targets() if not s['topology'][rid]['ready'] and available('region',rid)]
+  if s.get('campaign'):pending.sort(key=lambda item:(item[1],s['topology'][item[0]].get('chapter_id')!=s['campaign']['active']))
   if not s['topology'][s['current']]['ready']:
    if not available('region',s['current']):return None
    target=s['current']; kind='region'
@@ -301,7 +310,7 @@ class Director:
    job=self._next_job()
    if not job: return False
    ctx,cfg,generation=job; kind=ctx['kind']; target=ctx['target']; job_key=(ctx['epoch'],kind,target)
-   self.in_flight[job_key]=('续写 ' if kind=='reaction' else '生成 ')+self._title(target)
+   self.in_flight[job_key]=('规划章节 ' if kind=='campaign' else '续写 ' if kind=='reaction' else '生成 ')+self._title(target)
    self._begin_task(job_key,ctx)
    self.busy=' / '.join(self.in_flight.values()); self.last_request=time.monotonic()
   raw=None; error=None;attempts=0
@@ -347,7 +356,7 @@ class Director:
      with self.world.lock:
       self._record_corrections(changes,ctx)
       self.task_metrics[job_key]['validation_seconds']+=time.monotonic()-validation_started
-    if not cfg['offline'] and kind=='region' and not parsed['region'].get('destinations'):
+    if not cfg['offline'] and kind=='region' and not ctx.get('chapter_plan') and not parsed['region'].get('destinations'):
      raise InvalidPatch('region.destinations is required for live generation: supply 1..2 {id,name,description} new place outlines')
     if not cfg['offline'] and kind=='region' and not parsed['region'].get('visuals'):
      raise InvalidPatch('region.visuals is required: provide theme-specific palette and pixel sprite recipes')

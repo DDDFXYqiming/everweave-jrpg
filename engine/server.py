@@ -122,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
      # Validate all inputs before replacing an existing save.
      setting=data.get('setting','')
      if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
-     d.configure(data); w.start(setting,authored=not d.cfg['offline'],language=d.cfg['language']); server.seen.clear(); server.remember_configuration()
+     d.configure(data); w.start(setting,authored=not d.cfg['offline'],language=d.cfg['language'],planned=not d.cfg['offline']); server.seen.clear(); server.remember_configuration()
     elif self.path=='/configure': d.configure(data); server.remember_configuration()
     elif self.path=='/language':
      language=data.get('language')

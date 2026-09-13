@@ -19,7 +19,8 @@ def atlas(world):
     visible=set(visited);pairs=set()
     for rid in visited:
         node=topology[rid]
-        for target in node['children']+([node['parent']] if node.get('parent') else []):
+        from .campaign import neighbors,book
+        for target in (neighbors(s,rid,True) if book(s) else node['children']+([node['parent']] if node.get('parent') else [])):
             if target in topology:
                 visible.add(target);pairs.add(tuple(sorted((rid,target))))
     cache=getattr(world,'_map_cards',{})
@@ -41,8 +42,14 @@ def atlas(world):
                           visited=rid in visited,ready=bool(n['ready']),parent=n.get('parent') if n.get('parent') in visible else '',
                           description=card.get('description','尚未到访。你已发现通往这里的道路。'),
                           thumbnail=card.get('thumbnail'),tasks=quests.get(rid,[])))
-    return copy.deepcopy(dict(epoch=s['epoch'],current=s['current'],nodes=nodes,
-                              edges=[dict(a=a,b=b) for a,b in sorted(pairs)]))
+    edges=[dict(a=a,b=b) for a,b in sorted(pairs)]
+    if s.get('campaign'):
+        from .campaign import links,satisfied
+        for e in edges:
+            sources=[link for link in links(s,e['a'],True) if e['b'] in (link['a'],link['b'])]
+            e['locked']=all(not satisfied(source['requires'],s['campaign']['chapters'][source['chapter_id']]['flags']) for source in sources)
+            e['blocked_reason']=' / '.join(source['blocked_reason'] for source in sources) if e['locked'] else ''
+    return copy.deepcopy(dict(epoch=s['epoch'],current=s['current'],nodes=nodes,edges=edges))
 
 
 def journal(world,tab='history',before=None,limit=30):

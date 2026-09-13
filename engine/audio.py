@@ -16,13 +16,13 @@ def score(raw):
         notes=[]
         for note in arr(voice['notes'],'notes',24,1):
             arr(note,'note',2,2)
-            if type(note[0]) is not int or (note[0]!=0 and not 36<=note[0]<=96):raise InvalidPatch('note pitch must be MIDI 36..96, or 0 for a rest')
-            notes.append([note[0],scalar(note[1],.125,4)])
+            if type(note[0]) is not int or (note[0]!=0 and not 24<=note[0]<=96):raise InvalidPatch('note pitch must be MIDI 24..96, or 0 for a rest')
+            notes.append([note[0],scalar(note[1],.125,16)])
         if sum(n[1] for n in notes)*60/bpm>16:raise InvalidPatch('generated score must be at most 16 seconds per voice')
         voices.append(dict(wave=enum(voice['wave'],('sine','triangle','square'),'wave'),notes=notes,gain=scalar(voice.get('gain',.15),0,.3)))
     return dict(bpm=bpm,voices=voices)
 
-def sound(raw,track=False):
+def sound(raw,track=False,ambience=False):
     from .schema import obj,arr,enum
     obj(raw,'audio source',('asset','asset_hash','score','synth','layers','volume','pitch','delay_ms','loop'),())
     forms=set(raw)&{'asset','score','synth','layers'}
@@ -35,7 +35,7 @@ def sound(raw,track=False):
     elif 'score' in raw:
         result['score']=score(raw['score'])
     elif 'synth' in raw:
-        if track:raise InvalidPatch('use a score for synthesized music')
+        if track and not ambience:raise InvalidPatch('use a score for synthesized music')
         s=obj(raw['synth'],'synth',('wave','frequency','duration'),('wave','frequency','duration'))
         result['synth']=dict(wave=enum(s['wave'],('sine','triangle','square','noise'),'wave'),frequency=scalar(s['frequency'],30,4000),duration=scalar(s['duration'],.02,1))
     else:
@@ -60,7 +60,7 @@ def validate_audio(raw,existing=None):
         entries=raw.get(key,{})
         if not isinstance(entries,dict) or len(entries)>limit:raise InvalidPatch('too many audio entries')
         out[key]={ident(name):sound(value,track=key=='music') for name,value in entries.items()}
-    if 'ambience' in raw:out['ambience']=sound(raw['ambience'],track=True)
+    if 'ambience' in raw:out['ambience']=sound(raw['ambience'],track=True,ambience=True)
     for key,limit in (('bindings',10),('objects',32)):
         entries=raw.get(key,{})
         if not isinstance(entries,dict) or len(entries)>limit:raise InvalidPatch('invalid sound bindings')

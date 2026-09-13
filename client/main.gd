@@ -88,6 +88,10 @@ var return_button: Button
 var title_label: Label
 var subtitle_label: Label
 var stats_label: Label
+var role_label: Label
+var world_resources: VBoxContainer
+var resource_rows: Dictionary = {}
+var panel_buttons: Dictionary = {}
 var hp_bar: ProgressBar
 var mp_bar: ProgressBar
 var quest_label: Label
@@ -599,6 +603,7 @@ func _build_game() -> void:
 	for entry in [[L.t("行囊  I"),"bag","inventory"],[L.t("手记  J"),"book","journal"],[L.t("设置"),"settings","settings"]]:
 		var callback: Callable = _show_home if entry[2] == "settings" else _toggle_panel.bind(entry[2])
 		var b := _button(header,entry[0],callback)
+		panel_buttons[entry[2]]=b
 		b.icon = Icons.get_icon(entry[1])
 		b.add_theme_constant_override("icon_max_width",24)
 	var middle := HBoxContainer.new()
@@ -665,11 +670,13 @@ func _build_game() -> void:
 	var side := _vbox(side_scroll)
 	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	side.custom_minimum_size.x = 250
-	_label(side, L.t("旅人"), 14, GOLD)
+	role_label=_label(side, L.t("旅人"), 14, GOLD)
 	health_label = _label(side,L.t("生命"),12,MUTED)
 	hp_bar = _bar(side, Color("b5856b"))
 	energy_label = _label(side,L.t("魔力"),12,MUTED)
 	mp_bar = _bar(side, Color("98a480"))
+	world_resources=_vbox(side)
+	resource_rows.clear()
 	rule_label = _label(side, "", 13, MINT)
 	_label(side, L.t("当前待办"), 17, GOLD)
 	quest_label = _label(side, "", 14)
@@ -811,6 +818,7 @@ func _toggle_pause() -> void:
 	_post("/pause", {"paused": not bool(d.get("paused", false))})
 
 func _toggle_panel(name: String) -> void:
+	if name=="inventory" and state.get("game_spec") is Dictionary and not bool(state.game_spec.systems.inventory):return
 	if state.get("battle") is Dictionary or not state.get("ui", {}).is_empty(): return
 	local_panel = "" if local_panel == name else name
 	if is_instance_valid(soundscape):soundscape.play_ui()
@@ -956,6 +964,7 @@ func _render() -> void:
 	mp_bar.value = float(p.get("mp", 0))
 	health_label.text = L.t("生命  %d / %d") % [int(p.get("hp",0)),int(p.get("max_hp",0))]
 	energy_label.text = L.t("魔力  %d / %d") % [int(p.get("mp",0)),int(p.get("max_mp",0))]
+	_apply_game_spec()
 	var rules: Dictionary = {"normal": "", "no_magic": L.t("静默领域：无法使用魔法"), "healing_rain": L.t("治愈之雨：步行 / 战斗缓慢回血"), "volatile": L.t("易燃世界：双方伤害增加"), "echo": L.t("回声：每第三回合攻击重复")}
 	rule_label.text = str(rules.get(str(r.get("rule", "normal")), ""))
 	rule_label.visible = not rule_label.text.is_empty()
@@ -965,6 +974,11 @@ func _render() -> void:
 		lines.append("·  " + str(q.get("name",L.t("未完的事"))))
 		if lines.size() >= 3: break
 	quest_label.text = "\n".join(lines) if not lines.is_empty() else L.t("探索四周，找到正在等待你的事。")
+	if state.get("campaign") is Dictionary:
+		var journey: Dictionary = state.campaign
+		var goals: Array[String] = [str(journey.get("title","")),str(journey.get("goal",""))]
+		for milestone in journey.get("milestones",[]):goals.append(("✓ " if milestone.complete else "· ")+str(milestone.name))
+		quest_label.text="\n".join(goals+lines)
 	status_summary.text = View.summary(state)
 	var d: Dictionary = state.get("director", {})
 	var mode: String = str(d.get("mode", "not_configured"))
@@ -1230,3 +1244,36 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	elif key in [KEY_E, KEY_SPACE] and local_panel.is_empty():
 		_send_action({"op": "interact"})
 	get_viewport().set_input_as_handled()
+
+func _apply_game_spec() -> void:
+	var value: Variant = state.get("game_spec")
+	var custom: bool = value is Dictionary
+	health_label.visible=not custom
+	energy_label.visible=not custom
+	hp_bar.visible=not custom
+	mp_bar.visible=not custom
+	world_resources.visible=custom
+	role_label.text=str(value.identity) if custom else L.t("旅人")
+	panel_buttons.inventory.visible=not custom or bool(value.systems.inventory)
+	panel_buttons.inventory.text=(str(value.inventory_label)+"  I") if custom else L.t("行囊  I")
+	panel_buttons.journal.text=(str(value.journal_label)+"  J") if custom else L.t("手记  J")
+	if not custom:return
+	for row in resource_rows.values():row.box.hide()
+	var summary: Array[String] = []
+	for resource in value.resources:
+		var key: String = str(resource.id)
+		if not resource_rows.has(key):
+			var box := _vbox(world_resources)
+			resource_rows[key]={"box":box,"label":_label(box,"",12,MUTED),"bar":_bar(box,Color("98a480"))}
+		var row: Dictionary = resource_rows[key]
+		row.box.show()
+		row.label.text="%s  %s / %s" % [str(resource.label),_resource_number(resource.value),_resource_number(resource.max)]
+		row.bar.max_value=float(resource.max)
+		row.bar.value=float(resource.value)
+		row.bar.visible=str(resource.display)=="bar"
+		summary.append("%s %s" % [str(resource.label),_resource_number(resource.value)])
+	stats_label.text=" · ".join(summary.slice(0,2))
+	if bool(value.systems.progression):stats_label.text="Lv.%d  " % int(state.player.level)+stats_label.text
+
+func _resource_number(value: Variant) -> String:
+	return str(int(value)) if is_equal_approx(float(value),roundf(float(value))) else String.num(float(value),1)

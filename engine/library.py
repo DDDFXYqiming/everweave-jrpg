@@ -58,10 +58,13 @@ def usage(plan):
 
 def candidates(context):
     destination=json.dumps(context.get('destination') or {},ensure_ascii=False).lower()
-    setting=str(context.get('setting','')).lower()
+    setting=(str(context.get('setting',''))+' '+str((context.get('game_spec') or {}).get('visual_theme',''))).lower()
     underground=('dungeon','ruin','crypt','cave','地下','遗迹','地牢','洞穴','古墓')
     science=('sci-fi','space','火星','太空','宇宙','星际','赛博','机器人')
     profile='sci_fi' if any(x in destination or x in setting for x in science) else 'dungeon' if any(x in destination or x in setting for x in underground) else 'town'
+    modern=('生化','感染','病毒','丧尸','医院','实验室','现代','resident evil','zombie','infection','hospital','laboratory','modern','survival horror')
+    if any(x in setting for x in modern):profile='modern'
+    elif any(x in setting for x in science):profile='sci_fi'
     query=setting+' '+destination
     synonyms={'村民':'villager','商人':'merchant villager','柜台':'crate shelf','士兵':'guard soldier','法师':'mage','幽灵':'ghost','蜘蛛':'spider','老鼠':'rat','恶魔':'demon boss','首领':'boss demon','治疗':'healer medicine','药':'potion medicine','斧':'axe','杖':'staff','门':'door','水井':'well','森林':'forest tree','机械':'machine switch','箱':'chest crate','书':'shelf book','花':'flowers'}
     words=set(re.findall('[a-z_]+',query+' '+' '.join(v for k,v in synonyms.items() if k in query)))
@@ -74,8 +77,7 @@ def candidates(context):
         if not family or entry.get('family')!=family:continue
         tags=entry['tags']
         if profile not in tags and 'common' not in tags:continue
-        preferred=entry['name'] in ('adventurer','villager','slime','rat','red flask')
-        score=10*(profile in tags)+4*len(words.intersection(tags))+3*preferred-recent[key]
+        score=10*(profile in tags)+4*len(words.intersection(tags))-recent[key]
         pool.append((score,key,entry))
     # Cover usable roles before adding decorative variety. All these families
     # have the same view/pixel scale; raw construction tiles stay out of prompts.
@@ -96,4 +98,9 @@ def candidates(context):
         elif key in preferred:audio.append(dict(id=key,name=e['name'],kind='sfx',loop=False))
     from .modules import menu
     from .materials import menu as material_menu
-    return dict(profile=profile,family=family or 'no_matching_visual_family',perspective='top_down',images=chosen,audio=audio,modules=menu(),materials=material_menu(profile))
+    modules=menu();spec=context.get('game_spec')
+    if spec:
+        keys={r['id'] for r in spec['resources']}
+        modules=[m for m in modules if (m['id']!='duel_v1' or spec['systems']['combat'] and 'mp' in keys) and (m['id']!='trade_v1' or spec['systems']['inventory'] and 'gold' in keys)]
+    return dict(profile=profile,family=family or 'no_matching_visual_family',perspective='top_down',images=chosen,audio=audio,modules=modules,materials=material_menu(profile),
+     art_policy='Use only assets that fit this setting. Empty image candidates mean original drawing is required; do not force medieval substitutions.')

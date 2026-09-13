@@ -144,9 +144,9 @@ run after their committed player-action conditions are satisfied. Geometry must 
 
 
 HYBRID = '''
-HYBRID CONTENT: library first, AI-directed composition, original data for gaps. Reusing materials and
-reviewed abilities is encouraged; keep the scene/story purposeful. Aim for mostly library content,
-not a hard quota. library_candidates contains a SMALL compatible selection, not the full library.
+HYBRID CONTENT: setting fit first, AI-directed composition, original data for gaps. Reuse suitable materials
+and reviewed abilities; author ORIGINAL assets for missing roles. Never sacrifice the requested period,
+genre or object identity to reuse an incompatible sprite. No reuse quota. library_candidates is a small selection.
 You may mix all three visual forms in one region or one object:
 1) {"asset":"EXACT_CANDIDATE_IMAGE_ID"} uses its original size/colors.
 2) {"size":[48,48],"parts":[{"asset":"EXACT_ID","at":[0,0],"scale":1,"flip_x":false,"tint":"#ffffff"}],
@@ -192,10 +192,11 @@ audio={music:{explore:SOURCE,combat?:SOURCE,ANY_SPECIAL_CUE?:SOURCE},ambience?:S
  objects:{EXISTING_LOCAL_OBJECT_ID:CUE}}.
 Music SOURCE={asset:EXACT_MUSIC_ID,volume?:0..1,pitch?:0.5..2}; exploration/combat crossfade locally.
 For missing short music SOURCE={score:{bpm:60..180,voices:[{wave:sine/triangle/square,gain:0..0.3,
- notes:[[MIDI_36..96_OR_0_FOR_REST,BEATS_0.125..4],...]}]}}; <=2 voices, <=24 notes and <=16 seconds per voice.
+ notes:[[MIDI_24..96_OR_0_FOR_REST,BEATS_0.125..16],...]}]}}; <=2 voices, <=24 notes and <=16 seconds per voice.
 SFX={asset:EXACT_SFX_ID,volume?:0..1,pitch?:0.5..2,delay_ms?:0..500} or
 {synth:{wave:sine/triangle/square/noise,frequency:30..4000,duration:0.02..1}} or {layers:[1..3 non-layered SFX]}.
 Short scored jingles may also use the same bounded score structure in a cue and play once.
+ambience may use a short looping synth (including noise) for fans, wind or machinery, with the same synth limits.
 An explicit op:music can select a scored cue as a looping special track; op:sound plays it once.
 Do not send audio waveforms. Cue IDs are bare. Objects play on interaction; use explicit rule effects
 {op:sound,cue:CUE_ID} for activation and {op:music,cue:MUSIC_CUE_ID} for special story music.
@@ -206,13 +207,14 @@ Use current_audio for existing cue names. Audio is optional for legacy saved reg
 '''
 
 def prompt(kind,hybrid=False):
+    from .campaign_prompt import REGIONAL
     focus=('Create only the requested region; following destinations need short outlines, not their complete rules or art. '
-           'Use a small coherent set of mechanics and individually authored shapes; do not simulate a whole campaign in this response.'
+           'Realize this location as part of the supplied chapter goal and cross-region dependencies.'
            if kind=='region' else 'Return only the smallest complete causal reaction; omit unchanged content and unused optional fields.')
     base=COMMON + (REGION if kind == 'region' else REACTION + '\nAn entity:' + REGION.split('An entity:')[1].split('landmarks <=')[0])
     if hybrid:
         base=base.replace('explicit, individually authored sprite','explicit sprite, usually from the compatible library')
-    return (base
+    return (base + '\n' + REGIONAL
             + '\n' + (HYBRID if hybrid else VISUAL_PROMPT)
             + '\nEmit compact JSON. Omit default when:true, once:false, scope:explore, fail_when:false and empty optional lists. '
               'Do not repeat labels in descriptions unless there is new player-facing information. '
@@ -231,7 +233,7 @@ def model_context(context,kind,hybrid=False):
         return result
     keep=('content_version','item_policy','setting','world_title','target','target_depth','destination','refresh',
           'existing_destinations','visual_identity','planned_parent','story_revision','player','facts',
-          'lore','threads','known_locations','frontier','rejected_response','validation_errors')
+          'lore','threads','known_locations','frontier','rejected_response','validation_errors','game_spec','chapter_plan','planned_routes','region_purpose','required_flag_writes','reserve_chapter_gate')
     result={key:copy.deepcopy(context[key]) for key in keep if key in context}
     hero=context.get('hero_visual')
     result['hero_visual']={'reuse_canonical_identity':True,'sprite':'hero'} if hero else None

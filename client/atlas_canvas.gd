@@ -109,6 +109,7 @@ func path_to(target: String) -> Array[String]:
 		var id: String = queue.pop_front()
 		if id == target: break
 		for edge in data.get("edges",[]):
+			if bool(edge.get("locked",false)):continue
 			var next: String = str(edge.b) if str(edge.a) == id else str(edge.a) if str(edge.b) == id else ""
 			if not next.is_empty() and not parents.has(next):
 				parents[next] = id
@@ -181,8 +182,9 @@ func _draw() -> void:
 		var b: String = str(edge.b)
 		if concealed.has(a) or concealed.has(b) or not positions.has(a) or not positions.has(b): continue
 		var ink := Color("6e7c60")
+		if bool(edge.get("locked",false)):ink=Color("a47763")
 		if a in route and b in route and absi(route.find(a)-route.find(b)) == 1: ink = Color("e6c78b")
-		if bool(nodes[a].visited) and bool(nodes[b].visited): draw_line(positions[a],positions[b],ink,2,true)
+		if bool(nodes[a].visited) and bool(nodes[b].visited) and not bool(edge.get("locked",false)): draw_line(positions[a],positions[b],ink,2,true)
 		else: draw_dashed_line(positions[a],positions[b],ink,2,9,true)
 	var font: Font = get_theme_default_font()
 	for id in nodes:

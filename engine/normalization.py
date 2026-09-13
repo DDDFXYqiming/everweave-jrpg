@@ -449,7 +449,9 @@ class Normalizer:
             if isinstance(anchors, dict):
                 rebuilt = {}
                 for key, value in anchors.items():
-                    new = key if key in ('back','forward_0','forward_1','forward_2','forward_3') else self.ref('objects', key, root + '.scene.anchors.' + key)
+                    reserved={'back','forward_0','forward_1','forward_2','forward_3'}|{r['anchor'] for r in self.context.get('planned_routes',[])}
+                    if self.context.get('reserve_chapter_gate'):reserved.add('chapter_gate')
+                    new = key if key in reserved else self.ref('objects', key, root + '.scene.anchors.' + key)
                     if new in rebuilt and rebuilt[new] != value:
                         self.error(root + '.scene.anchors.' + key, 'conflicting anchor aliases', value)
                     else: rebuilt[new] = value

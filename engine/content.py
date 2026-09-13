@@ -66,6 +66,7 @@ def path(value, writable=False):
              (bits[0] == 'self' and len(bits) == 3 and bits[1] == 'state') or
              (bits[0] == 'objects' and len(bits) == 4 and bits[2] == 'state'))
     if not writable:
+        valid |= bits[0] in ('chapter','resources') and len(bits)==2
         valid |= (bits[0] in ('player', 'battle', 'world', 'event') and len(bits) == 2)
         valid |= (bits[0] == 'self' and len(bits) == 2)
         valid |= (bits[0] == 'objects' and len(bits) == 3)
@@ -138,6 +139,12 @@ def effects(value, depth=0):
             out = dict(op=op, target=target(raw['target']))
             if op != 'remove':
                 out['value'] = ident(raw['value']) if op == 'sprite' else expression(raw['value'])
+        elif op == 'chapter':
+            obj(raw,op,('op','key','value'),('op','key','value'))
+            out=dict(op=op,key=ident(raw['key']),value=expression(raw['value']))
+        elif op == 'resource':
+            obj(raw,op,('op','id','delta'),('op','id','delta'))
+            out=dict(op=op,id=ident(raw['id']),delta=expression(raw['delta']))
         elif op == 'paint':
             obj(raw, op, ('op', 'rect', 'tile', 'surface'), ('op', 'rect', 'tile'))
             out = dict(op=op, rect=[expression(x) for x in arr(raw['rect'], 'rect', 4, 4)], tile=tile(raw['tile']))

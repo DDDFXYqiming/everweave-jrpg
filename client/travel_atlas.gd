@@ -111,6 +111,8 @@ func _select(id: String) -> void:
 	main._label(details,str(node.name),24,main.GOLD)
 	main._label(details,L.t("你在这里") if id == str(canvas.data.current) else L.t("已到访") if bool(node.visited) else L.t("尚未到访"),13,main.MUTED)
 	main._label(details,str(node.description),16)
+	for edge in canvas.data.get("edges",[]):
+		if bool(edge.get("locked",false)) and id in [str(edge.a),str(edge.b)]:main._label(details,str(edge.get("blocked_reason","")),13,main.GOLD)
 	if not bool(node.ready):main._label(details,L.t("这个地区尚未准备完成。已发现的道路仍保留在旅图中。"),14,main.MUTED)
 	var tasks: Array = node.get("tasks",[])
 	if not tasks.is_empty():
