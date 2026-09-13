@@ -29,9 +29,25 @@ python tools/test_native.py --hybrid --headless
 ```text
 godot --headless --editor --path . --import --quit
 godot --headless --path . --script res://tests/terrain_materials_smoke.gd
+python tools/build_campaign_fixture.py
+godot --headless --path . --script res://tests/campaign_client_smoke.gd
 ```
 
 这些回归使用固定测试数据，不调用在线模型。在线生成验证会消耗服务额度，应使用独立存档和有限的调用预算。请保留失败样本用于排查，不把截图渲染结果当作交互已经成功的证明。
+
+章节专项位于 `tests/test_campaign.py`，覆盖共享状态、图连接、隐藏/锁闭路线、接续、资源和失败模式。客户端专项需要先生成 `userdata/campaign-fixture` 测试数据；这不是在线游戏的备用世界。上一轮验证结果及未试玩部分见 [交付记录](CAMPAIGN_VALIDATION.md)。
+
+## 可选在线联调
+
+下面的命令会调用模型，需要已有的 `DEEPSEEK_API_KEY`。输出目录必须是未使用的新目录：
+
+```powershell
+python tools/test_hybrid_live.py --live --campaign --steps 3 --max-calls 6 --output ./userdata/campaign-check --setting "现代医院停电，我要寻找失联同事并恢复隔离系统。不同地区共享线索，有回环和隐藏通道，不要魔法或等级。"
+```
+
+`--steps` 是调度步骤上限，不是保证生成的地区数；每步可能包含修复，`--max-calls` 才是请求预算。`--campaign` 启用规划，省略时为单地区路径测试。`--plan-from` 可重放相同设定下 trace 第一条章节响应，再生成地区；必须在报告中区分回放与新请求。`--retry-from` 是原有开局地区修复工具，不用于续修章节计划。
+
+脚本保存 `trace.json/result.json/snapshot.json` 和独立数据库。`ready` 仅代表当前地区存在，还需检查 `failed_tasks`、`ready_regions` 和各任务记录，不能单凭输出的成功标记判断整章已完成。
 
 ## 编辑器与日志
 
