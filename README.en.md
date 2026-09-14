@@ -1,0 +1,120 @@
+# Everweave · The Unwritten Realm
+
+> A language-model-directed 2D JRPG runtime where generated worlds become explorable, stateful game content.
+
+[中文 README](README.md)
+
+## What makes it different
+
+**Campaign before map**
+
+An online world starts with a game specification and a campaign plan. The plan defines the chapter goal, 4 to 8 regions, bidirectional links, branches, loops, locked or hidden routes, shared flags, and a continuation gate. Regions use the route anchors from that plan, giving the world a persistent structure.
+
+**The model creates executable content**
+
+The model produces `scene`, `program`, `visuals`, and `audio`. The `program` field is a bounded rule DSL that can read object state, chapter flags, resources, inventory, and recent position history. It can express switches, resource trades, combat conditions, and puzzles that depend on what happened earlier. The model submits JSON, the Python runtime validates and executes it, and Godot presents the result.
+
+**World specifications shape the game**
+
+A world specification can define the player title, inventory and journal labels, resource bars, system toggles for combat, inventory, equipment, and progression, along with the failure mode. The specification is saved with the world, so the interface and rules use the same world-specific vocabulary.
+
+**Player actions leave persistent changes**
+
+Player actions, triggers, rewards, and map changes are committed together in SQLite transactions. Nearby regions can be prepared in the background while the travel map reveals only discovered routes. Opening a door, changing a path, or reshaping an object can become part of the saved world.
+
+**Reusable assets and original drawing work together**
+
+The local asset index, material recipes, and bounded pixel drawing work together during generation. The model chooses theme-compatible candidates and can fill visual gaps with constrained drawing. The runtime places details from fixed seeds, verifies hashes, and records asset versions. Sound effects and short musical phrases can come from local assets or bounded recipes.
+
+**The runtime keeps generation inside its rules**
+
+Model output enters the game through a validated JSON content contract. It cannot submit Python, GDScript, or arbitrary file paths, and it cannot initiate network operations. Rules run inside a budgeted interpreter, and failed actions or save updates roll back.
+
+## Current status
+
+Everweave is still a research prototype. Campaign planning, region generation, rule validation, local execution, asset composition, the travel map, and the bilingual interface are connected in the current project. Automated tests and native Godot checks cover the main paths through these features.
+
+Full chapter playthroughs, solvability for arbitrary generated puzzles, coverage across themes, and long-running generation quality still need continued testing in real saves. Online generation can take several minutes and may incur model API charges. A fresh data directory is recommended for a first run.
+
+## Screenshots
+
+The screenshots below are rendered by the Godot client. They show the current range of generated scene composition. They are visual examples and do not represent a guaranteed full-chapter playthrough for every online generation.
+
+![Harbor repair village](docs/showcase/harbor.png)
+
+| Underground Planetarium | Orbital Weather Station |
+|---|---|
+| ![Underground Planetarium](docs/showcase/ruins.png) | ![Orbital Weather Station](docs/showcase/orbital.png) |
+
+See [Showcase](docs/SHOWCASE.md) for more scene descriptions.
+
+## Quick start
+
+You need Python 3.11 or newer and Godot 4 Standard. The project is currently tested with Godot 4.7.2.
+
+On Windows, place the Godot executable in the project root or in `tools/`, then double-click `Start.cmd`. You can also start it from PowerShell.
+
+```powershell
+python launch.py --godot ./tools/Godot.exe
+```
+
+If Godot is on PATH, `python launch.py` is enough. On the first run, the launcher prepares the pinned asset manifest and verifies SHA-256 hashes. If Pillow is missing, the launcher installs the supporting tools under `userdata/library-tools` without changing the system Python environment.
+
+## Create a world
+
+Choose DeepSeek in the connection settings, or provide a service compatible with Chat Completions and JSON output. Enter the API key in settings or provide `DEEPSEEK_API_KEY` through the environment.
+
+An online new world first generates its game specification and campaign plan, then prepares the starting region. The settings control request limits, reasoning level, and budget. The generation director prepares nearby regions, and failed tasks expose their diagnostic details with a retry action.
+
+Online generation may incur model API charges. Initial world creation and new region preparation can take time. Use the offline check when you only want to verify installation and basic controls.
+
+```powershell
+python launch.py --demo --data-dir ./userdata/offline-demo
+```
+
+Each data directory stores one world. Use a separate directory when you want to keep the current journey and start another one.
+
+```powershell
+python launch.py --godot ./tools/Godot.exe --data-dir ./userdata/another-journey
+```
+
+## Controls
+
+| Action | Key |
+|---|---|
+| Move | WASD or arrow keys |
+| Interact with an adjacent character, object, or exit | E or Space |
+| Show available custom actions | F |
+| Open inventory and journal panels | I, J |
+| Open the travel map | G or click the minimap |
+| Wait | `.` |
+| Choose a combat action | Number keys, as shown by the interface |
+| Close a panel | Esc |
+| Fullscreen | F11 |
+| Toggle music | M |
+
+## Documentation
+
+- [Local setup](docs/LOCAL_SETUP.md) covers installation, model connections, and save directories
+- [Runtime architecture](docs/ARCHITECTURE.md) explains the Godot client, local service, and generation scheduling
+- [Campaigns and game specifications](docs/CAMPAIGNS.md) describes campaign plans, shared clues, route graphs, and optional systems
+- [Executable content](docs/EXECUTABLE_CONTENT.md) describes scenes, rules, and runtime effects
+- [Hybrid content library](docs/HYBRID_CONTENT.md) covers asset references, materials, audio, and library extensions
+- [Showcase](docs/SHOWCASE.md) records generated scenes and screenshots
+- [Localization](docs/LOCALIZATION.md) covers the Chinese and English interface and generation language
+- [Development and testing](docs/DEVELOPMENT.md) covers asset preparation and regression tests
+- [Security boundaries](docs/SECURITY.md) describes local service access, credentials, and content limits
+- [Documentation index](docs/README.md) collects usage notes, design documents, and experiment records
+
+## Development checks
+
+```powershell
+python -m unittest discover -s tests -v
+python -m engine.asset_cache --verify
+```
+
+Online integration tests consume model service quota, so use a separate `--data-dir`. Do not commit runtime keys, personal saves, or generation logs.
+
+## License
+
+Project-owned code and documentation use the [MIT License](LICENSE). Third-party assets keep their original licenses. Sources and authors are listed in [asset credits](assets/library/CREDITS.md), with additional details in [LICENSE-NOTICE.md](LICENSE-NOTICE.md).
