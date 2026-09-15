@@ -13,6 +13,13 @@ func _run() -> void:
 	root.add_child(main)
 	while not main.connection_ready:await process_frame
 	await _click(main.return_button)
+	assert(not JSON.stringify(main.state.quests).contains("共同取回信件"))
+	await _click(main.task_button)
+	assert(main.mission_panel.visible and not main.modal_overlay.visible)
+	await _capture("task-panel")
+	await _tap(KEY_Q)
+	assert(not main.mission_panel.visible)
+	await _capture("task-tracker")
 	await _tap(KEY_D)
 	await _tap(KEY_E)
 	await _click(_find("听米拉说"))

@@ -5,7 +5,10 @@ cast:[{id,name,role,motive,state:{alive:true,trust:0,...bounded scalar fields}}]
 Persistent actors keep identity/state across locations. Existing cast IDs must not be renamed or reset.
 skills:[{id,name,description,scope:"explore"|"combat"}] (0..6) are PORTABLE abilities earned through play.
 missions:[{id,name,kind:"main"|"side"|"encounter",region:LOCAL_REGION,brief,depends:[MISSION_IDS],
-when:[{flag,eq}],fail_when?:[{flag,eq}]}] (0..10). Connect main goals, side characters, resource stakes and encounter consequences.
+when:[{flag,eq}],fail_when?:[{flag,eq}],reveal_when?:[{flag,eq}]}] (0..10). Connect main goals, side characters, resource stakes and encounter consequences.
+Define only the immediate 1-3 actionable missions. Every future main mission needs depends or reveal_when;
+do not disclose intermediate destinations or solution steps through mission names/briefs. The chapter goal is a
+player-known problem, not a walkthrough. Keep the eventual outcome direction in private ending_brief.
 endings:[{id,name,description,requires:[MISSION_IDS],final:bool}] (0..4). final=true ends the run;
 false concludes an arc while the adventure may continue. Give goals meaningful outcomes beyond flag labels.
 economy:{RESOURCE_ID:MAX_POSITIVE_GAIN_PER_PLAYER_ACTION} is a fixed resource reward policy, not a grant.
@@ -24,12 +27,17 @@ DIRECTOR='''You are the GLOBAL ADVENTURE DIRECTOR, reviewing committed play even
 Do not author tiles, sprites or executable rules. Return only JSON:
 {kind:"direction",direction:{reason:brief private reasoning,
 new_flags?:[{id,initial:false|0|"pending",source:EXISTING_REGION_ID}],
+new_regions?:[{id:FRESH_CANONICAL_ID,name,description,purpose}],
 additions?:{cast:[],skills:[],missions:[],endings:[],commissions:[]},
 region_briefs?:[{region:EXISTING_CANONICAL_ID,purpose:REVISED_UNVISITED_BRIEF}],
 links?:[{id,a:EXISTING_REGION,b:EXISTING_REGION,hidden?:bool,discover?:[{flag,eq}],requires?:[{flag,eq}],blocked_reason?:text,one_way?:bool}]}}.
 Respond with no additions when the current plan is working. Max 3 brief updates, 2 new links;
 do not accumulate more than 8 pending work orders. New links consume reserved director gates.
-Only current chapter regions/flags may be referenced; all existing IDs are authoritative.
+Add at most two new current-chapter locations when actual discoveries/choices justify them. Reference their exact
+new IDs in links, flags and commissions. Each needs a reachable connection from an existing location, not an
+isolated node. Up to four new links when adding locations, otherwise two; old locations have two reserved gates.
+Expand the middle from what happened; add branches/reconnections and meaningful encounters, not a chain of switches.
+Only current chapter regions/flags or explicitly declared additions may be referenced; existing IDs are authoritative.
 You may declare up to six new flags for genuinely new side content, with a matching commission at each
 flag's source region. They start false/zero/pending; never overwrite existing flags or declare earned progress.
 Respect cast deaths, earned skills, promises and actual mission results. Do not rewrite game_spec/economy,
@@ -51,6 +59,15 @@ CONTENT='''
 content_contract is the global director's bounded work order. Implement ready commissions in the requested region.
 Respect each encounter's limits with explicit enemy stats. Give each enemy distinct purpose, telegraphing and
 victory/escape consequences; do not substitute a flag-only console for an encounter.
+Overworld enemies can use behavior:{mode:"guard"|"patrol"|"hunt",radius:1..10,leash:1..16,pace:1..4,
+engage_range:1..2,patrol?:[[x,y],...],when?:EXPR}. Patrol requires waypoints. Visibility respects walls/solid doors.
+These local turn-driven behaviors approach/detect the player and trigger the real encounter, without model calls.
+Use footprints for large foes; place sentries at meaningful routes, patrols around resources and optional danger
+with authored rewards/defeat/escape consequences. Avoid universally bypassable stationary single-cell enemies.
+For new enemies, supply behavior (guard also supports intentional stationary sentries), or equivalent explicit
+exploration move/detection hooks. State the danger and cost in player-visible descriptions and blocked hints.
+Do not force combat into a peaceful setting. Include people making choices, negotiations, scarcity, danger and
+changing relationships when appropriate; do not make all dialogue serve a mechanical riddle.
 When reserve_director_gates=true, reserve TWO additional free reachable scene.anchors cells named
 director_gate_0 and director_gate_1, separate from all existing exits and chapter_gate. Future director links use these.
 entity.actor_id=ACTOR_ID binds a recurring actor's name, alive state and canonical visual identity;

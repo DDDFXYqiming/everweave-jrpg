@@ -219,6 +219,10 @@ def prompt(kind,hybrid=False):
             + '\n' + (HYBRID if hybrid else VISUAL_PROMPT)
             + '\nEmit compact JSON. Omit default when:true, once:false, scope:explore, fail_when:false and empty optional lists. '
               'Do not repeat labels in descriptions unless there is new player-facing information. '
+              'Keep the playable first delivery focused: aim for 6-12 distinct sprites, 2-4 spatial zones and 6-12 useful actions. '
+              'Fulfill required commissions, but defer unrelated side scenes to future work orders. '
+              'Use reusable local materials and scenery placement; never manually enumerate decoration tiles. '
+              'A distinctive original focal object is better than dozens of low-detail original variants. '
             + focus
             + f'\nEnvelope reminder: visuals belongs INSIDE {kind}.visuals, never at the top level. '
               'Only kind, world_title, region OR reaction, lore and threads are top-level keys.')
@@ -236,6 +240,19 @@ def model_context(context,kind,hybrid=False):
           'existing_destinations','visual_identity','planned_parent','story_revision','player','facts',
           'lore','threads','known_locations','frontier','rejected_response','validation_errors','game_spec','chapter_plan','planned_routes','region_purpose','required_flag_writes','reserve_chapter_gate','content_contract','adventure_revision','reserve_director_gates','commission_ids')
     result={key:copy.deepcopy(context[key]) for key in keep if key in context}
+    if result.get('chapter_plan'):
+        chapter=result['chapter_plan'];rid=context['target']
+        neighbors={r['target'] for r in context.get('planned_routes',[])}|{rid}
+        chapter['regions']=[r for r in chapter.get('regions',[]) if r['id'] in neighbors]
+        # Preserve complete route prerequisites, omit distant production instructions.
+        relevant=set(context.get('required_flag_writes',[]))
+        for route in context.get('planned_routes',[]):
+            relevant.update(c['flag'] for c in route.get('requires',[])+route.get('discover',[]))
+        chapter['flag_sources']={k:v for k,v in chapter.get('flag_sources',{}).items() if k in relevant}
+    if result.get('content_contract'):
+        contract=result['content_contract'];rid=context['target']
+        mission_ids={key for j in contract.get('commissions',[]) for key in j.get('missions',[])+j.get('requires',[])}
+        contract['missions']=[m for m in contract.get('missions',[]) if m['region']==rid or m['id'] in mission_ids]
     hero=context.get('hero_visual')
     result['hero_visual']={'reuse_canonical_identity':True,'sprite':'hero'} if hero else None
     current=context.get('current_region') or {}

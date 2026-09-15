@@ -55,8 +55,10 @@ flowchart TD
 
 外壳为 `{"kind":"campaign","campaign":{...}}`。章节包含 `title/premise/goal`、`flags`、`flag_sources`、`regions`、`links`、`milestones`、`complete_when` 和 `continuation`。
 
-- 每章 4～8 个地区，每个地区有名称、说明和 `purpose`。第一个地区是到达点。
+- 新在线默认 `planning:rolling`，先规划 2～4 个地区及私有 `ending_brief`，中段由导演追加。`planning:chapter` 保留原来的 4～8 地区整章模式。第一个地区是到达点。
 - 初始每章 4～14 条连接，默认双向，可设置 `one_way=true` 表示仅从 a 到 b。必须有回环和交汇点，沿允许方向从入口能够结构性到达所有地区。初始每个地点最多六条章内物理路线；跨章接续与后续导演预留门另计。
+
+上述最少连接数、回环和交汇点要求适用于整章模式。滚动开局允许从一小段相连地点开始，所有初始地点仍须沿允许方向可达；后续扩展应形成分支和交汇，运行时不保证模型每次都设计出有趣的网络。
 - 地区 ID 最长 20 字符，连接 ID 最长 40 字符。引擎提供短而稳定的实际锚点名，模型照抄 `planned_routes[].anchor`，不自行推算。
 - `flags` 是本章共享标量；`flag_sources` 为每个标量指定负责产生它的地区。地区校验会检查是否包含对应写入效果，但不能证明该效果一定能触发。
 - `milestones` 是面向玩家的阶段目标；`complete_when` 决定章节完成。条件列表采用 AND，每条为 `{flag,eq}`，比较值与声明类型一致。

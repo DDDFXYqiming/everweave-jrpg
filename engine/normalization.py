@@ -4,6 +4,7 @@ No gameplay fields are discarded. Existing canonical identities and prose are
 never globally rewritten, and ambiguous aliases remain validation errors.
 """
 import copy
+import hashlib
 import json
 import re
 from collections import defaultdict
@@ -174,12 +175,14 @@ class Normalizer:
             if isinstance(cues,dict):
                 for group in ('bindings','objects'):
                     for name,value in (audio.get(group,{}) or {}).items() if isinstance(audio.get(group,{}),dict) else []:
-                        if isinstance(value,dict) and set(value)=={'asset'}:
-                            asset=value['asset']
-                            if isinstance(asset,str) and asset in catalog() and catalog()[asset]['kind']=='sfx' and (asset not in cues or cues[asset]==value):
-                                cues.setdefault(asset,copy.deepcopy(value));audio[group][name]=asset
-                                self.record(root+'.audio.'+group+'.'+name,'inline_cue_reference',value,asset)
-                                value=asset
+                        if isinstance(value,dict) and set(value)&{'asset','synth','score','layers'}:
+                            source_options(value,root+'.audio.'+group+'.'+name)
+                            alias='inline_'+hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:16]
+                            if set(value)=={'asset'} and isinstance(value['asset'],str) and value['asset'] in catalog() and catalog()[value['asset']]['kind']=='sfx' and (value['asset'] not in cues or cues[value['asset']]==value):alias=value['asset']
+                            if alias not in cues or cues[alias]==value:
+                                cues.setdefault(alias,copy.deepcopy(value));audio[group][name]=alias
+                                self.record(root+'.audio.'+group+'.'+name,'inline_cue_reference',value,alias)
+                                value=alias
                         if isinstance(value,str) and value not in cues and value in catalog() and catalog()[value]['kind']=='sfx':
                             cues[value]={'asset':value}
                             self.record(root+'.audio.'+group+'.'+name,'library_reference',value,root+'.audio.cues.'+value)

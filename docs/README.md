@@ -11,6 +11,7 @@
 - [章节与游戏规格](CAMPAIGNS.md) 说明规划、共享线索、连接图和可选资源系统
 - [冒险导演](ADVENTURE_DIRECTOR.md) 说明持续复盘、人物、跨区技能、任务与内容委托
 - [快速自主试玩](FAST_PLAYTEST.md) 说明意图操作、事件中断和玩家视野边界
+- [生成节奏、任务披露与敌人行为](PACING_AND_ENCOUNTERS.md) 记录当前迭代、实测结果和未完成范围
 - [冒险导演交付记录](ADVENTURE_VALIDATION.md) 区分真实模型生成、自主操作与固定回归
 - [章节系统交付记录](CAMPAIGN_VALIDATION.md) 区分代码检查、模型联调、原始响应回放和待完成试玩
 - [混合内容库](HYBRID_CONTENT.md) 说明素材引用、音频、材质和扩库

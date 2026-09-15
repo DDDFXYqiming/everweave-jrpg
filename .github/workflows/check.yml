@@ -91,4 +91,6 @@ jobs:
       - name: Exercise story choices and portable abilities through native inputs
         env:
           GODOT_BIN: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
-        run: python3 tools/test_native.py --adventure --headless
+        run: |
+          python3 tools/test_native.py --adventure --headless
+          python3 tools/test_native.py --threat --headless

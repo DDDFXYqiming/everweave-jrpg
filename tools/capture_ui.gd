@@ -27,6 +27,8 @@ func _run() -> void:
 	main._accept_snapshot(data)
 	main._show_game()
 	await capture("world")
+	main._toggle_panel("missions")
+	await capture("objectives")
 	main._toggle_panel("inventory")
 	await capture("inventory")
 	main._toggle_panel("journal")

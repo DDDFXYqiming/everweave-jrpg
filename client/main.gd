@@ -31,6 +31,8 @@ var health_label: Label
 var energy_label: Label
 var previous_window_mode: int = Window.MODE_WINDOWED
 var atlas_panel
+var mission_panel
+var task_button: Button
 var atlas_signature: String = ""
 var journal_http: HTTPRequest
 var journal_pages: Dictionary = {}
@@ -621,6 +623,21 @@ func _build_game() -> void:
 	world_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	world_view.entity_clicked.connect(func(id: String) -> void: _send_action({"op": "interact", "id": id}))
 	world_view.map_requested.connect(func() -> void: _toggle_panel("atlas"))
+	task_button=_button(map_stack,"",_toggle_panel.bind("missions"))
+	task_button.position=Vector2(16,16)
+	task_button.size=Vector2(290,80)
+	task_button.tooltip_text=L.t("行动记录 · Q")
+	var task_margin: MarginContainer=_margin(task_button,12)
+	task_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	task_margin.mouse_filter=Control.MOUSE_FILTER_IGNORE
+	var task_stack: VBoxContainer=_vbox(task_margin)
+	task_stack.mouse_filter=Control.MOUSE_FILTER_IGNORE
+	var task_caption: Label=_label(task_stack,L.t("◇  当前行动                                      Q"),11,MINT)
+	task_caption.mouse_filter=Control.MOUSE_FILTER_IGNORE
+	quest_label=_label(task_stack,"",14)
+	quest_label.max_lines_visible=2
+	quest_label.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS
+	quest_label.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	loading_overlay = CenterContainer.new()
 	loading_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	map_stack.add_child(loading_overlay)
@@ -678,8 +695,6 @@ func _build_game() -> void:
 	world_resources=_vbox(side)
 	resource_rows.clear()
 	rule_label = _label(side, "", 13, MINT)
-	_label(side, L.t("当前待办"), 17, GOLD)
-	quest_label = _label(side, "", 14)
 	_label(side, L.t("沿途"), 17, GOLD)
 	status_summary = _label(side,"",13,MUTED)
 	diagnostics_button = _button(side,L.t("生成详情  +"),_toggle_diagnostics)
@@ -700,6 +715,9 @@ func _build_game() -> void:
 	atlas_panel = preload("res://client/travel_atlas.gd").new()
 	game.add_child(atlas_panel)
 	atlas_panel.build(self)
+	mission_panel=preload("res://client/mission_panel.gd").new()
+	game.add_child(mission_panel)
+	mission_panel.build(self)
 
 func _toggle_diagnostics() -> void:
 	diagnostics.visible = not diagnostics.visible
@@ -969,21 +987,13 @@ func _render() -> void:
 	rule_label.text = str(rules.get(str(r.get("rule", "normal")), ""))
 	rule_label.visible = not rule_label.text.is_empty()
 	var lines: Array[String] = []
-	for q in View.objectives(state):
-		if str(q.get("region","")) != str(r.get("id", "")): continue
-		lines.append("·  " + str(q.get("name",L.t("未完的事"))))
-		if lines.size() >= 3: break
-	quest_label.text = "\n".join(lines) if not lines.is_empty() else L.t("探索四周，找到正在等待你的事。")
-	if state.get("campaign") is Dictionary:
-		var journey: Dictionary = state.campaign
-		var goals: Array[String] = [str(journey.get("title","")),str(journey.get("goal",""))]
-		for milestone in journey.get("milestones",[]):goals.append(("✓ " if milestone.complete else "· ")+str(milestone.name))
-		quest_label.text="\n".join(goals+lines)
-	if state.get("adventure") is Dictionary:
-		var extra: Array[String] = []
-		for mission in state.adventure.get("missions",[]):
-			if not quest_label.text.contains(str(mission.name)):extra.append(("◇ " if mission.kind=="main" else "· ")+str(mission.name))
-		if not extra.is_empty():quest_label.text+="\n"+"\n".join(extra)
+	quest_label.text=L.t("留意身边的人与新的消息。")
+	for q in state.get("quests",[]):
+		if str(q.get("status",""))=="active":
+			quest_label.text=str(q.name)
+			break
+	task_button.visible=not r.is_empty()
+	if mission_panel.visible:mission_panel.refresh()
 	status_summary.text = View.summary(state)
 	var d: Dictionary = state.get("director", {})
 	var mode: String = str(d.get("mode", "not_configured"))
@@ -1071,6 +1081,13 @@ func _fit_modal() -> void:
 	modal_scroll.custom_minimum_size.y = clampf(modal_stack.get_combined_minimum_size().y + 8,100,minf(610,available_height))
 
 func _render_modal() -> void:
+	if local_panel=="missions" and state.get("ui",{}).is_empty() and not state.get("battle") is Dictionary:
+		modal_overlay.hide()
+		atlas_panel.hide()
+		mission_panel.show()
+		mission_panel.refresh()
+		return
+	mission_panel.hide()
 	var ui: Dictionary = state.get("ui", {})
 	var battle: Dictionary = state.battle if state.get("battle") is Dictionary else {}
 	if local_panel == "atlas" and ui.is_empty() and battle.is_empty():
@@ -1215,6 +1232,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if key == KEY_I: _toggle_panel("inventory")
 		elif key == KEY_J: _toggle_panel("journal")
 		elif key == KEY_G: _toggle_panel("atlas")
+		elif key == KEY_Q: _toggle_panel("missions")
 		elif key == KEY_ESCAPE:
 			local_panel = ""
 			modal_signature = ""
@@ -1254,6 +1272,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_toggle_panel("journal")
 	elif key == KEY_G:
 		_toggle_panel("atlas")
+	elif key == KEY_Q:
+		_toggle_panel("missions")
 	elif key in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_UP, KEY_LEFT, KEY_DOWN, KEY_RIGHT] and local_panel.is_empty():
 		# Handle the first tap as an event: a down/up pair can arrive within one
 		# frame and disappear before _process polls held keys.

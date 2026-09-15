@@ -112,17 +112,19 @@ class World:
   s=self.state; rid=target or s['current']; r=self.region(); n=s['topology'][rid]
   parent=self.region(n['parent']) if n['parent'] else None
   art=(parent or r or {}).get('visuals',{})
-  return dict(content_version=2,current_audio=(r or {}).get('audio',{}),current_visual_identity={k:v for k,v in (r or {}).get('visuals',{}).items() if k in ('style','terrain','palette')},item_policy=s.get('item_policy','legacy'),design_history=s.get('design_history',[])[-12:],hero_visual=s.get('hero_visual'),current_program=(r or {}).get('program',{}),current_runtime=(r or {}).get('runtime',{}),current_scene=(r or {}).get('scene',{}),known_sprites=list((r or {}).get('visuals',{}).get('sprites',{})),epoch=s['epoch'],kind=kind,setting=s['setting'],world_title=s['title'],target=rid,target_depth=n['depth'],target_revision=n.get('generation_revision',0),target_parent=n.get('parent'),destination=n.get('outline'),refresh=bool(n.get('needs_refresh')),existing_destinations=[s['topology'][ch].get('outline') for ch in n['children'] if s['topology'][ch].get('outline')],visual_identity={k:art[k] for k in ('style','terrain','palette') if k in art},planned_parent={k:parent[k] for k in ('id','name','description','biome','rule')} if parent else None,story_revision=s['story_revision'],
+  result=dict(content_version=2,current_audio=(r or {}).get('audio',{}),current_visual_identity={k:v for k,v in (r or {}).get('visuals',{}).items() if k in ('style','terrain','palette')},item_policy=s.get('item_policy','legacy'),design_history=s.get('design_history',[])[-12:],hero_visual=s.get('hero_visual'),current_program=(r or {}).get('program',{}),current_runtime=(r or {}).get('runtime',{}),current_scene=(r or {}).get('scene',{}),known_sprites=list((r or {}).get('visuals',{}).get('sprites',{})),epoch=s['epoch'],kind=kind,setting=s['setting'],world_title=s['title'],target=rid,target_depth=n['depth'],target_revision=n.get('generation_revision',0),target_parent=n.get('parent'),destination=n.get('outline'),refresh=bool(n.get('needs_refresh')),existing_destinations=[s['topology'][ch].get('outline') for ch in n['children'] if s['topology'][ch].get('outline')],visual_identity={k:art[k] for k in ('style','terrain','palette') if k in art},planned_parent={k:parent[k] for k in ('id','name','description','biome','rule')} if parent else None,story_revision=s['story_revision'],
    player={k:s['player'][k] for k in ('level','hp','gold')},current_region={k:r[k] for k in ('id','name','description','biome','rule','entities')} if r else {},
    available_items=[i for k,i in s['items'].items() if k in C.BASE_ITEMS or k.startswith(s['current']+':') or k in s['player']['inventory']],
    frontier=[dict(id=k,name=s['topology'][k]['name'],outline=s['topology'][k].get('outline'),visited=s['topology'][k]['visited']) for k in s['topology'][s['current']]['children']],
    known_locations=[dict(id=k,name=v['name'],visited=v['visited']) for k,v in list(s['topology'].items())[-18:]],
    facts=dict(list(s['facts'].items())[-35:]),lore=list(s['lore'].values())[-16:],threads=list(s['threads'].values())[-10:],quests=list(s['quests'].values())[-10:],recent_events=self.store.recent_events(12),**campaign.context(self,rid),**adventure.context(self,rid))
+  result['content_dependencies']=adventure.dependencies(self,result)
+  return result
  def context_is_current(self,context):
   s=self.state
   if not s or context.get('epoch')!=s['epoch']:return False
-  if context.get('kind')=='direction':return bool(adventure.state(self) and context.get('adventure_revision')==s['adventure']['revision'] and context.get('story_revision')==s['story_revision'] and context.get('event_seq')==s['adventure']['event_seq'])
-  if context.get('content_contract') and context.get('adventure_revision')!=s['adventure']['revision']:return False
+  if context.get('kind')=='direction':return bool(adventure.state(self) and context.get('chapter_id')==s['campaign']['active'])
+  if context.get('content_dependencies') and context['content_dependencies']!=adventure.dependencies(self,context):return False
   if context.get('kind')=='campaign':return bool(campaign.book(s) and s['campaign']['pending'] and context.get('campaign_revision')==s['campaign']['revision'])
   node=s['topology'].get(context.get('target'))
   if node is None:return False
@@ -225,6 +227,11 @@ class World:
     for key in ('director_gate_0','director_gate_1'):
      if key not in p['region'].get('scene',{}).get('anchors',{}):raise InvalidPatch('reserve '+key+' for future directed connections')
   if p['kind']=='region':
+   if context.get('require_overworld_threats'):
+    hooks=p['region'].get('program',{}).get('hooks',[])
+    for index,enemy in enumerate(p['region']['entities']):
+     if enemy['kind']=='enemy' and not enemy.get('behavior') and not any(h['on'] in ('move','wait','tick') and h.get('target')==enemy['id'] for h in hooks):
+      raise InvalidPatch('enemy needs authored overworld behavior, not only a combat turn',path=f'region.entities[{index}].behavior',expected={'mode':'guard | patrol | hunt','radius':'1..10','pace':'1..4','engage_range':'1..2','patrol':'waypoints required for patrol'})
    if context['target']=='r0' and not context.get('hero_visual') and p['region'].get('visuals'):
     resolve_sprite('hero',p['region']['visuals'])
    from .loadout import validate
@@ -261,6 +268,10 @@ class World:
    preview=build_region(p['region'],rid,C.stable_seed(self.state['setting'],rid),node['depth'],links);preview['plan']=p['region']
    if campaign.chapter(self.state,rid):preview['chapter_id']=node['chapter_id']
    preview['scenes']=p['region'].get('scenes',[])
+   for entity in preview['entities']:
+    for point in entity.get('behavior',{}).get('patrol',[]):
+     if not (0<=point[0]<preview['width'] and 0<=point[1]<preview['height']) or preview['tiles'][point[1]][point[0]] in C.BLOCKED:
+      raise InvalidPatch('patrol waypoint must be on walkable terrain inside this scene',path='region.entities.'+entity.get('local_id',entity['id'])+'.behavior.patrol',value=point)
    gameplay.definitions(self,preview)
    if context.get('reserve_chapter_gate'):
     pos=preview['scene']['anchors']['chapter_gate']
@@ -404,6 +415,8 @@ class World:
  def snapshot(self):
   if not self.state: return dict(started=False,version=0)
   s=self.state; r=copy.deepcopy(self.region()); p=s['player']
+  from .read_views import player_quests
+  known_quests=player_quests(self)
   if r:
    if campaign.book(s):r['entities']=[e for e in r['entities'] if not (e['kind']=='exit' and e.get('spent'))]
    for e in r['entities']:
@@ -418,7 +431,7 @@ class World:
    ui['title']='下一地区已准备好' if ui['ready'] else '地区正在后台准备'
    ui['lines']=['可以进入 '+ui['name']+'。'] if ui['ready'] else ['这条道路尚未准备好。你可以继续探索，后台会提前生成。']
   return copy.deepcopy(dict(adventure=adventure.public_view(self),game_over=bool(s.get('game_over')),game_spec=game_spec.snapshot(s),campaign=campaign.overview(s),audio_seq=s.get('audio_seq',0),audio_events=s.get('audio_events',[]),available_actions=generated_actions,content_version=2,started=True,version=s['version'],epoch=s['epoch'],title=s['title'],setting=s['setting'],story_revision=s['story_revision'],time=s['time'],
-   region={k:v for k,v in r.items() if k not in ('plan','pending_lore','pending_threads')} if r else None,player=p,inventory=inv,quests=list(s['quests'].values())[-20:],threads=list(s['threads'].values())[-10:],journal=s['journal'][-10:],battle=s['battle'],ui=ui,map_count=sum(n['visited'] for n in s['topology'].values()),
+   region={k:v for k,v in r.items() if k not in ('plan','pending_lore','pending_threads')} if r else None,player=p,inventory=inv,quests=known_quests[-20:],threads=list(s['threads'].values())[-10:],journal=s['journal'][-10:],battle=s['battle'],ui=ui,map_count=sum(n['visited'] for n in s['topology'].values()),
    frontier=[dict(id=rid,name=s['topology'][rid]['name'],ready=s['topology'][rid]['ready']) for rid in (campaign.neighbors(s,s['current'],True) if campaign.book(s) else s['topology'][s['current']]['children'])]))
  def action(self,a):
   return gameplay.action(self,a)

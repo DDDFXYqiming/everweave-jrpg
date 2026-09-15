@@ -8,13 +8,15 @@
 
 **Campaign before map**
 
-An online world starts with a game specification and a campaign plan. The plan defines the chapter goal, 4 to 8 regions, links with optional one-way travel, branches, loops, locked or hidden routes, shared flags, and a continuation gate. Regions use the route anchors from that plan, giving the world a persistent structure.
+An online world starts with a game specification and a rolling plan for the next 2 to 4 regions, plus a private eventual outcome brief. The director can add intermediate locations and links as choices unfold. The existing full-chapter mode still supports 4 to 8 regions. Routes always come from authoritative connection records.
 
 **A global director commissions concrete content**
 
 The director defines persistent cast, mission dependencies, skill briefs, resource gain limits and conditional endings. Content workers implement scenes, dialogue, encounters and rules. Accumulated gameplay events can trigger a review that adds commissions, adjusts unvisited region briefs or opens limited connections. Player choices update shared cast state, and earned abilities remain usable across regions. See the [director contract](docs/ADVENTURE_DIRECTOR.md) and [validation scope](docs/ADVENTURE_VALIDATION.md).
 
 [Fast autonomous playtesting](docs/FAST_PLAYTEST.md) uses normal game actions for continuous movement, stops at meaningful events and leaves exploration choices to the tester. Native Godot checks separately cover actual input and presentation.
+
+The current objective sits in the upper-left map corner; click it or press Q to open known and completed objectives. Future missions are filtered in the backend. Authored enemies can guard, patrol or pursue and initiate encounters during normal local turns. Waiting exits and nearby regions receive generation priority; a no-change review no longer invalidates in-flight maps. See [pacing and encounter validation](docs/PACING_AND_ENCOUNTERS.md) for measured results and limits.
 
 **The model creates executable content**
 

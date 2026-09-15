@@ -44,7 +44,7 @@ def observe(s):
             result['player'].update(select(p, ('level', 'xp')))
     else:
         result['player'].update(select(p, ('hp', 'max_hp', 'mp', 'max_mp', 'gold', 'level', 'xp')))
-    result['entities'] = [select(e, ('id', 'name', 'kind', 'x', 'y', 'footprint', 'locked', 'blocked_reason')) for e in visible_entities(s)]
+    result['entities'] = [select(e, ('id', 'name', 'kind', 'x', 'y', 'footprint', 'locked', 'blocked_reason','alerted','intent')) for e in visible_entities(s)]
     result['inventory'] = [select(i, ('id', 'name', 'description', 'quantity', 'equipped', 'usable')) for i in s.get('inventory', [])]
     result['goals'] = [select(q, ('id', 'name', 'description', 'status')) for q in s.get('quests', [])]
     if s.get('adventure'):
@@ -127,8 +127,12 @@ def interruption(before, after):
     if after.get('ui'): return 'dialogue_or_menu'
     if (after.get('region') or {}).get('id') != (before.get('region') or {}).get('id'): return 'region_changed'
     a, b = observe(before), observe(after)
-    for key in ('inventory', 'goals', 'adventure', 'journal', 'entities'):
+    for key in ('inventory', 'goals', 'adventure', 'journal'):
         if a.get(key) != b.get(key): return key + '_changed'
+    def nearby(observation):
+        p=observation['player']
+        return [e for e in observation['entities'] if e['kind']!='enemy' or e.get('alerted') or abs(e['x']-p['x'])+abs(e['y']-p['y'])<=6]
+    if nearby(a)!=nearby(b):return 'nearby_entities_changed'
     pa, pb = dict(a['player']), dict(b['player'])
     for key in ('x', 'y'): pa.pop(key, None); pb.pop(key, None)
     if pa != pb: return 'resources_changed'

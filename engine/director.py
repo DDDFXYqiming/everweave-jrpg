@@ -286,16 +286,28 @@ class Director:
    self.error='本次进程的模型调用已达上限。现有地图仍可玩；设置里可提高上限。'; return None
   if time.monotonic()-self.last_request<self.cfg['cooldown']: return None
   def available(kind,rid):return (s['epoch'],kind,rid) not in self.in_flight and (kind,rid) not in self.failed
+  def region_job(rid):
+   return w.context(rid,'region'),copy.deepcopy(self.cfg),self.generation
   if s.get('campaign',{}).get('pending'):
    if not available('campaign',s['current']) or any(k[1]=='campaign' for k in self.in_flight):return None
    return w.context(s['current'],'campaign'),copy.deepcopy(self.cfg),self.generation
   from . import adventure
+  # A player's waiting exit and a usable near-term buffer own the first slot.
+  waiting=s.get('ui',{}).get('target') if s.get('ui',{}).get('kind')=='pending_exit' else None
+  if waiting and waiting in s['topology'] and not s['topology'][waiting]['ready'] and available('region',waiting):return region_job(waiting)
+  if not s['topology'][s['current']]['ready']:
+   return region_job(s['current']) if available('region',s['current']) else None
+  horizon=w.prefetch_targets()
+  nearby=[rid for rid,distance in horizon if distance==1 and available('region',rid) and not s['topology'][rid]['ready']]
+  region_in_flight=any(k[1]=='region' for k in self.in_flight)
+  if nearby and not region_in_flight:return region_job(nearby[0])
   if s['topology'][s['current']]['ready'] and not s['battle'] and not s['ui']:
    jobs=adventure.ready_jobs(w,s['current'])
    if jobs and available('reaction',s['current']):
     ctx=w.context(kind='reaction');ctx['commission_ids']=[jobs[0]['id']];ctx['content_contract']['commissions']=[copy.deepcopy(jobs[0])]
+    ctx['content_dependencies']=adventure.dependencies(w,ctx)
     return ctx,copy.deepcopy(self.cfg),self.generation
-   if adventure.review_due(w) and available('direction',s['current']):return w.context(kind='direction'),copy.deepcopy(self.cfg),self.generation
+   if adventure.review_due(w) and available('direction',s['current']) and not any(k[1]=='direction' for k in self.in_flight):return w.context(kind='direction'),copy.deepcopy(self.cfg),self.generation
   pending=[(rid,distance) for rid,distance in w.prefetch_targets() if not s['topology'][rid]['ready'] and available('region',rid)]
   if s.get('campaign'):pending.sort(key=lambda item:(item[1],s['topology'][item[0]].get('chapter_id')!=s['campaign']['active']))
   if not s['topology'][s['current']]['ready']:
@@ -327,12 +339,13 @@ class Director:
    job=self._next_job()
    if not job: return False
    ctx,cfg,generation=job; kind=ctx['kind']; target=ctx['target']; job_key=(ctx['epoch'],kind,target)
+   if kind=='region' and not cfg['offline'] and self.world.state.get('adventure'):ctx['require_overworld_threats']=True
    self.in_flight[job_key]=('统筹冒险 ' if kind=='direction' else '规划章节 ' if kind=='campaign' else '落实委托 ' if ctx.get('commission_ids') else '续写 ' if kind=='reaction' else '生成 ')+self._title(target)
    self._begin_task(job_key,ctx)
    self.busy=' / '.join(self.in_flight.values()); self.last_request=time.monotonic()
   raw=None; error=None;attempts=0
   cached=self.failed_payloads.get((kind,target))
-  cache_fields=('epoch','target','kind','refresh','target_revision','adventure_revision')+(('story_revision','commission_ids') if kind=='reaction' else ())
+  cache_fields=('epoch','target','kind','refresh','target_revision','content_dependencies')+(('story_revision','commission_ids') if kind=='reaction' else ())
   if cached and cached['generation']==generation and all(cached['context'].get(k)==ctx.get(k) for k in cache_fields):
    raw=cached['raw'];error=cached['error']
   for attempt in range(2):

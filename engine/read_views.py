@@ -1,6 +1,31 @@
 """Player knowledge views, independent of LLM context windows and generation."""
 import copy
 
+def player_quests(world):
+    """Player knowledge, shared by HUD, journal, atlas and test observations."""
+    from .adventure import visible
+    s=world.state or {};adv=s.get('adventure');result=[];seen=set()
+    if adv:
+        source=[dict(id=m['id'],name=m['name'],description=m['brief'],region=m['region'],status=m['status'],kind=m['kind'],depends=[d for d in m['depends'] if adv['missions'][d].get('discovered')]) for m in adv['missions'].values() if visible(world,m)]
+    else:source=[]
+    unlocked=set()
+    for chapter in s.get('campaign',{}).get('chapters',{}).values():
+        for milestone in chapter['milestones']:
+            key=chapter['id']+':'+milestone['id'];unlocked.add(key)
+            if s['quests'][key]['status']=='active':break
+    for q in s.get('quests',{}).values():
+        if q.get('goal')=='adventure':continue
+        if q.get('goal')=='campaign':
+            if adv or q['id'] not in unlocked:continue
+        elif q.get('region') and not s.get('topology',{}).get(q['region'],{}).get('visited'):continue
+        source.append({k:q.get(k,'') for k in ('id','name','description','region','status','kind')})
+    mission_names={m['name'].strip() for m in source if adv and m['id'] in adv['missions']}
+    for q in source:
+        key=q['name'].strip()
+        if adv and q['id'] not in adv['missions'] and key in mission_names:continue
+        seen.add(key);result.append(copy.deepcopy(q))
+    return result
+
 
 def map_card(region):
     palette=region.get('visuals',{}).get('palette',{})
@@ -26,7 +51,7 @@ def atlas(world):
     cache=getattr(world,'_map_cards',{})
     if cache.get('epoch')!=s['epoch']:cache={'epoch':s['epoch'],'cards':{}};world._map_cards=cache
     quests={}
-    for q in s['quests'].values():
+    for q in player_quests(world):
         if q.get('status')=='active' and q.get('region') in visited:
             quests.setdefault(q['region'],[]).append({k:q.get(k,'') for k in ('id','name','description','status')})
     nodes=[]
@@ -65,7 +90,7 @@ def journal(world,tab='history',before=None,limit=30):
     s=world.state or {}
     if tab=='history':result=world.store.journal_page(before,limit)
     else:
-        source=list(s.get('threads' if tab=='threads' else 'quests',{}).values())
+        source=list(s.get('threads',{}).values()) if tab=='threads' else player_quests(world)
         ceiling=len(source) if before is None else min(before,len(source))
         rows=[]
         for index in range(ceiling-1,-1,-1):

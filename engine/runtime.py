@@ -412,6 +412,8 @@ def check_references(region, items):
             for key,value in node.items(): walk(value,location+'.'+key)
     walk(region.get('program', {}),'region.program')
     walk(region.get('scenes',[]),'region.scenes')
+    for index,entity in enumerate(region.get('entities',[])):
+        if entity.get('behavior'):walk(entity['behavior'],f'region.entities[{index}].behavior')
     for item in items.values():
         if item.get('origin') == region['id']: walk(item.get('use', {}),f'items[{item["id"]}].use')
     if errors:raise RuleError(issues=errors)

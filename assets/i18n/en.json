@@ -277,5 +277,15 @@
   "新世界会覆盖当前存档，请明确确认。": "Confirm before replacing the current world.",
   "金币": "gold",
   "生命值": "health",
-  "需要 %s ×%s（当前 %s）": "Requires %s ×%s (currently %s)"
+  "需要 %s ×%s（当前 %s）": "Requires %s ×%s (currently %s)",
+  "行动记录": "Objectives",
+  "行动记录 · Q": "Objectives · Q",
+  "◇  当前行动                                      Q": "◇  CURRENT OBJECTIVE                      Q",
+  "留意身边的人与新的消息。": "Look for people and new leads nearby.",
+  "收起 · Q / Esc": "Close · Q / Esc",
+  "进行中": "In progress",
+  "完整记录 · J": "Full journal · J",
+  "记录已得知的线索与选择。新的目标会随旅程出现。": "Known leads and choices. New objectives appear as your journey unfolds.",
+  "还没有完成的记录。": "No completed objectives yet.",
+  "当前行动": "Current objective"
 }

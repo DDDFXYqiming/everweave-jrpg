@@ -174,6 +174,11 @@ func _draw() -> void:
 			draw_circle(foot - Vector2(0, 17), 24 + 2 * sin(elapsed * 2), Color(0.4, 0.85, 0.8, 0.06))
 		if obj.kind == "enemy":
 			draw_arc(foot - Vector2(0, 8), 19, 0, TAU, 20, Color(0.91, 0.49, 0.50, 0.65), 1.0)
+			if bool(obj.entity.get("alerted",false)):
+				draw_string(font,foot-Vector2(5,66),"!",HORIZONTAL_ALIGNMENT_LEFT,-1,24,Color("f39579"))
+			if int(footprint[0])>1 or int(footprint[1])>1:
+				var occupied := Rect2(Vector2(float(obj.x),float(obj.y)-float(footprint[1])+1)*TILE-camera,Vector2(float(footprint[0]),float(footprint[1]))*TILE)
+				draw_rect(occupied,Color(0.91,0.49,0.50,0.35),false,1.0)
 		if obj.kind == "chest" and bool(obj.entity.get("spent", false)): tint = Color(.55, .55, .55, .7)
 		_draw_sprite(str(obj.sprite), foot, 2.0, tint)
 		if obj.kind in ["npc", "object"] and obj.has("entity"):

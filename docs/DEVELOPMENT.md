@@ -23,6 +23,7 @@ python -m unittest discover -s tests -v
 python tools/test_native.py --content --headless
 python tools/test_native.py --hybrid --headless
 python tools/test_native.py --adventure --headless
+python tools/test_native.py --threat --headless
 ```
 
 单独检查 Godot 脚本和图形编译可以使用引擎命令行。

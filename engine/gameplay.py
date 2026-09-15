@@ -15,6 +15,14 @@ def transaction(world, operation):
     world._batch = dict(regions={}, events=[], delete=set())
     try:
         result = operation()
+        old_cast=before.get('adventure',{}).get('cast',{})
+        adv=world.state.get('adventure')
+        if adv and any(key in old_cast and actor['state']!=old_cast[key]['state'] for key,actor in adv['cast'].items()):
+            adv['event_seq']+=1;adv['important_seq']=adv['event_seq']
+        marker=world._batch.get('advance_encounters')
+        if marker:
+            from .encounters import advance
+            advance(world)
         if world.state.get('pending_ending') and not world.state['ui'] and not world.state['battle']:
             ending=world.state.pop('pending_ending')
             world.state['ui']=dict(kind='message',title=ending['name'],lines=[ending['description']])
@@ -167,6 +175,7 @@ def action(world, a):
             if item.get('kind') in ('weapon','charm') and not enabled(s,'equipment'):raise RuleError('当前世界没有装备系统。')
             if item.get('kind')=='consumable' and not item.get('use') and not active(s,'hp' if item.get('effect')=='heal' else 'mp'):raise RuleError('此资源未启用。')
         previous = (s['current'], s['steps'], bool(s['battle']), copy.deepcopy(s['ui']))
+        if op in ('move','wait') and not s['ui'] and not s['battle']:world._batch['advance_encounters']=True
         if op in ('invoke', 'actions', 'wait'):
             if s['battle'] or s['ui']: raise RuleError('先结束当前交互。')
             vm = Runtime(world, r)
@@ -246,7 +255,7 @@ def combat(world, move):
     r = world.region(); s = world.state; b = s['battle']; p = s['player']
     if not has_combat(r,world): return False
     if move == 'flee':
-        s['battle'] = None; world.note('你撤出了战斗。'); world.persist(r); return True
+        s['battle'] = None;s['encounter_grace']=3; world.note('你撤出了战斗。'); world.persist(r); return True
     if not isinstance(move, str) or not move.startswith('rule:'): raise RuleError('请选择模型生成的战斗操作。')
     vm = Runtime(world, r)
     offered = {a['id']: a for a in vm.available(scope='combat')}

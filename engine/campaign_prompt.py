@@ -4,7 +4,12 @@ campaign fields: title, premise, goal (clear player objective, stakes and direct
 flag_sources:{FLAG:REGION_ID}, regions:[{id,name,description,purpose}], links:[{id,a,b,hidden?:bool,
 discover?:[{flag,eq}],requires?:[{flag,eq}],blocked_reason?:text,one_way?:bool}], milestones:[{id,name,description,when:[{flag,eq}]}],
 complete_when:[{flag,eq}], continuation:{from:REGION_ID,hook:next chapter promise}.
-4..8 regions, 4..14 links (bidirectional unless one_way=true from a to b), a graph with a loop and a junction of degree>=3 (max6).
+For new online adventures use planning:"rolling": author only the next 2..4 regions, connected by 1..6 links.
+Include ending_brief: a PRIVATE eventual outcome direction, not a complete intermediate route. Keep the middle open
+for the global director to expand as the player makes choices. Plan a playable local arc and its continuation,
+with room for danger, negotiation and character scenes. Do not prewrite a whole campaign as a puzzle checklist.
+The legacy planning:"chapter" supports 4..8 regions, 4..14 links with a loop and junction of degree>=3 (max6).
+Links are bidirectional unless one_way=true from a to b. Future expansion should add meaningful branches and loops.
 Every region must be structurally reachable from the first, respecting direction. Do not trap required progress behind a one-way return.
 Region IDs <=20, link IDs <=40 lowercase snake_case. The FIRST region is the arrival; allow an initially open visible route from it.
 Include meaningful branches, optional encounters and a discoverable hidden shortcut when appropriate.
@@ -12,6 +17,7 @@ Use clear cross-region dependencies: investigate A -> gain a shared clue/ability
 Conditions are AND lists; eq must match the flag's initial type. Every flag needs one producer region in flag_sources.
 Assign each region a distinct role in THIS story, with NPC motives, danger or discovery and consequences.
 State which concrete player action writes each produced flag in that region's purpose. Do not put the only key behind its own locked route.
+Use goal and premise for the player's known problem and stakes; keep solutions and future revelations in private purposes.
 At least one unfinished milestone and completion condition. A completed chapter must offer a next chapter via continuation.from;
 the region generator will reserve an anchor for it. Preserve the previous chapter's consequences, setting and identity.
 Do NOT draw assets, map tile arrays or entire executable programs at this planning stage. Be concise.

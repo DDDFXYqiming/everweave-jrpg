@@ -15,7 +15,7 @@ def conditions(raw,flags):
         out.append(copy.deepcopy(c))
     return out
 
-def validate(raw,first=True,existing=None):
+def validate(raw,first=True,existing=None,corrections=None):
     from .schema import obj,arr,ident,text
     from .content import state_values,boolean
     if isinstance(raw,str):
@@ -23,14 +23,23 @@ def validate(raw,first=True,existing=None):
         except (ValueError,TypeError) as exc:raise InvalidPatch('campaign must be valid JSON') from exc
     obj(raw,'campaign envelope',('kind','campaign'),('kind','campaign'))
     if raw['kind']!='campaign':raise InvalidPatch('expected kind=campaign')
-    r=obj(raw['campaign'],'campaign',('title','premise','goal','game_spec','flags','flag_sources','regions','links','milestones','complete_when','continuation','adventure'),('title','premise','goal','flags','flag_sources','regions','links','milestones','complete_when','continuation'))
+    candidate=raw.get('campaign')
+    if first and isinstance(candidate,dict) and 'failure_mode' in candidate and isinstance(candidate.get('game_spec'),dict):
+        if 'failure_mode' not in candidate['game_spec'] or candidate['game_spec']['failure_mode']==candidate['failure_mode']:
+            raw=copy.deepcopy(raw);candidate=raw['campaign'];value=candidate.pop('failure_mode');candidate['game_spec']['failure_mode']=value
+            if corrections is not None:corrections.append(dict(path='campaign.failure_mode',target='campaign.game_spec.failure_mode',reason='unambiguous game specification field placement'))
+    r=obj(raw['campaign'],'campaign',('title','premise','goal','game_spec','flags','flag_sources','regions','links','milestones','complete_when','continuation','adventure','planning','ending_brief'),('title','premise','goal','flags','flag_sources','regions','links','milestones','complete_when','continuation'))
+    rolling=r.get('planning')=='rolling'
+    if r.get('planning','chapter') not in ('rolling','chapter'):raise InvalidPatch('planning must be rolling or chapter')
     out={k:text(r[k],k,500) for k in ('title','premise','goal')};out['flags']=state_values(r['flags'])
+    out['planning']='rolling' if rolling else 'chapter'
+    out['ending_brief']=text(r.get('ending_brief',''),'ending brief',500) if r.get('ending_brief') else ''
     if first:
         if 'game_spec' not in r:raise InvalidPatch('opening campaign needs game_spec')
         out['game_spec']=game_spec.validate(r['game_spec'])
     elif 'game_spec' in r:raise InvalidPatch('game_spec is fixed for this world; do not replace it')
     regions=[];ids=set()
-    for node in arr(r['regions'],'chapter regions',8,4):
+    for node in arr(r['regions'],'chapter regions',4 if rolling else 8,2 if rolling else 4):
         obj(node,'chapter region',('id','name','description','purpose'),('id','name','description','purpose'))
         key=ident(node['id'])
         if len(key)>20 or key in ids:raise InvalidPatch('region IDs must be unique and at most 20 characters')
@@ -39,7 +48,7 @@ def validate(raw,first=True,existing=None):
     sources=r['flag_sources']
     if not isinstance(sources,dict) or set(sources)!=set(out['flags']) or any(not isinstance(v,str) or v not in ids for v in sources.values()):raise InvalidPatch('flag_sources must assign every flag to one chapter region')
     out['flag_sources']=copy.deepcopy(sources)
-    for link in arr(r['links'],'chapter links',14,4):
+    for link in arr(r['links'],'chapter links',14,1 if rolling else 4):
         obj(link,'chapter link',('id','a','b','hidden','discover','requires','blocked_reason','one_way'),('id','a','b'))
         key=ident(link['id']);a=ident(link['a']);b=ident(link['b']);pair=tuple(sorted((a,b)))
         if key in link_ids:raise InvalidPatch('duplicate link ID',path='campaign.links',value=key)
@@ -51,7 +60,7 @@ def validate(raw,first=True,existing=None):
     start=regions[0]['id'];seen={start};queue=deque([start])
     while queue:
         for node in adj[queue.popleft()]-seen:seen.add(node);queue.append(node)
-    if seen!=ids or len(pairs)<len(ids) or max(map(len,adj.values()))<3:raise InvalidPatch('chapter graph needs connected branches and at least one loop, not a linear chain')
+    if seen!=ids or not rolling and (len(pairs)<len(ids) or max(map(len,adj.values()))<3):raise InvalidPatch('chapter graph needs connected branches and at least one loop, not a linear chain')
     if max(map(len,adj.values()))>6:raise InvalidPatch('limit each location to six chapter routes')
     if any(sum(key in (e['a'],e['b']) for e in out['links'])>6 for key in ids):raise InvalidPatch('limit each location to six physical routes, including parallel routes')
     # The arrival cannot be stranded behind unknown flags.
@@ -135,7 +144,9 @@ def refresh(world):
             if e['hidden'] and not e['revealed'] and satisfied(e['discover'],c['flags']):e['revealed']=True
         for m in c['milestones']:
             q=s['quests'][cid+':'+m['id']]
-            if q['status']=='active' and satisfied(m['when'],c['flags']):q['status']='complete';world.note(m['name'])
+            if q['status']=='active' and satisfied(m['when'],c['flags']):
+                q['status']='complete'
+                if not s.get('adventure'):world.note(m['name'])
         if not c['complete'] and satisfied(c['complete_when'],c['flags']):
             c['complete']=True
             if cid==b['active']:b['pending']=True;b['revision']+=1;world.note(c['continuation']['hook'])
@@ -171,4 +182,11 @@ def overview(state):
     if not b:return None
     c=b['chapters'].get(b.get('active'))
     if not c:return dict(title='',goal='正在规划冒险目标与章节路线。',milestones=[])
-    return dict(title=c['title'],goal=c['goal'],complete=c['complete'],milestones=[dict(name=m['name'],complete=state['quests'][c['id']+':'+m['id']]['status']=='complete') for m in c['milestones']])
+    if state.get('adventure'):
+        missions=[m for m in state['adventure']['missions'].values() if m.get('discovered') and m['status']=='active']
+        return dict(title=c['title'],goal=missions[0]['brief'] if missions else '留意身边的人与新的消息。',complete=c['complete'],milestones=[])
+    shown=[]
+    for m in c['milestones']:
+        done=state['quests'][c['id']+':'+m['id']]['status']=='complete';shown.append(dict(name=m['name'],complete=done))
+        if not done:break
+    return dict(title=c['title'],goal=next((m['description'] for m in c['milestones'] if state['quests'][c['id']+':'+m['id']]['status']=='active'),'阶段目标已经完成。'),complete=c['complete'],milestones=shown)

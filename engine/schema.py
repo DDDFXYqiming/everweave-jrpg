@@ -45,10 +45,14 @@ def dialogue(v):
  return [checked(f'[{index}]',text,x,'dialogue',280) for index,x in enumerate(arr(v,'dialogue',4,1))]
 
 def entity(v):
- e=obj(v,'entity',('id','kind','name','zone','appearance','role','dialogue','choices','monster','tier','move','item_id','sprite','at','solid','state','description','footprint','stats','actor_id'),('id','kind','name'))
+ e=obj(v,'entity',('id','kind','name','zone','appearance','role','dialogue','choices','monster','tier','move','item_id','sprite','at','solid','state','description','footprint','stats','actor_id','behavior'),('id','kind','name'))
  out=dict(id=checked('id',ident,e['id']),kind=checked('kind',enum,e['kind'],C.KINDS+('object',),'kind'),name=checked('name',text,e['name'],'name',48),zone=checked('zone',enum,e.get('zone','center'),C.ZONES,'zone'))
  if 'sprite' in e:out['sprite']=checked('sprite',ident,e['sprite'])
  if 'actor_id' in e:out['actor_id']=checked('actor_id',ident,e['actor_id'])
+ if 'behavior' in e:
+  if out['kind']!='enemy':raise InvalidPatch('behavior requires an enemy')
+  from .encounters import validate
+  out['behavior']=checked('behavior',validate,e['behavior'])
  if out['kind']=='npc':
   out.update(role=checked('role',enum,e.get('role','wanderer'),C.ROLES,'role'),appearance=checked('appearance',number,e.get('appearance',0),'appearance',0,7),dialogue=checked('dialogue',dialogue,e.get('dialogue',['旅人，你听见钟声了吗？'])),choices=[])
   for index,ch in enumerate(checked('choices',arr,e.get('choices',[]),'choices',3)):
@@ -82,7 +86,7 @@ def unique_ids(values,name):
 def parse_patch(raw,expected,context=None,corrections=None):
  if expected=='campaign':
   from .campaign import validate
-  return dict(kind='campaign',campaign=validate(raw,not (context or {}).get('game_spec'),(context or {}).get('adventure_state')))
+  return dict(kind='campaign',campaign=validate(raw,not (context or {}).get('game_spec'),(context or {}).get('adventure_state'),corrections))
  if expected=='direction':
   from .adventure import validate_direction
   return dict(kind='direction',direction=validate_direction((context or {})['validation_world'],raw))
@@ -91,7 +95,7 @@ def parse_patch(raw,expected,context=None,corrections=None):
  expanded,module_sources=expand(decode(raw),expected)
  normalized,changes,errors=normalize_patch(expanded,expected,context)
  if corrections is not None:corrections.extend(changes)
- errors.extend(_independent_errors(normalized,expected))
+ errors.extend(_independent_errors(normalized,expected,context))
  from .story_content import ability_contract_errors
  errors.extend(ability_contract_errors(normalized.get(expected) if isinstance(normalized,dict) else None,expected,context))
  if errors:raise InvalidPatch(issues=unique_issues(errors),corrections=changes)
@@ -229,7 +233,7 @@ def _parse_patch(raw,expected,context=None):
  else: raise InvalidPatch('unsupported kind')
  return out
 
-def _independent_errors(raw,expected):
+def _independent_errors(raw,expected,context=None):
  """Collect independent component failures without executing any content."""
  if not isinstance(raw,dict) or not isinstance(raw.get(expected),dict):return []
  from .content import program,scene,state_values,expression,effects,item_use
@@ -238,6 +242,9 @@ def _independent_errors(raw,expected):
  def probe(path,function,*args):
   try:function(*args)
   except InvalidPatch as exc:errors.extend(as_issues(exc,path))
+ if 'audio' in body:
+  from .audio import validate_audio
+  probe(expected+'.audio',validate_audio,body['audio'],(context or {}).get('current_audio'))
  for group,validator in (('entities',entity),('spawns',entity),('items',item),('destinations',destination),('locations',destination)):
   if isinstance(body.get(group),list):
    for index,value in enumerate(body[group]):probe(f'{expected}.{group}[{index}]',validator,value)

@@ -30,6 +30,7 @@ def main():
     if args.repair_from:
         from engine.schema import InvalidPatch
         previous=json.loads(args.repair_from.read_text(encoding='utf8'))[-1];ctx=previous['context'];raw=previous['raw']
+        if ctx['kind']=='region':ctx['require_overworld_threats']=True
         if not w.context_is_current(ctx):raise ValueError('repair trace context no longer matches source world')
         try:w.validate_patch(raw,ctx)
         except InvalidPatch as error:

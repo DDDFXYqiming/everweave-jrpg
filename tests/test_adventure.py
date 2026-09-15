@@ -73,7 +73,9 @@ class AdventureTests(unittest.TestCase):
         self.assertEqual(self.w.state,before)
     def test_director_review_runs_after_committed_events_not_each_step(self):
         self.generate();self.talk();adv=adventure.state(self.w)
-        adv['event_seq']=adv['reviewed_seq']+3;self.w.state['ui']={}
+        for rid in list(self.w.state['topology']):
+            if rid!='r0':self.generate(rid)
+        adv['event_seq']=adv['reviewed_seq']+3;adv['important_seq']=adv['event_seq'];self.w.state['ui']={}
         d=Director(self.w);d.configure(dict(offline=False,api_key='test',base_url='https://example.test',model='test',max_calls=4));d.cfg['cooldown']=0
         seen=[]
         def reply(_,ctx,kind,repair=''):
