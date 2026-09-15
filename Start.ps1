@@ -1,10 +1,10 @@
 [CmdletBinding()]
-param([string]$Godot = '', [switch]$Demo, [switch]$ServerOnly, [string]$DataDir = '')
+param([string]$Godot = '', [switch]$Demo, [switch]$ServerOnly, [string]$DataDir = '', [switch]$LoadDeepSeekKey)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $env:PYTHONUTF8 = '1'
 $keyFile = Join-Path $PSScriptRoot 'deepseek.local.key'
-if (-not $env:DEEPSEEK_API_KEY -and (Test-Path -LiteralPath $keyFile)) {
+if ($LoadDeepSeekKey -and -not $env:DEEPSEEK_API_KEY -and (Test-Path -LiteralPath $keyFile)) {
     $secureKey = (Get-Content -LiteralPath $keyFile -Raw).Trim() | ConvertTo-SecureString
     $env:DEEPSEEK_API_KEY = [System.Net.NetworkCredential]::new('', $secureKey).Password
 }

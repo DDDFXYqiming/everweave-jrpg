@@ -71,6 +71,7 @@ var setting_input: TextEdit
 var base_input: LineEdit
 var model_input: LineEdit
 var key_input: LineEdit
+var key_label: Label
 var mode_select: OptionButton
 var hybrid_select: CheckBox
 var online_settings: VBoxContainer
@@ -369,6 +370,7 @@ func _build_home() -> void:
 	mode_select.add_item("DeepSeek",0)
 	mode_select.add_item(L.t("其他兼容服务"),1)
 	mode_select.add_item(L.t("离线演示"),2)
+	mode_select.add_item(L.t("Codex 订阅 · GPT-5.6 Luna"),3)
 	connection.add_child(mode_select)
 	mode_help = _label(connection,"",13,MUTED)
 	online_settings = _vbox(connection)
@@ -393,7 +395,7 @@ func _build_home() -> void:
 	var grid := GridContainer.new()
 	grid.columns = 2
 	online_settings.add_child(grid)
-	_label(grid,L.t("密钥"),14,MUTED)
+	key_label=_label(grid,L.t("密钥"),14,MUTED)
 	key_input = LineEdit.new()
 	key_input.secret = true
 	key_input.custom_minimum_size.x = 440
@@ -409,7 +411,8 @@ func _build_home() -> void:
 	grid.add_child(budget_input)
 	effort_help = _label(online_settings,"",12,MUTED)
 	mode_select.item_selected.connect(_mode_changed)
-	_mode_changed(0)
+	mode_select.select(3)
+	_mode_changed(3)
 	_button(connection,L.t("应用并继续旅程"),_continue_world)
 	form_error = _label(box,L.t("连接存档中……"),13,MUTED)
 	replace_dialog = ConfirmationDialog.new()
@@ -738,7 +741,9 @@ func _bar(parent: Node, fill: Color) -> ProgressBar:
 
 func _configuration() -> Dictionary:
 	var custom: bool = mode_select.selected == 1
-	return {"language":L.language,"hybrid_content":hybrid_select.button_pressed,"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
+	if mode_select.selected==3:
+		return {"provider":"codex_subscription","language":L.language,"hybrid_content":hybrid_select.button_pressed,"offline":false,"base_url":"","model":"gpt-5.6-luna","api_key":"","deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
+	return {"provider":"chat_completions","language":L.language,"hybrid_content":hybrid_select.button_pressed,"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
 
 func _set_effort(effort: String) -> void:
 	for i in range(effort_select.item_count):
@@ -748,9 +753,10 @@ func _set_effort(effort: String) -> void:
 	effort_select.select(0)
 
 func _mode_changed(index: int) -> void:
-	var previous: String = "low" if effort_select.item_count == 0 else str(effort_select.get_item_metadata(effort_select.selected))
+	var previous: String = ("high" if index==3 else "low") if effort_select.item_count == 0 else str(effort_select.get_item_metadata(effort_select.selected))
 	effort_select.clear()
 	var efforts: Array = ["low", "high", "max", "none"] if index != 1 else ["low", "medium", "high", "xhigh", "max", "minimal", "none", "default"]
+	if index==3:efforts=["high","low","medium","xhigh","max","none"]
 	for effort in efforts:
 		var label: String = L.t("关闭思考") if effort == "none" else (L.t("服务默认（不传参数）") if effort == "default" else effort)
 		effort_select.add_item(label)
@@ -759,11 +765,17 @@ func _mode_changed(index: int) -> void:
 	effort_help.text = L.t("默认 low；可随时调整思考等级，应用后用于后续生成。") if index != 1 else L.t("等级由接入服务支持；不接受此参数的服务请选择“服务默认”。")
 	online_settings.visible = index != 2
 	custom_fields.visible = index == 1
-	provider_summary.visible = index == 0
+	provider_summary.visible = index in [0,3]
+	provider_summary.text = "GPT-5.6 Luna · Codex" if index==3 else "DeepSeek Flash"
+	key_input.visible=index!=3
+	key_label.visible=index!=3
 	key_input.text = ""
 	mode_help.text = L.t("从一句设定开始，由模型生成世界并持续续写。") if index != 2 else L.t("仅检查地图、交互与存档功能。内容来自固定测试样例，不调用 LLM。")
 	key_input.placeholder_text = L.t("留空使用此服务已有的密钥")
 	if index == 0: key_input.placeholder_text = L.t("留空使用启动器加载的 DeepSeek 密钥")
+	if index==3:
+		mode_help.text=L.t("使用本机 Codex 的 ChatGPT 订阅登录，共享订阅额度，无需 API 密钥。")
+		effort_help.text=L.t("默认 high。登录、额度或模型不可用时停止，不自动切换收费服务。")
 
 func _sync_configuration() -> void:
 	var cfg: Dictionary = state.get("configuration", {})
@@ -773,6 +785,7 @@ func _sync_configuration() -> void:
 	budget_input.value = int(cfg.get("max_calls", 60))
 	hybrid_select.button_pressed = bool(cfg.get("hybrid_content",true))
 	var index: int = 2 if bool(cfg.get("offline", false)) else (0 if base_input.text == "https://api.deepseek.com" and model_input.text == "deepseek-flash" and bool(cfg.get("deepseek_options", true)) else 1)
+	if not bool(cfg.get("offline",false)) and cfg.get("provider","")=="codex_subscription":index=3
 	mode_select.select(index)
 	_mode_changed(index)
 	_set_effort(str(cfg.get("reasoning_effort", "low")))
@@ -1000,6 +1013,7 @@ func _render() -> void:
 	var mode_text: String = L.t("离线演示 · 非 LLM") if mode == "offline_demo" else L.t("在线 · ") + str(d.get("model", ""))
 	if mode == "not_configured": mode_text = L.t("尚未配置导演")
 	if mode == "live_llm": mode_text += L.t(" · 思考 ") + str(d.get("reasoning_effort", "low"))
+	if mode=="live_llm" and d.get("provider","")=="codex_subscription":mode_text=L.t("订阅 · ")+str(d.get("model",""))+" · "+str(d.get("reasoning_effort","high"))
 	var active_lines: Array[String] = []
 	for task in d.get("active_tasks", []):
 		var purpose: String = L.t("世界变化") if str(task.kind) == "reaction" else (L.t("更新草案") if str(task.get("source", "")) == "refresh" else L.t("自动预生成"))

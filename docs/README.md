@@ -3,6 +3,7 @@
 ## 使用与开发
 
 - [使用指南](LOCAL_SETUP.md) 包含安装、模型连接和独立存档
+- [Codex 订阅接入](CODEX_SUBSCRIPTION.md) 说明 Luna / high、登录边界和本轮实测
 - [语言设置](LOCALIZATION.md) 说明中英文界面与生成语言
 - [示例世界](SHOWCASE.md) 记录 README 中章节系统加入前的场景与截图
 - [开发与测试](DEVELOPMENT.md) 说明资源准备和回归方法

@@ -16,17 +16,20 @@ from engine.director import Director,ChatProvider
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live',action='store_true');parser.add_argument('--source',type=Path,required=True);parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--provider',choices=('codex_subscription','chat_completions'),default='codex_subscription')
     parser.add_argument('--steps',type=int,default=1);parser.add_argument('--max-calls',type=int,default=2)
     parser.add_argument('--repair-from',type=Path,help='Reuse the last rejected output from a compatible trace; validate it before requesting repair')
     args=parser.parse_args()
-    if not args.live or not os.environ.get('DEEPSEEK_API_KEY'):parser.error('--live and an existing DEEPSEEK_API_KEY are required')
+    if not args.live:parser.error('--live is required')
+    if args.provider=='chat_completions' and not os.environ.get('DEEPSEEK_API_KEY'):parser.error('DeepSeek requires an existing DEEPSEEK_API_KEY')
     if not 1<=args.steps<=3 or not 1<=args.max_calls<=6:parser.error('bounded steps/call count required')
     out=args.output.resolve();out.mkdir(parents=True,exist_ok=True);db=out/'world.sqlite3'
     if db.exists():parser.error('output database must not exist')
     source=sqlite3.connect(args.source.resolve().as_uri()+'?mode=ro',uri=True);dest=sqlite3.connect(db)
     try:source.backup(dest)
     finally:source.close();dest.close()
-    w=World(Store(db));d=Director(w);d.configure(dict(offline=False,max_calls=args.max_calls,reasoning_effort='low'));d.cfg['cooldown']=0
+    w=World(Store(db));d=Director(w);subscription=args.provider=='codex_subscription'
+    d.configure(dict(provider=args.provider,model='gpt-5.6-luna' if subscription else 'deepseek-flash',offline=False,max_calls=args.max_calls,reasoning_effort='high' if subscription else 'low'));d.cfg['cooldown']=0
     if args.repair_from:
         from engine.schema import InvalidPatch
         previous=json.loads(args.repair_from.read_text(encoding='utf8'))[-1];ctx=previous['context'];raw=previous['raw']

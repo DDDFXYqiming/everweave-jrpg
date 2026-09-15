@@ -45,13 +45,15 @@ godot --headless --path . --script res://tests/campaign_client_smoke.gd
 
 ## 可选在线联调
 
-下面的命令会调用模型，需要已有的 `DEEPSEEK_API_KEY`。输出目录必须是未使用的新目录：
+下面的命令默认通过 Codex 的 ChatGPT 订阅登录调用 **GPT-5.6 Luna / high**，无需 API Key。输出目录必须是未使用的新目录：
 
 ```powershell
 python tools/test_hybrid_live.py --live --campaign --steps 3 --max-calls 6 --output ./userdata/campaign-check --setting "现代医院停电，我要寻找失联同事并恢复隔离系统。不同地区共享线索，有回环和隐藏通道，不要魔法或等级。"
 ```
 
 `--steps` 是调度步骤上限，不是保证生成的地区数；每步可能包含修复，`--max-calls` 才是请求预算。`--campaign` 启用规划，省略时为单地区路径测试。`--plan-from` 可重放相同设定下 trace 第一条章节响应，再生成地区；必须在报告中区分回放与新请求。`--retry-from` 是原有开局地区修复工具，不用于续修章节计划。
+
+`test_hybrid_live.py` 与 `review_adventure_live.py` 的 `--provider codex_subscription` 为默认值。需要有意测试旧 DeepSeek API 时使用 `--provider chat_completions` 并提供 `DEEPSEEK_API_KEY`；没有自动回退。历史 trace 不因默认服务改变而改名或重算。
 
 脚本保存 `trace.json/result.json/snapshot.json` 和独立数据库。`ready` 仅代表当前地区存在，还需检查 `failed_tasks`、`ready_regions` 和各任务记录，不能单凭输出的成功标记判断整章已完成。
 

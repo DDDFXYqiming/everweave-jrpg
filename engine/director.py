@@ -118,6 +118,10 @@ class ChatProvider:
   if cfg.get('language','zh')=='en':
    system=payload['messages'][0]['content'].replace('Use Chinese display names','Use English display names').replace('Use Chinese display text.','Use English display text.')
    payload['messages'][0]['content']=system+'\nWrite all NEW player-facing names, objectives, dialogue, descriptions and action labels in English. Preserve existing names, prior story text and all technical IDs exactly; do not translate the saved world. The language of the user setting does not override this output language.'
+  if cfg.get('provider')=='codex_subscription':
+   from .codex_provider import generate,CodexError
+   try:return generate(payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
+   except CodexError as exc:raise ProviderError(str(exc),getattr(exc,'usage',None)) from None
   effort=reasoning_effort(cfg)
   if cfg.get('deepseek_options',True): payload['thinking']={'type':'disabled' if effort=='none' else 'enabled'}
   if effort!='default': payload['reasoning_effort']=effort
@@ -174,18 +178,23 @@ class Director:
   self.task_metrics={}; self.task_history=[];self.task_sequence=0
   self.audit=NullAudit()
  def configure(self,cfg):
-  offline=bool(cfg.get('offline',True)); base=validate_url(cfg.get('base_url','https://api.deepseek.com')); model=str(cfg.get('model','deepseek-flash')).strip()
+  provider=cfg.get('provider','chat_completions')
+  if provider not in ('chat_completions','codex_subscription'):raise ProviderError('Unsupported generation provider.')
+  subscription=provider=='codex_subscription'
+  offline=bool(cfg.get('offline',True)); base='' if subscription else validate_url(cfg.get('base_url','https://api.deepseek.com')); model=str(cfg.get('model','gpt-5.6-luna' if subscription else 'deepseek-flash')).strip()
   if not model or len(model)>150: raise ProviderError('请输入有效模型名。')
-  key=str(cfg.get('api_key','')).strip()
+  if subscription and model!='gpt-5.6-luna':raise ProviderError('Subscription mode requires gpt-5.6-luna; no model fallback is configured.')
+  key='' if subscription else str(cfg.get('api_key','')).strip()
   if not key and self.cfg and base==self.cfg['base_url']: key=self.cfg['api_key']
   if not key and official_deepseek(base): key=os.environ.get('DEEPSEEK_API_KEY','')
-  if not offline and not key and urllib.parse.urlsplit(base).hostname not in ('localhost','127.0.0.1','::1'): raise ProviderError('在线模式需要 API Key；密钥仅保留在本机进程内存。')
+  if not subscription and not offline and not key and urllib.parse.urlsplit(base).hostname not in ('localhost','127.0.0.1','::1'): raise ProviderError('在线模式需要 API Key；密钥仅保留在本机进程内存。')
   limit=int(cfg.get('max_calls',60))
   if not 1<=limit<=1000: raise ProviderError('调用上限应为 1～1000。')
   language=cfg.get('language','zh')
   if language not in ('zh','en'):raise ProviderError('Unsupported language')
-  effort=reasoning_effort(cfg)
-  self.cfg=dict(language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
+  effort=reasoning_effort(dict(cfg,deepseek_options=False,reasoning_effort=cfg.get('reasoning_effort','high'))) if subscription else reasoning_effort(cfg)
+  if subscription and effort not in ('none','low','medium','high','xhigh','max'):raise ProviderError('Unsupported Luna reasoning effort.')
+  self.cfg=dict(provider=provider,language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=False if subscription else bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
   self.audit.add_secret(key)
   self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit)
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
@@ -277,7 +286,7 @@ class Director:
      source=metrics.get('source','prefetch'),started_at=metrics.get('started_at'),started_steps=metrics.get('started_steps'),
      elapsed_seconds=round(time.monotonic()-metrics.get('_start',time.monotonic()),1),attempts=metrics.get('attempts',0)))
   return copy.deepcopy(dict(failed_tasks=failed_tasks,active_tasks=active_tasks,task_history=self.task_history,repair_calls=self.repair_calls,normalized_responses=self.normalized_responses,normalization_count=self.normalization_count,recent_corrections=self.recent_corrections,
-   prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
+   prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),provider=(self.cfg or {}).get('provider',''),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
  def _next_job(self):
   w=self.world; s=w.state
   if s and s.get('game_over'):return None
@@ -369,6 +378,7 @@ class Director:
      request_started=time.monotonic()
      self.audit.emit('model.request',kind=kind,target=target,call=request_number,repair=bool(repair),model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
      model_started=time.monotonic()
+     cfg['_cancel_event']=self.stop_event
      try:raw,usage=ChatProvider(cfg).generate(request_ctx,kind,repair)
      finally:
       with self.world.lock:self.task_metrics[job_key]['request_seconds']+=time.monotonic()-model_started

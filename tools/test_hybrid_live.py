@@ -22,6 +22,7 @@ SCENES={
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live',action='store_true')
+    parser.add_argument('--provider',choices=('codex_subscription','chat_completions'),default='codex_subscription')
     parser.add_argument('--scene',choices=SCENES,default='town')
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--baseline',action='store_true')
@@ -33,7 +34,8 @@ def main():
     parser.add_argument('--max-calls',type=int,default=2)
     parser.add_argument('--retry-from',type=Path,help='Repair the last recorded response for the same opening premise')
     args=parser.parse_args()
-    if not args.live or not os.environ.get('DEEPSEEK_API_KEY'):parser.error('--live and an existing DEEPSEEK_API_KEY are required')
+    if not args.live:parser.error('--live is required for generation')
+    if args.provider=='chat_completions' and not os.environ.get('DEEPSEEK_API_KEY'):parser.error('DeepSeek requires an existing DEEPSEEK_API_KEY')
     if not 1<=args.max_calls<=8 or not 1<=args.steps<=5:parser.error('budget must be 1..8 calls and 1..5 steps')
     out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
     db=out/'world.sqlite3'
@@ -43,7 +45,8 @@ def main():
         record=json.loads(args.plan_from.read_text(encoding='utf-8'))[0]
         if not args.campaign or record['context']['setting']!=w.state['setting']:parser.error('A campaign plan with the same setting is required')
         w.apply_patch(record['raw'],w.context(kind='campaign'))
-    d.configure(dict(language=args.language,offline=False,hybrid_content=not args.baseline,max_calls=args.max_calls,reasoning_effort='low'))
+    subscription=args.provider=='codex_subscription'
+    d.configure(dict(provider=args.provider,model='gpt-5.6-luna' if subscription else 'deepseek-flash',language=args.language,offline=False,hybrid_content=not args.baseline,max_calls=args.max_calls,reasoning_effort='high' if subscription else 'low'))
     d.cfg['cooldown']=0
     if args.retry_from:
         from engine.schema import InvalidPatch

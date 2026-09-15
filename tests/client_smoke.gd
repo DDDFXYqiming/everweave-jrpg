@@ -14,9 +14,12 @@ func _run() -> void:
 	await process_frame
 	await process_frame
 	assert(main.home.visible)
-	assert(main.mode_select.selected == 0)
+	assert(main.mode_select.selected == 3)
 	assert(main.online_settings.visible)
-	assert(main._configuration().reasoning_effort == "low")
+	assert(main._configuration().reasoning_effort == "high")
+	assert(main._configuration().provider=="codex_subscription")
+	assert(main._configuration().model=="gpt-5.6-luna" and main._configuration().api_key=="")
+	assert(not main.key_input.visible)
 	main._set_effort("max")
 	assert(main._configuration().reasoning_effort == "max")
 	main.mode_select.select(2)

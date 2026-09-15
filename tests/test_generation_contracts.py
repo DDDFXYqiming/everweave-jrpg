@@ -172,9 +172,11 @@ class ConfigurationPersistence(unittest.TestCase):
                 self.assertEqual(s['director']['calls'],0)
             finally:restored.server_close();restored.world.store.close()
 
-    def test_old_settings_gain_low_default(self):
+    def test_old_settings_gain_subscription_high_default(self):
         with tempfile.TemporaryDirectory() as td:
             (Path(td)/'settings.json').write_text(json.dumps({'offline':False,'deepseek_options':True}),encoding='utf-8')
             server=GameServer(('127.0.0.1',0),Path(td)/'world.sqlite3','test-session')
-            try:self.assertEqual(server.snapshot()['configuration']['reasoning_effort'],'low')
+            try:
+                self.assertEqual(server.snapshot()['configuration']['reasoning_effort'],'high')
+                self.assertEqual(server.snapshot()['configuration']['provider'],'codex_subscription')
             finally:server.server_close();server.world.store.close()

@@ -42,7 +42,7 @@ Model output enters the game through a validated JSON content contract. It canno
 
 Everweave is still a research prototype. Campaign planning, region generation, rule validation, local execution, asset composition, the travel map, and the bilingual interface are connected in the current project. Automated tests and native Godot checks cover the main paths through these features.
 
-Full chapter playthroughs, solvability for arbitrary generated puzzles, coverage across themes, and long-running generation quality still need continued testing in real saves. Online generation can take several minutes and may incur model API charges. A fresh data directory is recommended for a first run.
+Full chapter playthroughs, solvability for arbitrary generated puzzles, coverage across themes, and long-running generation quality still need continued testing in real saves. Online generation can take several minutes and consumes the selected service's allowance. A fresh data directory is recommended for a first run.
 
 ## Screenshots
 
@@ -70,11 +70,11 @@ If Godot is on PATH, `python launch.py` is enough. On the first run, the launche
 
 ## Create a world
 
-Choose DeepSeek in the connection settings, or provide a service compatible with Chat Completions and JSON output. Enter the API key in settings or provide `DEEPSEEK_API_KEY` through the environment.
+The default is **Codex subscription · GPT-5.6 Luna / high**. Install Codex CLI and sign in through `codex login` with ChatGPT. The game uses that subscription login without an OpenAI API key. Login, model or usage failures stop generation; there is no automatic paid-provider fallback. See [setup and validation](docs/CODEX_SUBSCRIPTION.md).
 
 An online new world first generates its game specification and campaign plan, then prepares the starting region. The settings control request limits, reasoning level, and budget. The generation director prepares nearby regions, and failed tasks expose their diagnostic details with a retry action.
 
-Online generation may incur model API charges. Initial world creation and new region preparation can take time. Use the offline check when you only want to verify installation and basic controls.
+Subscription mode shares your Codex usage allowance; it is not unlimited. DeepSeek and compatible paid APIs remain explicit manual choices, and the launcher no longer loads a DeepSeek key by default. Initial world creation and new region preparation can take time. Use the offline check to verify installation and basic controls without model calls.
 
 ```powershell
 python launch.py --demo --data-dir ./userdata/offline-demo

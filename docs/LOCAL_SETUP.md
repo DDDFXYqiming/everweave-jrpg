@@ -16,7 +16,9 @@ Linux 使用同样的 Python 启动器，将 `--godot` 指向对应平台的可�
 
 ## 模型连接
 
-在设置的连接页选择 DeepSeek，或填写兼容 Chat Completions 与 JSON 输出的接口。填写 API Key 后应用配置。PowerShell 启动器也支持既有的本地 DPAPI 加密凭据，环境变量 `DEEPSEEK_API_KEY` 优先。
+默认连接为 **Codex 订阅 · GPT-5.6 Luna / high**。本机安装 Codex CLI 并通过 `codex login` 选择 ChatGPT 登录后，直接在游戏应用配置即可。订阅登录与 API 计费是不同方式，游戏会检查登录类型、实际模型列表和思考等级；不会读取订阅令牌或回退到 API Key。[详细说明](CODEX_SUBSCRIPTION.md)
+
+若主动选择 DeepSeek 或兼容 Chat Completions API，再使用该服务的密钥。启动器默认不解密 DeepSeek 本地凭据；明确运行 `.\Start.ps1 -LoadDeepSeekKey` 才加载已有 `deepseek.local.key`。环境变量和手动输入仍适用于对应 API 模式。
 
 密钥不会写入游戏存档。不要把密钥放进世界设定、代码或问题反馈。更换模型服务时，需要确认新服务对应的密钥与模型名称。
 

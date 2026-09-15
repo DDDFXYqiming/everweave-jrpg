@@ -26,13 +26,15 @@ class GameServer(ThreadingHTTPServer):
   if address[0]!='127.0.0.1': raise ValueError('Only IPv4 loopback binding is supported')
   self.token=token; self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
   self.snapshot_sequence=0
-  self.preference_keys=('offline','base_url','model','deepseek_options','reasoning_effort','max_calls','hybrid_content','language')
-  self.preferences=dict(offline=False,base_url='https://api.deepseek.com',model='deepseek-flash',deepseek_options=True,reasoning_effort='low',max_calls=60,hybrid_content=True,language='zh')
+  self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','hybrid_content','language')
+  self.preferences=dict(provider='codex_subscription',offline=False,base_url='',model='gpt-5.6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,hybrid_content=True,language='zh')
   self.preference_path=None if str(save_path)==':memory:' else Path(save_path).with_name('settings.json')
   if self.preference_path and self.preference_path.exists():
    try:
     saved=json.loads(self.preference_path.read_text(encoding='utf-8'))
-    if isinstance(saved,dict): self.preferences.update({k:saved[k] for k in self.preference_keys if k in saved})
+    if isinstance(saved,dict):
+     allowed=self.preference_keys if saved.get('provider') else ('offline','max_calls','hybrid_content','language')
+     self.preferences.update({k:saved[k] for k in allowed if k in saved})
    except (OSError,ValueError): pass
   super().__init__(address,Handler)
   self.audit=NullAudit() if str(save_path)==':memory:' else AuditLog(Path(save_path).parent/'logs')
@@ -54,7 +56,12 @@ class GameServer(ThreadingHTTPServer):
   self.snapshot_sequence+=1; s['snapshot_sequence']=self.snapshot_sequence
   s['configuration']={k:(self.director.cfg or self.preferences)[k] for k in self.preference_keys}
   base=s['configuration']['base_url']
-  s['configuration']['credential_available']=bool((self.director.cfg or {}).get('api_key') or (official_deepseek(base) and os.environ.get('DEEPSEEK_API_KEY')))
+  if s['configuration']['provider']=='codex_subscription':
+   from .codex_provider import executable,CodexError
+   try:executable();s['configuration']['codex_available']=True
+   except CodexError:s['configuration']['codex_available']=False
+   s['configuration']['credential_available']=False  # Login is checked by app-server, never guessed from a file.
+  else:s['configuration']['credential_available']=bool((self.director.cfg or {}).get('api_key') or (official_deepseek(base) and os.environ.get('DEEPSEEK_API_KEY')))
   return s
 
 class Handler(BaseHTTPRequestHandler):
