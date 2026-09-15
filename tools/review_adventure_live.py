@@ -20,7 +20,6 @@ def main():
     parser.add_argument('--provider',choices=('chatgpt_subscription','codex_subscription','chat_completions'),default='chatgpt_subscription')
     parser.add_argument('--steps',type=int,default=1);parser.add_argument('--max-calls',type=int,default=2)
     parser.add_argument('--repair-from',type=Path,help='Reuse the last rejected output from a compatible trace; validate it before requesting repair')
-    parser.add_argument('--borrow-access-from',type=Path,help='Read a valid ChatGPT access token for this test only; never copy/refresh/write it')
     args=parser.parse_args()
     if not args.live:parser.error('--live is required')
     if args.provider=='chat_completions' and not os.environ.get('DEEPSEEK_API_KEY'):parser.error('DeepSeek requires an existing DEEPSEEK_API_KEY')
@@ -33,12 +32,6 @@ def main():
     w=World(Store(db));d=Director(w);subscription=args.provider in ('chatgpt_subscription','codex_subscription')
     audit=AuditLog(out/'logs');d.audit=audit
     d.configure(dict(provider=args.provider,model='gpt-5.6-luna' if subscription else 'deepseek-flash',offline=False,max_calls=args.max_calls,reasoning_effort='high' if subscription else 'low'));d.cfg['cooldown']=0
-    if args.borrow_access_from:
-        if args.provider!='chatgpt_subscription':parser.error('--borrow-access-from requires the direct subscription provider')
-        from engine.subscription_auth import load_loreweaver_access
-        token=load_loreweaver_access(args.borrow_access_from)
-        if not token:parser.error('no still-valid access token was found')
-        d.cfg['_subscription_token']=token
     if subscription:d.cfg['_codex_partial_dir']=str(out/'partial')
     if args.repair_from:
         from engine.schema import InvalidPatch
@@ -62,7 +55,7 @@ def main():
         with patch.object(ChatProvider,'generate',generate):
             for _ in range(args.steps):
                 if not d.step() or d.failed:break
-        result=dict(source=str(args.source),calls=d.calls,accepted=d.accepted,failed_tasks=d.status()['failed_tasks'],task_history=d.task_history,input_tokens=d.tokens_in,output_tokens=d.tokens_out)
+        result=dict(source=str(args.source),provider=args.provider,calls=d.calls,accepted=d.accepted,failed_tasks=d.status()['failed_tasks'],task_history=d.task_history,input_tokens=d.tokens_in,output_tokens=d.tokens_out)
         write('result.json',result);write('snapshot.json',dict(w.snapshot(),director=d.status()))
         print(json.dumps(result,ensure_ascii=False),flush=True)
         if d.failed:raise SystemExit(1)

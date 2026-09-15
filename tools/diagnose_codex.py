@@ -19,9 +19,9 @@ def main():
     parser.add_argument('--live',action='store_true');parser.add_argument('--source',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True);parser.add_argument('--timeout-seconds',type=int,default=660)
     parser.add_argument('--transport',choices=('direct','app-server'),default='direct')
-    parser.add_argument('--borrow-access-from',type=Path,help='Read a still-valid access token for this test only; never copy/refresh/write it')
+    parser.add_argument('--max-calls',type=int,default=3,help='Actual subscription requests; split regions need three')
     args=parser.parse_args()
-    if not args.live or not 60<=args.timeout_seconds<=900:parser.error('--live and a bounded timeout of 60..900 seconds are required')
+    if not args.live or not 60<=args.timeout_seconds<=900 or not 1<=args.max_calls<=5:parser.error('--live, timeout 60..900 and max-calls 1..5 are required')
     out=args.output.resolve();out.mkdir(parents=True,exist_ok=True);db=out/'world.sqlite3'
     if db.exists():parser.error('use a fresh diagnostic output directory')
     source=sqlite3.connect(args.source.resolve().as_uri()+'?mode=ro',uri=True);dest=sqlite3.connect(db)
@@ -29,13 +29,7 @@ def main():
     finally:source.close();dest.close()
     w=World(Store(db));d=Director(w);audit=AuditLog(out/'logs');d.audit=audit
     provider='chatgpt_subscription' if args.transport=='direct' else 'codex_subscription'
-    d.configure(dict(provider=provider,model='gpt-5.6-luna',reasoning_effort='high',offline=False,max_calls=1))
-    if args.borrow_access_from:
-        if provider!='chatgpt_subscription':parser.error('--borrow-access-from is only for the direct transport')
-        from engine.subscription_auth import load_loreweaver_access
-        token=load_loreweaver_access(args.borrow_access_from)
-        if not token:parser.error('no still-valid access token was found')
-        d.cfg['_subscription_token']=token
+    d.configure(dict(provider=provider,model='gpt-5.6-luna',reasoning_effort='high',offline=False,max_calls=args.max_calls))
     d.cfg.update(codex_timeout_seconds=args.timeout_seconds,_codex_partial_dir=str(out/'partial'))
     # Print only counters and stages. The reasoning text never enters these logs.
     def progress(p):print(json.dumps({k:p[k] for k in ('stage','elapsed_seconds','last_event_age','reasoning_chars','output_chars','errors','retries')},ensure_ascii=False),flush=True)
@@ -53,7 +47,7 @@ def main():
             record['seconds']=round(time.monotonic()-start,3);traces.append(record);write('trace.json',traces)
     try:
         with patch.object(ChatProvider,'generate',generate):d.step()
-        result=dict(provider=provider,model='gpt-5.6-luna',effort='high',borrowed_access=bool(args.borrow_access_from),calls=d.calls,accepted=d.accepted,
+        result=dict(provider=provider,model='gpt-5.6-luna',effort='high',calls=d.calls,accepted=d.accepted,
             failed_tasks=d.status()['failed_tasks'],task_history=d.task_history,ready=bool(w.region()),input_tokens=d.tokens_in,output_tokens=d.tokens_out)
         write('result.json',result);write('snapshot.json',dict(w.snapshot(),director=d.status()))
         print(json.dumps(result,ensure_ascii=False),flush=True)

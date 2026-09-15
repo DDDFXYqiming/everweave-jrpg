@@ -2,6 +2,8 @@
 
 > 阶段说明：此文记录章节系统之前的地区/反应调度。章节世界新增 campaign 任务，并禁止用 reaction.locations/future_updates 改写章节连接。当前调度见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
+当前在线默认使用 ChatGPT 订阅直连；下文的 DeepSeek 请求和旧耗时属于历史实验。
+
 ## 原因与处理
 
 预生成原本就会由两个后台线程启动，并覆盖全部出口及下一层。主要缺陷是地区请求与当前地图共享 `story_revision`：玩家交互、开箱或战斗推进故事时，尚在生成的另一地区被丢弃。受控并发复现中，两次请求均成为过期结果，两个出口都未准备好。

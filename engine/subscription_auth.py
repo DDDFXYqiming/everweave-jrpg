@@ -199,17 +199,3 @@ class LoginManager:
                 time.sleep(login.interval)
         except Exception as exc:
             with self.lock:self.phase='failed';self.error=str(exc);self.login=None
-
-
-def load_loreweaver_access(path):
-    """Read a still-valid access token for one migration test; never refresh/write its DB."""
-    import sqlite3
-    source=Path(path)
-    if not source.is_file():return None
-    db=sqlite3.connect(source.resolve().as_uri()+'?mode=ro',uri=True)
-    try:row=db.execute("SELECT value FROM kv WHERE user_key='' AND store_key='runtime_config.credentials'").fetchone()
-    finally:db.close()
-    entry=(json.loads(row[0]).get('chatgpt') if row else None) or {}
-    try:token=Token(str(entry.get('access_token') or ''),'',float(entry.get('expires_at') or 0),str(entry.get('account_id') or ''))
-    except (TypeError,ValueError):return None
-    return token if token.access_token and not token.expired() else None

@@ -16,7 +16,7 @@
 
 DeepSeek/兼容 API 是手动选项。PowerShell 启动器默认不解密 `deepseek.local.key`；只有显式 `-LoadDeepSeekKey` 才加载它。订阅模式即使收到 API Key 字段也不会使用。
 
-旧 App Server 对照仍可通过测试工具的 `--provider codex_subscription` 调用，并可用 `EVERWEAVE_CODEX_BIN` 指定可执行文件。正常游戏不再需要 Codex CLI。
+旧 App Server 对照仍可通过测试工具的 `--provider codex_subscription` 调用，并可用 `EVERWEAVE_CODEX_BIN` 指定可执行文件。它只用于历史性能对照，正常游戏不需要 Codex CLI。
 
 ## 接入边界
 
@@ -24,7 +24,7 @@ DeepSeek/兼容 API 是手动选项。PowerShell 启动器默认不解密 `deeps
 
 授权由 `subscription_auth.py` 管理。Windows 上访问与刷新令牌通过当前用户 DPAPI 加密，默认保存到 `%LOCALAPPDATA%/EverweaveJRPG/chatgpt-subscription.bin`；不写入世界存档、仓库或日志。Everweave 不读写 Codex `auth.json`，也不改全局 `config.toml`。
 
-只收集最终回答，排除中间 commentary 与重复流片段；用量读取 Codex 的 token 通知。对“完整值已经结束，只漏掉末尾少量容器括号”的情况，可补齐最多四个闭合括号，并记录 `closed_json_containers`；字符串被截断、缺少值或括号错配仍失败。之后继续通过原有完整游戏契约校验，绝不自动填写场景、物品或规则。
+只收集最终回答，排除中间状态说明；用量读取 `response.completed` 的 usage。对“完整值已经结束，只漏掉末尾少量容器括号”的情况，可补齐最多四个闭合括号，并记录 `closed_json_containers`；字符串被截断、缺少值或括号错配仍失败。之后继续通过原有完整游戏契约校验，绝不自动填写场景、物品或规则。
 
 直连请求使用 15 分钟硬上限和 3 分钟 SSE 无数据上限；只要仍有事件就不会因总时长达到 300 秒而被误杀。连接错误和超时不自动重放；若未收到最终用量，零统计值不表示请求没有消耗订阅额度。
 
@@ -42,7 +42,7 @@ python tools/test_hybrid_live.py --live --provider chatgpt_subscription --campai
 
 ## 2026-09-15 初次接入结果
 
-- 本机 `codex login status` 显示 ChatGPT 登录；App Server 返回 Pro，模型列表确认 `gpt-5.6-luna` 支持 high。测试后登录方式保持不变。
+- 初次对照时本机 `codex login status` 显示 ChatGPT 登录；App Server 返回 Pro，模型列表确认 `gpt-5.6-luna` 支持 high。这个结果只属于旧适配器，不代表当前游戏仍依赖 Codex CLI。
 - 一次极小 JSON 传输测试成功，耗时约 **6.6 秒**，记录的输入为 3202、输出为 9 tokens。这只证明通道连通。
 - 游戏内容初次试跑进行了 **4 次实际模型请求**：前两次章节输出都漏了末尾括号；本地补齐后暴露多余字段，第三次定向修复使章节计划通过。第四次首地区请求达到本地旧 300 秒总时限，被停止，当时没有阶段日志可以判断是否仍活跃。
 - 另有一次 App Server 在加载进程级 MCP 配置时退出，发生在模型请求开始之前。已修复 CLI 对配置键的兼容问题，并重新验证订阅预检通过。
@@ -75,7 +75,7 @@ App Server 的实际 token 通知返回 `modelContextWindow=828400`，对应显�
 
 迁移前的 App Server 路径每次执行初始化、账户/模型/额度查询、临时线程和回合协议。迁移后直接进行 OAuth 刷新与 Responses SSE，不启用工具、文件、浏览器或智能体线程。
 
-为避免破坏另一个项目的授权，速度测试只从 Loreweaver 数据库读取仍有效的 access token 到内存；没有复制 refresh token，没有修改其数据库。正式运行使用 Everweave 自己的设备授权。
+早期速度对照曾读取另一个项目的短期 access token 到内存，没有复制 refresh token，也没有修改对方数据库。该迁移辅助代码已在公开前删除；当前测试和正式运行只使用 Everweave 自己的设备授权。
 
 | 测试 | App Server | 直连 |
 |---|---:|---:|
@@ -90,6 +90,6 @@ Everweave 独立授权已在 Windows 实测。第一次浏览器确认已换回�
 
 开启 Responses JSON Object 后，对首份无效地区做定向修复：约 **107 秒**开始输出，**232.3 秒**完成，输入 14454、输出 12455、推理 5483 tokens，返回 JSON 本身合法。Luna 使用了 `{"and":[...]}`、`{"eq":[...]}`、`{"not":...}` 简写；这些与正式 `op/args` 结构一一对应，现由本地归一化并保留修正记录。处理后第一份响应直接通过，无须第二次 High 请求，生成的 44×26“黑檐夜市”含 7 个实体和 10 个动作，快速试玩用 16 次正常移动抵达秋叶并打开谈判。
 
-此次迁移和诊断没有调用 DeepSeek。Loreweaver 授权只作为两次直连性能/修复测试的内存 access token 来源；未复制 refresh token，未修改其数据库。正式结果使用 Everweave 自己的授权。
+此次迁移和诊断没有调用 DeepSeek。公开版本不读取其他项目的授权数据库；正式结果使用 Everweave 自己的设备授权。
 
 最终 **309 项 Python 测试通过**，Godot 脚本导入以及原生内容、混合素材、剧情/跨区能力、任务界面和敌人行为检查通过。重启本机服务后再次读取到 `phase=ready / provider=chatgpt_subscription / model=gpt-5.6-luna / effort=high`，证明授权不是仅在首次登录进程内有效。

@@ -14,6 +14,10 @@ dist/
 *.pem
 *credentials*
 *secrets*
+chatgpt-subscription.bin
+.subscription-*.tmp
+*.token
+*.auth
 *.sqlite
 *.sqlite3
 *.sqlite3-*

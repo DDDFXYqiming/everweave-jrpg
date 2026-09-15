@@ -1,5 +1,7 @@
 # 文档
 
+当前 `main` 的默认在线入口是 Everweave 自己的 ChatGPT 设备 OAuth，使用 GPT-5.6 Luna / high 和 Responses SSE。下列标为阶段记录的文档保留旧版本的实验数字与问题，不应当覆盖当前代码事实。
+
 ## 使用与开发
 
 - [使用指南](LOCAL_SETUP.md) 包含安装、模型连接和独立存档
