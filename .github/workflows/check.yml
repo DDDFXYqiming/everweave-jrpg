@@ -79,12 +79,12 @@ jobs:
           cat /tmp/terrain.log
           grep -q 'TERRAIN_MATERIALS_OK' /tmp/terrain.log
           ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/terrain.log
-          timeout 40 "$GODOT_BIN" --headless --path . --script res://tests/i18n_smoke.gd > /tmp/i18n.log 2>&1
+          timeout 40 "$GODOT_BIN" --headless --path . --script res://tests/i18n_smoke.gd > /tmp/i18n.log 2>&1 || { cat /tmp/i18n.log; exit 1; }
           cat /tmp/i18n.log
           grep -q 'I18N_OK' /tmp/i18n.log
           ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/i18n.log
           python3 tools/build_campaign_fixture.py
-          timeout 40 "$GODOT_BIN" --headless --path . --script res://tests/campaign_client_smoke.gd > /tmp/campaign.log 2>&1
+          timeout 40 "$GODOT_BIN" --headless --path . --script res://tests/campaign_client_smoke.gd > /tmp/campaign.log 2>&1 || { cat /tmp/campaign.log; exit 1; }
           cat /tmp/campaign.log
           grep -q 'CAMPAIGN_CLIENT_OK' /tmp/campaign.log
           ! grep -E 'SCRIPT ERROR|Parse Error|ERROR:' /tmp/campaign.log

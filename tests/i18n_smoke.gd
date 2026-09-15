@@ -36,7 +36,7 @@ func _run() -> void:
 	assert(main._configuration().base_url=="https://example.invalid/api")
 	assert(main._configuration().reasoning_effort=="high")
 	assert("New journey" in texts(main.home))
-	assert("Current objectives" in texts(main.game))
+	assert(main.task_button.tooltip_text=="Objectives · Q")
 	assert("Music volume" in texts(main.home))
 	var snapshot: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/demo_snapshot.json"))
 	main._accept_snapshot(snapshot)
@@ -48,7 +48,7 @@ func _run() -> void:
 	main._change_language(0,false,false)
 	await process_frame
 	assert(main.language_select.selected==0)
-	assert("当前待办" in texts(main.game))
+	assert(main.task_button.tooltip_text=="行动记录 · Q")
 	assert(JSON.stringify(main.state)==original,"Language switch changed the saved world's text or state")
 	assert(main._configuration().language=="zh")
 	main.queue_free()
