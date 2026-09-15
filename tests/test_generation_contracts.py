@@ -178,5 +178,5 @@ class ConfigurationPersistence(unittest.TestCase):
             server=GameServer(('127.0.0.1',0),Path(td)/'world.sqlite3','test-session')
             try:
                 self.assertEqual(server.snapshot()['configuration']['reasoning_effort'],'high')
-                self.assertEqual(server.snapshot()['configuration']['provider'],'codex_subscription')
+                self.assertEqual(server.snapshot()['configuration']['provider'],'chatgpt_subscription')
             finally:server.server_close();server.world.store.close()

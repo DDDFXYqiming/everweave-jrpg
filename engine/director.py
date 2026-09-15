@@ -123,6 +123,10 @@ class ChatProvider:
    from .codex_provider import generate,CodexError
    try:return generate(payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
    except CodexError as exc:raise ProviderError(str(exc),getattr(exc,'usage',None),diagnostics=getattr(exc,'diagnostics',None)) from None
+  if cfg.get('provider')=='chatgpt_subscription':
+   from .chatgpt_provider import generate,DirectError
+   try:return generate(payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
+   except DirectError as exc:raise ProviderError(str(exc),exc.usage,diagnostics={'transport':'direct_sse','category':exc.category}) from None
   effort=reasoning_effort(cfg)
   if cfg.get('deepseek_options',True): payload['thinking']={'type':'disabled' if effort=='none' else 'enabled'}
   if effort!='default': payload['reasoning_effort']=effort
@@ -181,8 +185,8 @@ class Director:
   self.codex_partial_dir=None
  def configure(self,cfg):
   provider=cfg.get('provider','chat_completions')
-  if provider not in ('chat_completions','codex_subscription'):raise ProviderError('Unsupported generation provider.')
-  subscription=provider=='codex_subscription'
+  if provider not in ('chat_completions','codex_subscription','chatgpt_subscription'):raise ProviderError('Unsupported generation provider.')
+  subscription=provider in ('codex_subscription','chatgpt_subscription')
   offline=bool(cfg.get('offline',True)); base='' if subscription else validate_url(cfg.get('base_url','https://api.deepseek.com')); model=str(cfg.get('model','gpt-5.6-luna' if subscription else 'deepseek-flash')).strip()
   if not model or len(model)>150: raise ProviderError('请输入有效模型名。')
   if subscription and model!='gpt-5.6-luna':raise ProviderError('Subscription mode requires gpt-5.6-luna; no model fallback is configured.')

@@ -92,6 +92,13 @@ class PacingTests(unittest.TestCase):
         parsed=parse_patch(raw,'region')['region']['audio']
         a,b=(parsed['bindings'][k] for k in ('move','interact'))
         self.assertNotEqual(a,b);self.assertEqual(parsed['cues'][a]['volume'],0.2);self.assertEqual(parsed['cues'][b]['volume'],0.8)
+    def test_unambiguous_expression_shorthand_is_local_normalization(self):
+        raw=authored_adventure_region(self.w,'r0');action=raw['region']['program']['actions'][0]
+        action['when']={'and':[{'eq':[1,1]},{'not':False}]};changes=[]
+        from engine.schema import parse_patch
+        parsed=parse_patch(raw,'region',self.w.validation_context(self.w.context('r0')),changes)
+        self.assertEqual(parsed['region']['program']['actions'][0]['when'],{'op':'and','args':[{'op':'eq','args':[1,1]},{'op':'not','args':[False]}]})
+        self.assertEqual(sum(c['operation']=='expression_alias' for c in changes),3)
     def enemy(self,mode='hunt',at=(12,5),footprint=None):
         s=self.w.state;s['game_spec']['systems']['combat']=True;s['game_spec']['resources'].append(dict(id='hp',label='体力',initial=24,max=24,display='bar'));s['player'].update(hp=24,max_hp=24,x=9,y=5)
         r=self.w.region();e=dict(id='r0:guard',local_id='guard',kind='enemy',name='警卫',monster='sentinel',tier=1,move='strike',x=at[0],y=at[1],spent=False,solid=True,behavior=encounters.validate(dict(mode=mode,radius=6,pace=1,patrol=[[12,5],[18,5]])))

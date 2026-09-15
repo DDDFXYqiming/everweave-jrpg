@@ -68,11 +68,11 @@ python launch.py --godot ./tools/Godot.exe
 
 ## 创建世界
 
-默认使用 **Codex 订阅 · GPT-5.6 Luna / high**。本机需安装 Codex CLI，并通过 `codex login` 登录 ChatGPT。游戏复用订阅登录，不需要 OpenAI API Key；模型或额度不可用时停止，不自动回退到收费服务。[接入与验证说明](docs/CODEX_SUBSCRIPTION.md)
+默认使用 **ChatGPT 订阅直连 · GPT-5.6 Luna / high**。在连接页为 Everweave 完成一次官方设备授权后，游戏直接读取 Responses SSE，不需要 Codex CLI 或 OpenAI API Key；模型或额度不可用时停止，不自动回退到收费服务。[接入与验证说明](docs/CODEX_SUBSCRIPTION.md)
 
 在线新建世界会先生成游戏规格和章节计划，再生成开局地区。请求次数、思考等级和预算都可以在设置中调整。生成导演会准备附近地区，失败任务会显示具体错误并提供重试入口。
 
-订阅模式共享 Codex 使用额度，并非无限生成。DeepSeek 与其他兼容 API 仍可手动选择并按其规则计费，启动器默认不加载 DeepSeek 密钥。初次创建世界和准备新地区可能需要等待；只想检查安装和操作时，可以运行不调用模型的离线自检。
+订阅模式共享 ChatGPT/Codex 使用额度，并非无限生成。DeepSeek 与其他兼容 API 仍可手动选择并按其规则计费，启动器默认不加载 DeepSeek 密钥。初次创建世界和准备新地区可能需要等待；只想检查安装和操作时，可以运行不调用模型的离线自检。
 
 ```powershell
 python launch.py --demo --data-dir ./userdata/offline-demo

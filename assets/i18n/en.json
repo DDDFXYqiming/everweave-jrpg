@@ -293,5 +293,13 @@
   "默认 high。登录、额度或模型不可用时停止，不自动切换收费服务。": "Default: high. Stops on login, usage or model limits; no automatic paid-provider fallback.",
   "订阅 · ": "Subscription · ",
   " · 模型正在推理": " · Model is reasoning",
-  " · 已接收 %d 字符": " · Received %d characters"
+  " · 已接收 %d 字符": " · Received %d characters",
+  "ChatGPT 订阅直连 · GPT-5.6 Luna": "Direct ChatGPT subscription · GPT-5.6 Luna",
+  "直接使用 ChatGPT 订阅 Responses 流，不经过 Codex CLI。": "Use the ChatGPT subscription Responses stream directly, without Codex CLI.",
+  "登录 ChatGPT 订阅": "Sign in to ChatGPT subscription",
+  "ChatGPT 订阅已连接": "ChatGPT subscription connected",
+  "等待浏览器授权……": "Waiting for browser authorization…",
+  "凭据由当前 Windows 用户保护。": "Credential protected for this Windows user.",
+  "浏览器中输入代码：": "Enter this code in the browser: ",
+  "尚未为 Everweave 授权。": "Everweave is not authorized yet."
 }

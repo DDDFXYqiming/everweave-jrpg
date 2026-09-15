@@ -72,6 +72,9 @@ var base_input: LineEdit
 var model_input: LineEdit
 var key_input: LineEdit
 var key_label: Label
+var subscription_button: Button
+var subscription_label: Label
+var subscription_code_opened: String = ""
 var mode_select: OptionButton
 var hybrid_select: CheckBox
 var online_settings: VBoxContainer
@@ -370,7 +373,7 @@ func _build_home() -> void:
 	mode_select.add_item("DeepSeek",0)
 	mode_select.add_item(L.t("其他兼容服务"),1)
 	mode_select.add_item(L.t("离线演示"),2)
-	mode_select.add_item(L.t("Codex 订阅 · GPT-5.6 Luna"),3)
+	mode_select.add_item(L.t("ChatGPT 订阅直连 · GPT-5.6 Luna"),3)
 	connection.add_child(mode_select)
 	mode_help = _label(connection,"",13,MUTED)
 	online_settings = _vbox(connection)
@@ -380,6 +383,8 @@ func _build_home() -> void:
 	hybrid_select.tooltip_text = L.t("给模型提供匹配的图像、音频和能力候选，缺少的部分仍可原创。")
 	online_settings.add_child(hybrid_select)
 	provider_summary = _label(online_settings,"DeepSeek Flash",14,GOLD)
+	subscription_button=_button(online_settings,L.t("登录 ChatGPT 订阅"),func() -> void:_post("/subscription/login",{}))
+	subscription_label=_label(online_settings,"",12,MUTED)
 	custom_fields = GridContainer.new()
 	custom_fields.columns = 2
 	online_settings.add_child(custom_fields)
@@ -742,7 +747,7 @@ func _bar(parent: Node, fill: Color) -> ProgressBar:
 func _configuration() -> Dictionary:
 	var custom: bool = mode_select.selected == 1
 	if mode_select.selected==3:
-		return {"provider":"codex_subscription","language":L.language,"hybrid_content":hybrid_select.button_pressed,"offline":false,"base_url":"","model":"gpt-5.6-luna","api_key":"","deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
+		return {"provider":"chatgpt_subscription","language":L.language,"hybrid_content":hybrid_select.button_pressed,"offline":false,"base_url":"","model":"gpt-5.6-luna","api_key":"","deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
 	return {"provider":"chat_completions","language":L.language,"hybrid_content":hybrid_select.button_pressed,"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
 
 func _set_effort(effort: String) -> void:
@@ -766,7 +771,9 @@ func _mode_changed(index: int) -> void:
 	online_settings.visible = index != 2
 	custom_fields.visible = index == 1
 	provider_summary.visible = index in [0,3]
-	provider_summary.text = "GPT-5.6 Luna · Codex" if index==3 else "DeepSeek Flash"
+	provider_summary.text = "GPT-5.6 Luna · Responses SSE" if index==3 else "DeepSeek Flash"
+	subscription_button.visible=index==3
+	subscription_label.visible=index==3
 	key_input.visible=index!=3
 	key_label.visible=index!=3
 	key_input.text = ""
@@ -774,8 +781,20 @@ func _mode_changed(index: int) -> void:
 	key_input.placeholder_text = L.t("留空使用此服务已有的密钥")
 	if index == 0: key_input.placeholder_text = L.t("留空使用启动器加载的 DeepSeek 密钥")
 	if index==3:
-		mode_help.text=L.t("使用本机 Codex 的 ChatGPT 订阅登录，共享订阅额度，无需 API 密钥。")
+		mode_help.text=L.t("直接使用 ChatGPT 订阅 Responses 流，不经过 Codex CLI。")
 		effort_help.text=L.t("默认 high。登录、额度或模型不可用时停止，不自动切换收费服务。")
+	_subscription_view()
+
+func _subscription_view() -> void:
+	if not is_instance_valid(subscription_button):return
+	var info: Dictionary=state.get("subscription",{}) if state.get("subscription") is Dictionary else {}
+	var phase: String=str(info.get("phase","required"))
+	subscription_button.disabled=phase in ["pending","ready"]
+	subscription_button.text=L.t("ChatGPT 订阅已连接") if phase=="ready" else (L.t("等待浏览器授权……") if phase=="pending" else L.t("登录 ChatGPT 订阅"))
+	subscription_label.text=L.t("凭据由当前 Windows 用户保护。") if phase=="ready" else (L.t("浏览器中输入代码：")+str(info.get("user_code","")) if phase=="pending" else str(info.get("error",L.t("尚未为 Everweave 授权。"))))
+	if phase=="pending" and str(info.get("user_code",""))!=subscription_code_opened:
+		subscription_code_opened=str(info.get("user_code",""))
+		OS.shell_open(str(info.get("verification_url","")))
 
 func _sync_configuration() -> void:
 	var cfg: Dictionary = state.get("configuration", {})
@@ -785,7 +804,7 @@ func _sync_configuration() -> void:
 	budget_input.value = int(cfg.get("max_calls", 60))
 	hybrid_select.button_pressed = bool(cfg.get("hybrid_content",true))
 	var index: int = 2 if bool(cfg.get("offline", false)) else (0 if base_input.text == "https://api.deepseek.com" and model_input.text == "deepseek-flash" and bool(cfg.get("deepseek_options", true)) else 1)
-	if not bool(cfg.get("offline",false)) and cfg.get("provider","")=="codex_subscription":index=3
+	if not bool(cfg.get("offline",false)) and cfg.get("provider","") in ["chatgpt_subscription","codex_subscription"]:index=3
 	mode_select.select(index)
 	_mode_changed(index)
 	_set_effort(str(cfg.get("reasoning_effort", "low")))
@@ -962,9 +981,13 @@ func _accept_snapshot(data: Dictionary) -> void:
 	if first_snapshot:
 		first_snapshot = false
 		_sync_configuration()
+		if mode_select.selected==3 and not bool(state.get("subscription",{}).get("ready",false)):_home_tab(2)
 		if str(state.get("configuration",{}).get("language","zh"))!=L.language:_send_language()
 		if state.get("region") is Dictionary:
 			setting_input.text = str(state.get("setting", setting_input.text))
+	_subscription_view()
+	if mode_select.selected==3 and not bool(state.get("subscription",{}).get("ready",false)):
+		start_button.disabled=true;continue_button.disabled=true
 	form_error.text = L.system_text(last_action_error) if not last_action_error.is_empty() else L.t("本机引擎已连接。") + (L.t("找到存档，可继续旅途。") if bool(state.get("started", false)) else "")
 	_render()
 
@@ -1013,7 +1036,7 @@ func _render() -> void:
 	var mode_text: String = L.t("离线演示 · 非 LLM") if mode == "offline_demo" else L.t("在线 · ") + str(d.get("model", ""))
 	if mode == "not_configured": mode_text = L.t("尚未配置导演")
 	if mode == "live_llm": mode_text += L.t(" · 思考 ") + str(d.get("reasoning_effort", "low"))
-	if mode=="live_llm" and d.get("provider","")=="codex_subscription":mode_text=L.t("订阅 · ")+str(d.get("model",""))+" · "+str(d.get("reasoning_effort","high"))
+	if mode=="live_llm" and d.get("provider","") in ["chatgpt_subscription","codex_subscription"]:mode_text=L.t("订阅 · ")+str(d.get("model",""))+" · "+str(d.get("reasoning_effort","high"))
 	var active_lines: Array[String] = []
 	for task in d.get("active_tasks", []):
 		var purpose: String = L.t("世界变化") if str(task.kind) == "reaction" else (L.t("更新草案") if str(task.get("source", "")) == "refresh" else L.t("自动预生成"))

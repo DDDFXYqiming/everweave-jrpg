@@ -99,7 +99,7 @@ class CodexProviderTests(unittest.TestCase):
             path=Path(folder)/'world.sqlite3';path.with_name('settings.json').write_text(json.dumps({'model':'deepseek-flash','base_url':'https://api.deepseek.com','reasoning_effort':'low','max_calls':7}))
             server=GameServer(('127.0.0.1',0),path,'test')
             try:
-                self.assertEqual(server.preferences['provider'],'codex_subscription')
+                self.assertEqual(server.preferences['provider'],'chatgpt_subscription')
                 self.assertEqual(server.preferences['model'],MODEL);self.assertEqual(server.preferences['reasoning_effort'],'high');self.assertEqual(server.preferences['max_calls'],7)
             finally:server.server_close();server.world.store.close()
 

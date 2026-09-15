@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Launch Godot and its local state helper, preparing missing local asset caches.
-The paid API credential is entered in the game (or supplied by DEEPSEEK_API_KEY).
+ChatGPT subscription OAuth is stored outside saves; paid APIs are explicit options.
 The only command-line token is a per-launch local loopback session credential.
 """
 from __future__ import annotations

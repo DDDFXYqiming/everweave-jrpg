@@ -1,45 +1,41 @@
 # Codex 订阅接入 · GPT-5.6 Luna / high
 
-当前默认生成服务为 `codex_subscription`，模型固定 `gpt-5.6-luna`，默认思考等级 `high`。游戏通过本机 Codex App Server 使用已有 ChatGPT 登录，不向 OpenAI Platform API 提交 API Key。官方区分 [ChatGPT 订阅登录与 API Key 按量登录](https://learn.chatgpt.com/docs/auth)；集成协议见 [Codex App Server](https://learn.chatgpt.com/docs/app-server)。
+当前默认生成服务为 `chatgpt_subscription`，模型固定 `gpt-5.6-luna`，思考等级固定 `high`。Everweave 使用独立设备 OAuth，直接读取 ChatGPT Codex Responses SSE，不向 OpenAI Platform API 提交 API Key。官方区分 [ChatGPT 订阅登录与 API Key 按量登录](https://learn.chatgpt.com/docs/auth)。直连实现参考同机 Loreweaver 已验证的订阅适配；该 ChatGPT 后端不是官方文档面向普通第三方应用承诺的公共 API，若上游协议改变，需要同步维护。
 
 ## 使用
 
-本机需安装 Codex CLI，并完成 ChatGPT 登录：
+在游戏连接页完成一次授权：
 
 ```powershell
-codex login
-codex login status
 .\Start.ps1
 ```
 
-连接页默认选择“Codex 订阅 · GPT-5.6 Luna”，不显示密钥输入框。继续旅程时使用新配置，世界和存档格式不因服务切换而重建。未带 provider 字段的旧连接设置会采用新的订阅默认值；主动选择并保存的 API 模式仍会保留。
+连接页默认选择“ChatGPT 订阅直连 · GPT-5.6 Luna”，不显示密钥输入框。点击登录后显示设备代码并打开官方授权页；完成后后台自动保存。继续旅程时使用新配置，世界和存档格式不因服务切换而重建。旧 `codex_subscription` 设置自动迁移到直连；主动选择并保存的 API 模式仍会保留。
 
-订阅模式共享你在 Codex 中的使用额度，并非无限请求，也不能据此保证固定生成速度。游戏会检查 `account/read` 的 ChatGPT 登录类型、`model/list` 中的精确模型和思考等级，以及已报告的使用限制。达到额度或认证失败就停止，绝不自动切换其他模型或收费 API，也不自动购买或申请额外额度。
+订阅模式共享 ChatGPT/Codex 使用额度，并非无限请求，也不能据此保证固定生成速度。请求固定发送 Luna / high，响应若报告其他模型便拒绝；认证、额度或响应失败会停止，绝不自动切换其他模型或收费 API，也不自动购买或申请额外额度。
 
 DeepSeek/兼容 API 是手动选项。PowerShell 启动器默认不解密 `deepseek.local.key`；只有显式 `-LoadDeepSeekKey` 才加载它。订阅模式即使收到 API Key 字段也不会使用。
 
-可通过 `EVERWEAVE_CODEX_BIN` 指定真实 Codex 可执行文件；Windows 不把复杂参数交给 `.cmd` 包装器，而优先定位安装包中的原生程序。本轮验证版本为 Codex CLI **0.154.0**。其他机器的模型权限应以该机器实际登录和模型列表为准。
+旧 App Server 对照仍可通过测试工具的 `--provider codex_subscription` 调用，并可用 `EVERWEAVE_CODEX_BIN` 指定可执行文件。正常游戏不再需要 Codex CLI。
 
 ## 接入边界
 
-`engine/codex_provider.py` 使用 stdio JSON-RPC，先初始化并检查登录，再建立 `ephemeral=true` 的临时任务，发送 `turn/start`。每次生成使用空临时目录、只读权限和进程级配置，关闭 shell、MCP、应用、浏览器、插件及多代理能力；只接受生成内容，不执行生成模型发出的工具或审批请求。
+`engine/chatgpt_provider.py` 直接发送无工具的 Responses 请求，`store=false`，通过 SSE 收集 `response.output_text.delta`，直到 `response.completed` 后才进入游戏契约。稳定系统提示使用 `prompt_cache_key`，无工具流程不请求加密推理回放。
 
-模型、服务方和思考等级由启动回执复核；禁止模型自动回退，使用标准服务速度。游戏不读写 `auth.json`，不提取、复制或保存订阅令牌，不改全局 `config.toml`。若全局配置强制 API 登录，适配器停止并提示，不为试验强改登录类型。
+授权由 `subscription_auth.py` 管理。Windows 上访问与刷新令牌通过当前用户 DPAPI 加密，默认保存到 `%LOCALAPPDATA%/EverweaveJRPG/chatgpt-subscription.bin`；不写入世界存档、仓库或日志。Everweave 不读写 Codex `auth.json`，也不改全局 `config.toml`。
 
 只收集最终回答，排除中间 commentary 与重复流片段；用量读取 Codex 的 token 通知。对“完整值已经结束，只漏掉末尾少量容器括号”的情况，可补齐最多四个闭合括号，并记录 `closed_json_containers`；字符串被截断、缺少值或括号错配仍失败。之后继续通过原有完整游戏契约校验，绝不自动填写场景、物品或规则。
 
-订阅子进程显式使用 `model_context_window=872000`，与当前本机 Codex 配置对齐。每次游戏生成都是单个临时回合，当前实测输入约一万 tokens，因此不会接近此窗口，也不会触发上下文压缩。该设置保留了未来更大世界摘要的余量，不会缩短 High 的推理时间。
+直连请求使用 15 分钟硬上限和 3 分钟 SSE 无数据上限；只要仍有事件就不会因总时长达到 300 秒而被误杀。连接错误和超时不自动重放；若未收到最终用量，零统计值不表示请求没有消耗订阅额度。
 
-单次请求的硬上限改为 15 分钟；连续 3 分钟没有任何 App Server 事件才视为停滞。只要仍有推理、输出、用量或上游重试事件，就不会因总时长达到 300 秒而被误杀。游戏退出时发出取消信号并清理子进程。连接错误和超时不自动重放；若未收到最终用量通知，零统计值不表示这次模型没有消耗额度。
-
-App Server 会流式发送推理阶段和最终回答增量。游戏不会把未完成的机械 JSON 展示或应用给玩家，因为对象引用、地图碰撞和奖励需要整包事务校验；生成详情会显示“正在推理”或已收到的字符数。异常结束时可在测试工具指定的目录保存仅含回答增量的 partial 文件，推理文本、提示词和认证信息不写入该文件。
+Responses SSE 持续提供回答增量。游戏不会把未完成的机械 JSON 展示或应用给玩家，因为对象引用、地图碰撞和奖励需要整包事务校验；生成详情显示正在推理或已接收字符数。请求使用 JSON Object 模式，最终仍通过完整游戏契约。
 
 ## 开发测试
 
 主测试工具默认使用订阅，也可以显式指定：
 
 ```powershell
-python tools/test_hybrid_live.py --live --provider codex_subscription --campaign --steps 2 --max-calls 4 --output ./userdata/luna-trial --setting "雨夜里，一名佣兵护送掌握秘密的医护人员穿过封锁线。先谈条件，保留交涉、绕路和应战选择。"
+python tools/test_hybrid_live.py --live --provider chatgpt_subscription --campaign --steps 2 --max-calls 4 --output ./userdata/luna-trial --setting "雨夜里，一名佣兵护送掌握秘密的医护人员穿过封锁线。先谈条件，保留交涉、绕路和应战选择。"
 ```
 
 `review_adventure_live.py` 同样支持该 provider。仍需明确 `--live`，所有请求计入测试预算。只有显式 `--provider chat_completions` 并提供对应密钥才会测试旧 DeepSeek 接口。
@@ -74,3 +70,26 @@ App Server 的实际 token 通知返回 `modelContextWindow=828400`，对应显�
 修正后 **299 项 Python 测试通过**，并通过原生剧情、跨区能力和敌人行为检查。详细本机证据位于 `userdata/codex-diagnostics/`，包含轮转日志、trace、独立数据库、试玩记录和截图，不加入 Git。
 
 当前结论：Luna / high 可以生成并修复可玩地区；一次请求仍可能需要 3～5 分钟。新的 15 分钟硬限制和 3 分钟无事件限制解决“活着却被误杀”，进度日志解决“看似卡死”，结构化信封减少小型规划 JSON 截断。它们不会让 High 本身变快。后续若要明显缩短首区等待，应拆分地区的机制/场景与美术/音频委托并行生成，或扩充相容素材以减少原创像素配方；这属于下一阶段架构优化，需要单独做质量和总额度对照。
+
+## 直连迁移与速度对照
+
+迁移前的 App Server 路径每次执行初始化、账户/模型/额度查询、临时线程和回合协议。迁移后直接进行 OAuth 刷新与 Responses SSE，不启用工具、文件、浏览器或智能体线程。
+
+为避免破坏另一个项目的授权，速度测试只从 Loreweaver 数据库读取仍有效的 access token 到内存；没有复制 refresh token，没有修改其数据库。正式运行使用 Everweave 自己的设备授权。
+
+| 测试 | App Server | 直连 |
+|---|---:|---:|
+| 极小 Luna/high JSON | 约 9.6 秒 | 约 2.5 秒；启用 JSON Object 后约 3.7 秒 |
+| 同一“黑檐夜市”首地区 | 283 秒完成 | 296 秒完成 |
+
+大地区直连首次输出约在 183 秒出现，最终输入 7663、输出 16324、推理 10067 tokens。它虽然完成了 SSE，却在中部产生无效 JSON；现已启用 Responses JSON Object 模式。对照说明直连确实去掉约数秒固定开销，但大型地区的主体耗时是 Luna/high 的推理与 1～1.6 万 token 输出，并非 Codex CLI 进程。后续请求使用按静态系统提示生成的 `prompt_cache_key`，可提高同协议前缀的复用机会；缓存是否命中以服务返回用量为准。
+
+因此，这次迁移优化登录、固定延迟、SSE 可观测性和 JSON 传输可靠性；不能把它描述成首地区从五分钟降到几秒。要继续明显提速，需要将场景/机制和美术/音频拆成可并行、可独立修复的委托，并减少缺少相容素材时的原创绘图数量。
+
+Everweave 独立授权已在 Windows 实测。第一次浏览器确认已换回令牌，但重定向的用户资料目录在原子替换时返回 `WinError 17`；令牌正文从未输出，保存失败。现已增加“DPAPI 密文直接刷新写入”的受限回退并补回归，第二次授权成功。凭据文件为 2386 字节，当前 Windows 用户可以解密，文件字节中不含明文 access token。使用这份独立授权做极小 Luna/high 请求耗时约 **2.9 秒**。
+
+开启 Responses JSON Object 后，对首份无效地区做定向修复：约 **107 秒**开始输出，**232.3 秒**完成，输入 14454、输出 12455、推理 5483 tokens，返回 JSON 本身合法。Luna 使用了 `{"and":[...]}`、`{"eq":[...]}`、`{"not":...}` 简写；这些与正式 `op/args` 结构一一对应，现由本地归一化并保留修正记录。处理后第一份响应直接通过，无须第二次 High 请求，生成的 44×26“黑檐夜市”含 7 个实体和 10 个动作，快速试玩用 16 次正常移动抵达秋叶并打开谈判。
+
+此次迁移和诊断没有调用 DeepSeek。Loreweaver 授权只作为两次直连性能/修复测试的内存 access token 来源；未复制 refresh token，未修改其数据库。正式结果使用 Everweave 自己的授权。
+
+最终 **309 项 Python 测试通过**，Godot 脚本导入以及原生内容、混合素材、剧情/跨区能力、任务界面和敌人行为检查通过。重启本机服务后再次读取到 `phase=ready / provider=chatgpt_subscription / model=gpt-5.6-luna / effort=high`，证明授权不是仅在首次登录进程内有效。

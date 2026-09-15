@@ -27,16 +27,19 @@ class GameServer(ThreadingHTTPServer):
   self.token=token; self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
   self.snapshot_sequence=0
   self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','hybrid_content','language')
-  self.preferences=dict(provider='codex_subscription',offline=False,base_url='',model='gpt-5.6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,hybrid_content=True,language='zh')
+  self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-5.6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,hybrid_content=True,language='zh')
   self.preference_path=None if str(save_path)==':memory:' else Path(save_path).with_name('settings.json')
   if self.preference_path and self.preference_path.exists():
    try:
     saved=json.loads(self.preference_path.read_text(encoding='utf-8'))
     if isinstance(saved,dict):
+     if saved.get('provider')=='codex_subscription':saved=dict(saved,provider='chatgpt_subscription',model='gpt-5.6-luna',reasoning_effort='high',base_url='',deepseek_options=False)
      allowed=self.preference_keys if saved.get('provider') else ('offline','max_calls','hybrid_content','language')
      self.preferences.update({k:saved[k] for k in allowed if k in saved})
    except (OSError,ValueError): pass
   super().__init__(address,Handler)
+  from .subscription_auth import LoginManager
+  self.subscription=LoginManager()
   self.audit=NullAudit() if str(save_path)==':memory:' else AuditLog(Path(save_path).parent/'logs')
   if str(save_path)!=':memory:':self.director.codex_partial_dir=Path(save_path).parent/'logs'/'codex-partials'
   self.audit.add_secret(token);self.director.audit=self.audit
@@ -54,10 +57,13 @@ class GameServer(ThreadingHTTPServer):
    temporary.write_text(dumps(self.preferences),encoding='utf-8'); temporary.replace(self.preference_path)
  def snapshot(self):
   s=self.world.snapshot(); s['director']=self.director.status()
+  s['subscription']=self.subscription.public()
   self.snapshot_sequence+=1; s['snapshot_sequence']=self.snapshot_sequence
   s['configuration']={k:(self.director.cfg or self.preferences)[k] for k in self.preference_keys}
   base=s['configuration']['base_url']
-  if s['configuration']['provider']=='codex_subscription':
+  if s['configuration']['provider']=='chatgpt_subscription':
+   s['configuration']['credential_available']=bool(s['subscription']['ready'])
+  elif s['configuration']['provider']=='codex_subscription':
    from .codex_provider import executable,CodexError
    try:executable();s['configuration']['codex_available']=True
    except CodexError:s['configuration']['codex_available']=False
@@ -130,8 +136,12 @@ class Handler(BaseHTTPRequestHandler):
      # Validate all inputs before replacing an existing save.
      setting=data.get('setting','')
      if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
+     if data.get('provider')=='chatgpt_subscription' and not server.subscription.public()['ready']:raise GameError('请先完成 Everweave 的 ChatGPT 订阅授权。')
      d.configure(data); w.start(setting,authored=not d.cfg['offline'],language=d.cfg['language'],planned=not d.cfg['offline']); server.seen.clear(); server.remember_configuration()
-    elif self.path=='/configure': d.configure(data); server.remember_configuration()
+    elif self.path=='/configure':
+     if data.get('provider')=='chatgpt_subscription' and not server.subscription.public()['ready']:raise GameError('请先完成 Everweave 的 ChatGPT 订阅授权。')
+     d.configure(data); server.remember_configuration()
+    elif self.path=='/subscription/login':server.subscription.start()
     elif self.path=='/language':
      language=data.get('language')
      if language not in ('zh','en'):raise ValueError('Unsupported language')

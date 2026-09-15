@@ -2,7 +2,7 @@
 
 当前在线入口先生成章节计划，再生成 Content Runtime v2 地区。章节协议见 [章节与游戏规格](CAMPAIGNS.md)，局部执行语法见 [内容协议](EXECUTABLE_CONTENT.md)，历史验证按 [文档目录](README.md) 中的阶段记录阅读。
 
-模型传输默认使用 `codex_provider.py` 调用本机 Codex App Server，通过已有 ChatGPT 订阅登录运行 GPT-5.6 Luna / high。每次生成使用临时对话，保留同一份游戏上下文与校验流程；API 服务仍由原 Chat Completions 适配器处理，但必须明确选择。登录、额度或传输失败不会跨服务回退。
+模型传输默认使用 `chatgpt_provider.py`，通过 Everweave 自己的设备 OAuth 授权直接读取 ChatGPT Responses SSE，以 GPT-5.6 Luna / high 生成内容。`codex_provider.py` 仅保留为兼容与对照工具；API 服务仍由原 Chat Completions 适配器处理，但必须明确选择。登录、额度或传输失败不会跨服务回退。
 
 ## 生成任务与创作分工
 

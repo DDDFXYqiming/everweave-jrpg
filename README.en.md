@@ -70,7 +70,7 @@ If Godot is on PATH, `python launch.py` is enough. On the first run, the launche
 
 ## Create a world
 
-The default is **Codex subscription · GPT-5.6 Luna / high**. Install Codex CLI and sign in through `codex login` with ChatGPT. The game uses that subscription login without an OpenAI API key. Login, model or usage failures stop generation; there is no automatic paid-provider fallback. See [setup and validation](docs/CODEX_SUBSCRIPTION.md).
+The default is **direct ChatGPT subscription · GPT-5.6 Luna / high**. Authorize Everweave once from its connection screen, then the game reads the Responses SSE stream without Codex CLI or an OpenAI API key. Login, model or usage failures stop generation; there is no automatic paid-provider fallback. See [setup and validation](docs/CODEX_SUBSCRIPTION.md).
 
 An online new world first generates its game specification and campaign plan, then prepares the starting region. The settings control request limits, reasoning level, and budget. The generation director prepares nearby regions, and failed tasks expose their diagnostic details with a retry action.
 

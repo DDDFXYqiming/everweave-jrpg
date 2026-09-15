@@ -45,7 +45,7 @@ godot --headless --path . --script res://tests/campaign_client_smoke.gd
 
 ## 可选在线联调
 
-下面的命令默认通过 Codex 的 ChatGPT 订阅登录调用 **GPT-5.6 Luna / high**，无需 API Key。输出目录必须是未使用的新目录：
+下面的命令默认通过 Everweave 的 ChatGPT 订阅直连调用 **GPT-5.6 Luna / high**，无需 API Key。先在游戏中完成设备授权；输出目录必须是未使用的新目录：
 
 ```powershell
 python tools/test_hybrid_live.py --live --campaign --steps 3 --max-calls 6 --output ./userdata/campaign-check --setting "现代医院停电，我要寻找失联同事并恢复隔离系统。不同地区共享线索，有回环和隐藏通道，不要魔法或等级。"
@@ -53,7 +53,7 @@ python tools/test_hybrid_live.py --live --campaign --steps 3 --max-calls 6 --out
 
 `--steps` 是调度步骤上限，不是保证生成的地区数；每步可能包含修复，`--max-calls` 才是请求预算。`--campaign` 启用规划，省略时为单地区路径测试。`--plan-from` 可重放相同设定下 trace 第一条章节响应，再生成地区；必须在报告中区分回放与新请求。`--retry-from` 是原有开局地区修复工具，不用于续修章节计划。
 
-`test_hybrid_live.py` 与 `review_adventure_live.py` 的 `--provider codex_subscription` 为默认值。需要有意测试旧 DeepSeek API 时使用 `--provider chat_completions` 并提供 `DEEPSEEK_API_KEY`；没有自动回退。历史 trace 不因默认服务改变而改名或重算。
+`test_hybrid_live.py` 与 `review_adventure_live.py` 的 `--provider chatgpt_subscription` 为默认值；`codex_subscription` 只保留 App Server 对照。需要有意测试旧 DeepSeek API 时使用 `--provider chat_completions` 并提供 `DEEPSEEK_API_KEY`；没有自动回退。历史 trace 不因默认服务改变而改名或重算。
 
 订阅请求停滞分析优先使用 `tools/diagnose_codex.py`，方法和日志字段见 [Codex 订阅接入](CODEX_SUBSCRIPTION.md) 与 [日志](LOGGING.md)。诊断保持 high 或更高；程序拒绝 medium/low/none，避免测试结论来自降低思考等级。
 

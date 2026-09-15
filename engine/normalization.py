@@ -370,9 +370,12 @@ class Normalizer:
 
     def expression(self, node, path):
         if not isinstance(node, dict): return
-        if set(node)=={'not'}:
+        from .content import OPS
+        shorthand=next(iter(node)) if len(node)==1 and next(iter(node)) in OPS else None
+        if shorthand:
             previous=copy.deepcopy(node)
-            operand=node['not'];node.clear();node.update(op='not',args=[operand])
+            operand=node[shorthand];args=operand if isinstance(operand,list) else [operand]
+            node.clear();node.update(op=shorthand,args=args)
             self.record(path,'expression_alias',previous,node)
         if 'item' in node: self.field_ref(node, 'item', 'items', path)
         for field in ('get', 'path'):
@@ -431,6 +434,7 @@ class Normalizer:
                 path = f'{root}.{group}[{i}]'
                 self.field_ref(entry, 'sprite', 'sprites', path)
                 if group in ('entities','spawns'): self.field_ref(entry, 'item_id', 'items', path)
+                if group in ('entities','spawns') and isinstance(entry,dict):self.program_refs(entry.get('behavior'),path+'.behavior')
                 if group == 'object_updates': self.field_ref(entry, 'id', 'objects', path, canonical=True)
                 if group == 'items' and isinstance(entry, dict): self.program_refs(entry.get('use'), path + '.use')
         for i, entry in enumerate(body.get('npc_lines', []) if isinstance(body.get('npc_lines'), list) else []):
