@@ -1,6 +1,6 @@
 # 文档
 
-当前 `main` 的默认在线入口是 Everweave 自己的 ChatGPT 设备 OAuth，使用 GPT-5.6 Luna / high 和 Responses SSE。下列标为阶段记录的文档保留旧版本的实验数字与问题，不应当覆盖当前代码事实。
+当前 `main` 的默认在线入口是 Everweave 自己的 ChatGPT 设备 OAuth，使用 GPT-5.6 Luna / high 和 Responses SSE。下列标为阶段记录的文档保留旧版本的实验数字与问题，不应当覆盖当前代码事实。公开发布前已重写 `main` 历史以移除早期本机路径；阶段文档中的旧提交号只用于历史定位，不保证仍是当前分支可直接访问的提交。
 
 ## 使用与开发
 
