@@ -291,5 +291,7 @@
   "Codex 订阅 · GPT-5.6 Luna": "Codex subscription · GPT-5.6 Luna",
   "使用本机 Codex 的 ChatGPT 订阅登录，共享订阅额度，无需 API 密钥。": "Use the local Codex ChatGPT login and shared subscription allowance. No API key is needed.",
   "默认 high。登录、额度或模型不可用时停止，不自动切换收费服务。": "Default: high. Stops on login, usage or model limits; no automatic paid-provider fallback.",
-  "订阅 · ": "Subscription · "
+  "订阅 · ": "Subscription · ",
+  " · 模型正在推理": " · Model is reasoning",
+  " · 已接收 %d 字符": " · Received %d characters"
 }

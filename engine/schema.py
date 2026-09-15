@@ -121,7 +121,8 @@ def _parse_patch(raw,expected,context=None):
   r=obj(p.get('region'),'region',('name','biome','layout','weather','rule','description','landmarks','entities','items','quests','destinations','visuals','scene','program','starting_loadout','audio','abilities','scenes'),('name','description','entities'))
   reg=dict(name=text(r['name'],'region name',48),biome=text(r.get('biome','dream'),'biome',48) if 'scene' in r else enum(r['biome'],C.BIOMES,'biome'),layout=text(r.get('layout','authored'),'layout',48) if 'scene' in r else enum(r['layout'],C.LAYOUTS,'layout'),weather=enum(r.get('weather','clear'),C.WEATHERS,'weather'),rule=enum(r.get('rule','normal'),C.RULES,'rule'),description=text(r['description'],'description',450),entities=[entity(e) for e in arr(r['entities'],'entities',32,1)],items=[item(i) for i in arr(r.get('items',[]),'items',8)],landmarks=[],quests=[])
   for lm in arr(r.get('landmarks',[]),'landmarks',24):
-   obj(lm,'landmark',('type','zone','sprite','id','at','solid','footprint'),('type','zone')); landmark=dict(type=enum(lm['type'],C.LANDMARKS,'type'),zone=enum(lm['zone'],C.ZONES,'zone'))
+   obj(lm,'landmark',('type','zone','sprite','id','name','description','at','solid','footprint'),('type','zone')); landmark=dict(type=enum(lm['type'],C.LANDMARKS,'type'),zone=enum(lm['zone'],C.ZONES,'zone'))
+   if 'name' in lm:landmark['name']=text(lm['name'],'landmark name',48)
    if 'sprite' in lm:landmark['sprite']=ident(lm['sprite'])
    from .content import entity_extensions
    entity_extensions(lm,landmark)

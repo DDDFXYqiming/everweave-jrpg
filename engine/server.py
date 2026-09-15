@@ -38,6 +38,7 @@ class GameServer(ThreadingHTTPServer):
    except (OSError,ValueError): pass
   super().__init__(address,Handler)
   self.audit=NullAudit() if str(save_path)==':memory:' else AuditLog(Path(save_path).parent/'logs')
+  if str(save_path)!=':memory:':self.director.codex_partial_dir=Path(save_path).parent/'logs'/'codex-partials'
   self.audit.add_secret(token);self.director.audit=self.audit
   self.audit.emit('server.started',port=self.server_port,world_loaded=bool(self.world.state))
  def server_close(self):

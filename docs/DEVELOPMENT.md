@@ -55,6 +55,8 @@ python tools/test_hybrid_live.py --live --campaign --steps 3 --max-calls 6 --out
 
 `test_hybrid_live.py` 与 `review_adventure_live.py` 的 `--provider codex_subscription` 为默认值。需要有意测试旧 DeepSeek API 时使用 `--provider chat_completions` 并提供 `DEEPSEEK_API_KEY`；没有自动回退。历史 trace 不因默认服务改变而改名或重算。
 
+订阅请求停滞分析优先使用 `tools/diagnose_codex.py`，方法和日志字段见 [Codex 订阅接入](CODEX_SUBSCRIPTION.md) 与 [日志](LOGGING.md)。诊断保持 high 或更高；程序拒绝 medium/low/none，避免测试结论来自降低思考等级。
+
 脚本保存 `trace.json/result.json/snapshot.json` 和独立数据库。`ready` 仅代表当前地区存在，还需检查 `failed_tasks`、`ready_regions` 和各任务记录，不能单凭输出的成功标记判断整章已完成。
 
 ## 编辑器与日志

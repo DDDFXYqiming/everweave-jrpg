@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from engine.codex_provider import CodexError,generate,preflight,process_config,close_json_containers,MODEL
+from engine.codex_provider import CodexError,generate,preflight,process_config,close_json_containers,output_schema,MODEL
 from engine.director import ChatProvider,Director,ProviderError
 from engine.world import World
 from engine.storage import Store
@@ -21,8 +21,8 @@ class FakeRPC:
     def __init__(self,*args,**kwargs):
         self.calls=[];self.closed=False;self.saved=deque([
             {'method':'item/completed','params':{'threadId':'test-thread','item':{'id':'preface','type':'agentMessage','phase':'commentary','text':'Working...'}}},
-            {'method':'item/agentMessage/delta','params':{'threadId':'test-thread','delta':'{"kind":"region"}'}},
-            {'method':'item/completed','params':{'threadId':'test-thread','item':{'id':'answer','type':'agentMessage','phase':'final_answer','text':'{"kind":"region"}'}}},
+            {'method':'item/agentMessage/delta','params':{'threadId':'test-thread','delta':'{"payload":"{\\"kind\\":\\"region\\"}"}'}},
+            {'method':'item/completed','params':{'threadId':'test-thread','item':{'id':'answer','type':'agentMessage','phase':'final_answer','text':'{"payload":"{\\"kind\\":\\"region\\"}"}'}}},
             {'method':'thread/tokenUsage/updated','params':{'threadId':'test-thread','tokenUsage':{'last':{'inputTokens':120,'outputTokens':80,'cachedInputTokens':40,'reasoningOutputTokens':20}}}},
             {'method':'turn/completed','params':{'threadId':'test-thread','turn':{'id':'test-turn','status':self.final_status}}}])
         self.instances.append(self)
@@ -56,18 +56,20 @@ class CodexProviderTests(unittest.TestCase):
         with self.assertRaises(CodexError):preflight(FakeRPC())
         FakeRPC.model=MODEL
         with self.assertRaises(CodexError):preflight(FakeRPC(),effort='ultra')
+        with self.assertRaises(CodexError):generate('','',{'model':MODEL,'reasoning_effort':'medium'})
     def test_exhausted_subscription_stops_before_generation(self):
         FakeRPC.limits={'rateLimits':{'primary':{'usedPercent':100},'credits':{'hasCredits':True}}}
         with self.assertRaises(CodexError):preflight(FakeRPC())
         self.assertNotIn('turn/start',[m for m,p in FakeRPC.instances[-1].calls])
     def test_ephemeral_final_only_usage_and_cleanup(self):
-        with patch('engine.codex_provider.RPC',FakeRPC):raw,usage=generate('protocol','game context',{'model':MODEL,'reasoning_effort':'high'})
+        with patch('engine.codex_provider.RPC',FakeRPC):raw,usage=generate('protocol','game context',{'model':MODEL,'reasoning_effort':'high','_request_meta':{'kind':'campaign'}})
         self.assertEqual(raw,'{"kind":"region"}');self.assertEqual(usage['reasoning_tokens'],20)
         rpc=FakeRPC.instances[-1];self.assertTrue(rpc.closed)
         start=next(p for m,p in rpc.calls if m=='thread/start');turn=next(p for m,p in rpc.calls if m=='turn/start')
         self.assertTrue(start['ephemeral']);self.assertFalse(start['allowProviderModelFallback'])
         self.assertEqual(start['sandbox'],'read-only');self.assertEqual(turn['effort'],'high')
         self.assertEqual(start['modelProvider'],'openai');self.assertEqual(turn['serviceTierForTurn'],'default')
+        self.assertEqual(turn['outputSchema'],output_schema('campaign'));self.assertIsNone(output_schema('region'))
     def test_failed_turn_preserves_usage_and_closes(self):
         FakeRPC.final_status='failed'
         with patch('engine.codex_provider.RPC',FakeRPC),self.assertRaises(CodexError) as caught:generate('protocol','data',{'model':MODEL,'reasoning_effort':'high'})
@@ -76,6 +78,7 @@ class CodexProviderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder,patch.dict(os.environ,{'CODEX_HOME':folder}):
             path=Path(folder)/'config.toml';original='model="something_else"\n[mcp_servers.example]\ncommand="unused"\n';path.write_text(original)
             cfg=process_config();self.assertFalse(cfg['features.shell_tool']);self.assertFalse(cfg['features.apps'])
+            self.assertEqual(cfg['model_context_window'],872000)
             self.assertFalse(cfg['mcp_servers.example.enabled']);self.assertEqual(path.read_text(),original)
             path.write_text('forced_login_method="api"')
             with self.assertRaises(CodexError):process_config()

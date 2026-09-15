@@ -22,6 +22,7 @@ EFFORT = 'high'
 
 class CodexError(RuntimeError):
     usage = None
+    diagnostics = None
 
 
 def executable():
@@ -55,7 +56,7 @@ def process_config():
                 'browser_use','computer_use','image_generation','view_image','memories',
                 'skill_search','code_mode','code_mode_host','goals','hooks','workspace_dependencies')
     values = {'model_provider':'openai', 'web_search':'disabled', 'project_doc_max_bytes':0,
-              'model_reasoning_effort':EFFORT, 'model':MODEL}
+              'model_reasoning_effort':EFFORT, 'model':MODEL, 'model_context_window':872000}
     values.update({'features.' + key:False for key in disabled})
     for name in config.get('mcp_servers', {}):
         if not re.fullmatch(r'[A-Za-z0-9_-]+',name):raise CodexError('An inherited MCP name cannot be safely disabled by this CLI version.')
@@ -64,7 +65,8 @@ def process_config():
 
 
 class RPC:
-    def __init__(self, cwd, timeout=300, cancel=None):
+    def __init__(self, cwd, timeout=900, idle_timeout=180, cancel=None, telemetry=None):
+        self.telemetry=telemetry
         args = [executable(), 'app-server', '--stdio']
         for key,value in process_config().items():args += ['-c', key+'='+json.dumps(value)]
         env = dict(os.environ)
@@ -75,16 +77,18 @@ class RPC:
             stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',errors='replace',
             creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         self.queue = queue.Queue();self.saved=deque();self.sequence=0
-        self.deadline=time.monotonic()+timeout
+        self.deadline=time.monotonic()+timeout;self.idle_timeout=idle_timeout
         self.cancel=cancel
         def read():
             try:
                 for line in self.process.stdout:
                     try:self.queue.put(json.loads(line))
-                    except ValueError:continue
+                    except ValueError:
+                        if self.telemetry:self.telemetry.audit.emit('codex.invalid_protocol_line',request_id=self.telemetry.request_id,chars=len(line))
             finally:self.queue.put(None)
         def drain():
-            for _ in self.process.stderr:pass  # Never publish raw provider diagnostics/credentials.
+            for line in self.process.stderr:
+                if self.telemetry:self.telemetry.stderr(line)
         self.reader=threading.Thread(target=read,daemon=True);self.reader.start()
         self.errors=threading.Thread(target=drain,daemon=True);self.errors.start()
 
@@ -93,26 +97,31 @@ class RPC:
         except (OSError,ValueError):raise CodexError('Codex app-server connection closed.') from None
 
     def receive(self):
-        remaining=self.deadline-time.monotonic()
-        if remaining<=0:raise CodexError('Codex subscription request timed out; it was not replayed.')
         while True:
+            if self.telemetry:self.telemetry.heartbeat()
             if self.cancel is not None and self.cancel.is_set():raise CodexError('Codex generation was stopped with the game.')
             remaining=self.deadline-time.monotonic()
-            if remaining<=0:raise CodexError('Codex subscription request timed out; it was not replayed.')
-            try:message=self.queue.get(timeout=min(remaining,.25));break
+            idle_remaining=self.idle_timeout-(time.monotonic()-self.telemetry.last_event) if self.telemetry else self.idle_timeout
+            if remaining<=0:raise CodexError('Codex subscription request exceeded the 15-minute hard limit; it was not replayed.')
+            if idle_remaining<=0:raise CodexError('Codex subscription produced no events for 3 minutes; it was stopped and not replayed.')
+            try:message=self.queue.get(timeout=min(remaining,idle_remaining,.25));break
             except queue.Empty:continue
         if message is None:raise CodexError('Codex app-server exited before completing the request.')
+        if self.telemetry:self.telemetry.observe(message)
         if 'method' in message and 'id' in message:
             self.send(dict(id=message['id'],error=dict(code=-32601,message='Game generation does not execute tools or approvals.')))
             raise CodexError('Codex requested a tool/approval; this game transport only accepts generated content.')
         return message
 
     def call(self, method, params):
+        started=time.monotonic()
+        if self.telemetry:self.telemetry.phase(method)
         self.sequence+=1;key=self.sequence
         self.send(dict(id=key,method=method,params=params))
         while True:
             message=self.receive()
             if message.get('id')==key:
+                if self.telemetry:self.telemetry.emit('codex.rpc.completed',method=method,rpc_seconds=round(time.monotonic()-started,3),ok='error' not in message)
                 if 'error' in message:
                     # Error text may include caller data: expose only the operation and code.
                     raise CodexError(f'Codex {method} failed (code {message["error"].get("code")}); check CLI login, model access and version.')
@@ -122,6 +131,16 @@ class RPC:
     def initialize(self):
         self.call('initialize',dict(clientInfo=dict(name='everweave_local',title='Everweave',version='0.1.0'),capabilities=dict(experimentalApi=True)))
         self.send(dict(method='initialized',params={}))
+
+    def interrupt(self,thread_id,turn_id):
+        if self.process.poll() is not None:return
+        try:
+            self.deadline=time.monotonic()+5
+            if self.telemetry:self.telemetry.last_event=time.monotonic()
+            self.call('turn/interrupt',dict(threadId=thread_id,turnId=turn_id))
+            if self.telemetry:self.telemetry.emit('codex.turn.interrupted')
+        except CodexError:
+            if self.telemetry:self.telemetry.emit('codex.turn.interrupt_failed')
 
     def close(self):
         if self.process.poll() is None:
@@ -161,6 +180,16 @@ def probe():
         finally:rpc.close()
 
 
+def output_schema(kind):
+    if kind not in ('campaign','direction','reaction'):return None
+    # Strict Structured Outputs cannot describe our evolving recursive DSL with
+    # an open object. Constrain a transport envelope, then validate the enclosed
+    # game JSON through the authoritative engine schema. Large region responses
+    # stay unwrapped so escaping does not inflate their output by thousands of
+    # characters; they still stream and pass close-container + engine checks.
+    return {'type':'object','properties':{'payload':{'type':'string'}},'required':['payload'],'additionalProperties':False}
+
+
 def close_json_containers(text):
     """Close at most four omitted terminal containers; never invent JSON values.
 
@@ -190,8 +219,11 @@ def close_json_containers(text):
 def generate(system, user, cfg):
     if cfg.get('model',MODEL)!=MODEL:raise CodexError('Subscription mode is pinned to gpt-5.6-luna.')
     effort=cfg.get('reasoning_effort',EFFORT)
+    if effort not in ('high','xhigh','max'):raise CodexError('Luna subscription generation requires high or above; reasoning was not lowered.')
+    from .codex_telemetry import CodexTelemetry
+    telemetry=CodexTelemetry(cfg,system,user);outcome='failed';kind=cfg.get('_request_meta',{}).get('kind')
     with tempfile.TemporaryDirectory(prefix='everweave-codex-') as cwd:
-        rpc=RPC(cwd,cancel=cfg.get('_cancel_event'));usage={}
+        rpc=RPC(cwd,timeout=cfg.get('codex_timeout_seconds',900),idle_timeout=cfg.get('codex_idle_timeout_seconds',180),cancel=cfg.get('_cancel_event'),telemetry=telemetry);usage={};thread=None;turn_id=None;turn_finished=False
         try:
             rpc.initialize();metadata=preflight(rpc,MODEL,effort)
             result=rpc.call('thread/start',dict(model=MODEL,modelProvider='openai',allowProviderModelFallback=False,
@@ -202,19 +234,27 @@ def generate(system, user, cfg):
             if result.get('model',MODEL)!=MODEL:raise CodexError('Codex returned a different model; generation stopped.')
             if result.get('modelProvider','openai')!='openai' or result.get('reasoningEffort',effort)!=effort:
                 raise CodexError('Codex returned a different provider or reasoning effort; generation stopped.')
+            telemetry.emit('codex.model.confirmed',model=result.get('model'),provider=result.get('modelProvider'),effort=result.get('reasoningEffort'),auth=metadata['auth'])
             thread=result['thread']['id']
-            turn=rpc.call('turn/start',dict(threadId=thread,model=MODEL,effort=effort,serviceTierForTurn='default',input=[dict(type='text',text=user)]))
+            turn_params=dict(threadId=thread,model=MODEL,effort=effort,serviceTierForTurn='default',input=[dict(type='text',text=user)])
+            if output_schema(kind):
+                turn_params['outputSchema']=output_schema(kind)
+                turn_params['input'][0]['text']+='\nReturn an outer object with exactly one field named payload. payload must be a string containing the complete requested game JSON object, including every closing bracket. Do not put markdown or commentary outside it.'
+            turn=rpc.call('turn/start',turn_params)
             turn_id=turn['turn']['id'];messages={};usage={}
+            telemetry.phase('waiting_for_model')
             while True:
                 event=rpc.saved.popleft() if rpc.saved else rpc.receive()
                 method=event.get('method');params=event.get('params') or {}
                 if params.get('threadId') not in (None,thread):continue
                 item=params.get('item') or {}
+                if method=='model/rerouted':raise CodexError('The service rerouted this request to a different model; generation stopped.')
                 if method=='item/started' and item.get('type') in ('commandExecution','fileChange','mcpToolCall','dynamicToolCall','webSearch','imageGeneration','collabAgentToolCall'):
                     raise CodexError('A tool was requested during content generation; the request was stopped.')
                 if method=='item/completed' and item.get('type')=='agentMessage' and item.get('phase')!='commentary':messages[item['id']]=item.get('text','')
                 if method=='thread/tokenUsage/updated':usage=params.get('tokenUsage',{}).get('last',{})
                 if method=='turn/completed' and params.get('turn',{}).get('id')==turn_id:
+                    turn_finished=True
                     finished=params['turn']
                     if finished.get('status')!='completed':
                         raise CodexError('Codex generation did not complete. Check subscription limits and CLI connectivity; no paid fallback was used.')
@@ -222,11 +262,18 @@ def generate(system, user, cfg):
             text='\n'.join(messages.values())
             if not text.strip():raise CodexError('Codex returned no final game content.')
             if len(text.encode('utf-8'))>128000:raise CodexError('Codex content exceeds the game response size limit.')
+            if output_schema(kind):
+                try:envelope=json.loads(text);text=envelope['payload']
+                except (ValueError,TypeError,KeyError):raise CodexError('Codex structured transport envelope was invalid.') from None
+                if not isinstance(text,str):raise CodexError('Codex structured transport payload was not text.')
             text,closed=close_json_containers(text)
+            outcome='completed'
             return text,dict(input_tokens=usage.get('inputTokens',0),output_tokens=usage.get('outputTokens',0),
                 reasoning_tokens=usage.get('reasoningOutputTokens',0),reasoning_observed=usage.get('reasoningOutputTokens',0)>0,
                 cached_input_tokens=usage.get('cachedInputTokens',0),provider='codex_subscription',model=MODEL,effort=effort,auth=metadata['auth'],closed_json_containers=closed)
         except CodexError as exc:
+            if thread and turn_id and not turn_finished:rpc.interrupt(thread,turn_id)
             exc.usage=dict(input_tokens=usage.get('inputTokens',0),output_tokens=usage.get('outputTokens',0),reasoning_tokens=usage.get('reasoningOutputTokens',0),reasoning_observed=bool(usage.get('reasoningOutputTokens',0)))
+            exc.diagnostics=telemetry.snapshot()
             raise
-        finally:rpc.close()
+        finally:telemetry.finish(outcome);rpc.close()

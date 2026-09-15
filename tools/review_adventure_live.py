@@ -11,7 +11,8 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from engine.world import World
 from engine.storage import Store
-from engine.director import Director,ChatProvider
+from engine.director import Director,ChatProvider,ProviderError
+from engine.audit import AuditLog
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -29,7 +30,9 @@ def main():
     try:source.backup(dest)
     finally:source.close();dest.close()
     w=World(Store(db));d=Director(w);subscription=args.provider=='codex_subscription'
+    audit=AuditLog(out/'logs');d.audit=audit
     d.configure(dict(provider=args.provider,model='gpt-5.6-luna' if subscription else 'deepseek-flash',offline=False,max_calls=args.max_calls,reasoning_effort='high' if subscription else 'low'));d.cfg['cooldown']=0
+    if subscription:d.cfg['_codex_partial_dir']=str(out/'partial')
     if args.repair_from:
         from engine.schema import InvalidPatch
         previous=json.loads(args.repair_from.read_text(encoding='utf8'))[-1];ctx=previous['context'];raw=previous['raw']
@@ -43,9 +46,11 @@ def main():
     def write(name,data):(out/name).write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf8')
     def generate(provider,ctx,kind,repair=''):
         print(json.dumps(dict(kind=kind,target=ctx['target'],repair=bool(repair))),flush=True)
-        start=time.monotonic();raw,usage=original(provider,ctx,kind,repair)
-        traces.append(dict(context=ctx,kind=kind,repair=repair,raw=raw,usage=usage,seconds=round(time.monotonic()-start,3)));write('trace.json',traces)
-        return raw,usage
+        start=time.monotonic();record=dict(context=ctx,kind=kind,repair=repair)
+        try:
+            raw,usage=original(provider,ctx,kind,repair);record.update(raw=raw,usage=usage);return raw,usage
+        except ProviderError as exc:record.update(error=str(exc),usage=exc.usage,diagnostics=exc.diagnostics);raise
+        finally:record['seconds']=round(time.monotonic()-start,3);traces.append(record);write('trace.json',traces)
     try:
         with patch.object(ChatProvider,'generate',generate):
             for _ in range(args.steps):
@@ -54,6 +59,6 @@ def main():
         write('result.json',result);write('snapshot.json',dict(w.snapshot(),director=d.status()))
         print(json.dumps(result,ensure_ascii=False),flush=True)
         if d.failed:raise SystemExit(1)
-    finally:d.paused=True;w.store.close()
+    finally:d.paused=True;audit.close();w.store.close()
 
 if __name__=='__main__':main()

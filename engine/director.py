@@ -58,10 +58,11 @@ All fields not described above are forbidden. Stay within the enum catalog provi
 CATALOG={k:list(getattr(C,k)) for k in ('BIOMES','LAYOUTS','WEATHERS','RULES','ROLES','KINDS','MONSTERS','MOVES','LANDMARKS','ZONES','EFFECTS')}
 
 class ProviderError(RuntimeError):
- def __init__(self,message,usage=None,finish_reason=None):
+ def __init__(self,message,usage=None,finish_reason=None,diagnostics=None):
   super().__init__(message)
   self.usage=usage or {}
   self.finish_reason=finish_reason
+  self.diagnostics=diagnostics
 REASONING_EFFORTS=('default','none','minimal','low','medium','high','xhigh','max','ultra')
 
 def reasoning_effort(cfg):
@@ -121,7 +122,7 @@ class ChatProvider:
   if cfg.get('provider')=='codex_subscription':
    from .codex_provider import generate,CodexError
    try:return generate(payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
-   except CodexError as exc:raise ProviderError(str(exc),getattr(exc,'usage',None)) from None
+   except CodexError as exc:raise ProviderError(str(exc),getattr(exc,'usage',None),diagnostics=getattr(exc,'diagnostics',None)) from None
   effort=reasoning_effort(cfg)
   if cfg.get('deepseek_options',True): payload['thinking']={'type':'disabled' if effort=='none' else 'enabled'}
   if effort!='default': payload['reasoning_effort']=effort
@@ -177,6 +178,7 @@ class Director:
   self.normalized_responses=0; self.normalization_count=0; self.recent_corrections=[]
   self.task_metrics={}; self.task_history=[];self.task_sequence=0
   self.audit=NullAudit()
+  self.codex_partial_dir=None
  def configure(self,cfg):
   provider=cfg.get('provider','chat_completions')
   if provider not in ('chat_completions','codex_subscription'):raise ProviderError('Unsupported generation provider.')
@@ -193,7 +195,7 @@ class Director:
   language=cfg.get('language','zh')
   if language not in ('zh','en'):raise ProviderError('Unsupported language')
   effort=reasoning_effort(dict(cfg,deepseek_options=False,reasoning_effort=cfg.get('reasoning_effort','high'))) if subscription else reasoning_effort(cfg)
-  if subscription and effort not in ('none','low','medium','high','xhigh','max'):raise ProviderError('Unsupported Luna reasoning effort.')
+  if subscription and effort not in ('high','xhigh','max'):raise ProviderError('Luna subscription generation requires high or above.')
   self.cfg=dict(provider=provider,language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=False if subscription else bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
   self.audit.add_secret(key)
   self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit)
@@ -284,7 +286,7 @@ class Director:
    epoch,kind,target=key;metrics=self.task_metrics.get(key,{})
    active_tasks.append(dict(kind=kind,target=target,name=self._title(target),phase=metrics.get('phase','generating'),
      source=metrics.get('source','prefetch'),started_at=metrics.get('started_at'),started_steps=metrics.get('started_steps'),
-     elapsed_seconds=round(time.monotonic()-metrics.get('_start',time.monotonic()),1),attempts=metrics.get('attempts',0)))
+     elapsed_seconds=round(time.monotonic()-metrics.get('_start',time.monotonic()),1),attempts=metrics.get('attempts',0),progress=metrics.get('progress')))
   return copy.deepcopy(dict(failed_tasks=failed_tasks,active_tasks=active_tasks,task_history=self.task_history,repair_calls=self.repair_calls,normalized_responses=self.normalized_responses,normalization_count=self.normalization_count,recent_corrections=self.recent_corrections,
    prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),provider=(self.cfg or {}).get('provider',''),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
  def _next_job(self):
@@ -379,6 +381,12 @@ class Director:
      self.audit.emit('model.request',kind=kind,target=target,call=request_number,repair=bool(repair),model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
      model_started=time.monotonic()
      cfg['_cancel_event']=self.stop_event
+     cfg['_audit']=self.audit;cfg['_request_meta']=dict(kind=kind,target=target,call=request_number)
+     if self.codex_partial_dir:cfg['_codex_partial_dir']=str(self.codex_partial_dir)
+     def update_progress(progress):
+      with self.world.lock:
+       if job_key in self.task_metrics:self.task_metrics[job_key]['progress']=progress
+     cfg.setdefault('_codex_progress',update_progress)
      try:raw,usage=ChatProvider(cfg).generate(request_ctx,kind,repair)
      finally:
       with self.world.lock:self.task_metrics[job_key]['request_seconds']+=time.monotonic()-model_started
@@ -417,7 +425,7 @@ class Director:
     with self.world.lock: self.rejected+=1
     if cfg['offline']: break
    except ProviderError as exc:
-    self.audit.emit('model.failed',level=logging.WARNING,kind=kind,target=target,call=request_number,seconds=round(time.monotonic()-request_started,3) if request_started else None,error=str(exc),usage=exc.usage,finish_reason=exc.finish_reason)
+    self.audit.emit('model.failed',level=logging.WARNING,kind=kind,target=target,call=request_number,seconds=round(time.monotonic()-request_started,3) if request_started else None,error=str(exc),usage=exc.usage,finish_reason=exc.finish_reason,diagnostics=exc.diagnostics)
     error=exc
     with self.world.lock:
      self._record_usage(exc.usage)

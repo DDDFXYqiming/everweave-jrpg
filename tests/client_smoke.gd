@@ -36,6 +36,13 @@ func _run() -> void:
 	var snapshot = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/demo_snapshot.json"))
 	assert(snapshot is Dictionary)
 	main._accept_snapshot(snapshot)
+	main.state.director.provider="codex_subscription"
+	main.state.director.mode="live_llm"
+	main.state.director.model="gpt-5.6-luna"
+	main.state.director.reasoning_effort="high"
+	main.state.director.active_tasks=[{"kind":"region","target":"r0","name":"测试地区","source":"prefetch","elapsed_seconds":42.0,"phase":"generating","progress":{"stage":"reasoning","output_chars":0}}]
+	main._render()
+	assert(main.director_label.text.contains("订阅") and main.director_label.text.contains("模型正在推理"))
 	var old = {"started":false,"version":0}
 	main._accept_snapshot(old)
 	assert(main.state.started)

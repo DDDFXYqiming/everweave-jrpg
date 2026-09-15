@@ -756,7 +756,7 @@ func _mode_changed(index: int) -> void:
 	var previous: String = ("high" if index==3 else "low") if effort_select.item_count == 0 else str(effort_select.get_item_metadata(effort_select.selected))
 	effort_select.clear()
 	var efforts: Array = ["low", "high", "max", "none"] if index != 1 else ["low", "medium", "high", "xhigh", "max", "minimal", "none", "default"]
-	if index==3:efforts=["high","low","medium","xhigh","max","none"]
+	if index==3:efforts=["high","xhigh","max"]
 	for effort in efforts:
 		var label: String = L.t("关闭思考") if effort == "none" else (L.t("服务默认（不传参数）") if effort == "default" else effort)
 		effort_select.add_item(label)
@@ -1018,6 +1018,10 @@ func _render() -> void:
 	for task in d.get("active_tasks", []):
 		var purpose: String = L.t("世界变化") if str(task.kind) == "reaction" else (L.t("更新草案") if str(task.get("source", "")) == "refresh" else L.t("自动预生成"))
 		var stage: String = L.t(" · 修复中") if str(task.get("phase", "")) == "repairing" else (L.t(" · 校验中") if str(task.get("phase", "")) == "validating" else "")
+		var progress: Variant=task.get("progress")
+		if progress is Dictionary:
+			if progress.get("stage")=="reasoning":stage+=L.t(" · 模型正在推理")
+			elif progress.get("stage")=="output":stage+=L.t(" · 已接收 %d 字符") % int(progress.get("output_chars",0))
 		active_lines.append(L.t("%s %s · %.0f 秒%s") % [purpose, str(task.name), float(task.get("elapsed_seconds", 0)), stage])
 	var activity: String = "\n".join(active_lines) if not active_lines.is_empty() else str(d.get("busy", ""))
 	director_label.text = mode_text + "\n" + (activity if not activity.is_empty() else (L.t("导演已暂停") if bool(d.get("paused", false)) else L.t("等待重要事件 · 不按帧调用")))
