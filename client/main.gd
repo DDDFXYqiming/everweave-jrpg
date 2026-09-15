@@ -981,7 +981,7 @@ func _accept_snapshot(data: Dictionary) -> void:
 	if first_snapshot:
 		first_snapshot = false
 		_sync_configuration()
-		if mode_select.selected==3 and not bool(state.get("subscription",{}).get("ready",false)):_home_tab(2)
+		if not bool(state.get("started",false)) and mode_select.selected==3 and not bool(state.get("subscription",{}).get("ready",false)):_home_tab(2)
 		if str(state.get("configuration",{}).get("language","zh"))!=L.language:_send_language()
 		if state.get("region") is Dictionary:
 			setting_input.text = str(state.get("setting", setting_input.text))
