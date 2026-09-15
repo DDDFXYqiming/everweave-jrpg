@@ -747,7 +747,7 @@ func _bar(parent: Node, fill: Color) -> ProgressBar:
 func _configuration() -> Dictionary:
 	var custom: bool = mode_select.selected == 1
 	if mode_select.selected==3:
-		return {"provider":"chatgpt_subscription","language":L.language,"hybrid_content":hybrid_select.button_pressed,"offline":false,"base_url":"","model":"gpt-5.6-luna","api_key":"","deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
+		return {"provider":"chatgpt_subscription","language":L.language,"hybrid_content":hybrid_select.button_pressed,"parallel_region":true,"offline":false,"base_url":"","model":"gpt-5.6-luna","api_key":"","deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
 	return {"provider":"chat_completions","language":L.language,"hybrid_content":hybrid_select.button_pressed,"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
 
 func _set_effort(effort: String) -> void:
@@ -1041,6 +1041,10 @@ func _render() -> void:
 	for task in d.get("active_tasks", []):
 		var purpose: String = L.t("世界变化") if str(task.kind) == "reaction" else (L.t("更新草案") if str(task.get("source", "")) == "refresh" else L.t("自动预生成"))
 		var stage: String = L.t(" · 修复中") if str(task.get("phase", "")) == "repairing" else (L.t(" · 校验中") if str(task.get("phase", "")) == "validating" else "")
+		var component: String = str(task.get("component", ""))
+		if component=="parallel":stage+=L.t(" · 玩法与视听并行")
+		elif component=="gameplay":stage+=L.t(" · 玩法制作")
+		elif component=="audiovisual":stage+=L.t(" · 视听制作")
 		var progress: Variant=task.get("progress")
 		if progress is Dictionary:
 			if progress.get("stage")=="reasoning":stage+=L.t(" · 模型正在推理")
@@ -1051,7 +1055,7 @@ func _render() -> void:
 	var failed_tasks: Array = d.get("failed_tasks", [])
 	director_label.text += L.t("\n请求 %d / %d · 其中修复 %d") % [int(d.get("calls", 0)), int(d.get("max_calls", 60)), int(d.get("repair_calls", 0))]
 	director_label.text += L.t("\n已应用 %d · 过期 %d · 失败任务 %d") % [int(d.get("accepted", 0)), int(d.get("stale", 0)), failed_tasks.size()]
-	director_label.text += L.t("\n在途 %d · 本地纠正 %d 处\n输入 %d / 输出 %d tokens") % [int(d.get("active_requests", 0)), int(d.get("normalization_count", 0)), int(d.get("input_tokens", 0)), int(d.get("output_tokens", 0))]
+	director_label.text += L.t("\n在途 %d · 本地纠正 %d 处\n输入 %d / 输出 %d tokens") % [int(d.get("active_model_requests", d.get("active_requests", 0))), int(d.get("normalization_count", 0)), int(d.get("input_tokens", 0)), int(d.get("output_tokens", 0))]
 	director_label.text += L.t("\n提前两层 · 已准备 %d / %d 区域") % [int(d.get("prefetch_ready", 0)), int(d.get("prefetch_total", 0))]
 	var library_usage: Dictionary = r.get("library_usage",{})
 	if not library_usage.is_empty():

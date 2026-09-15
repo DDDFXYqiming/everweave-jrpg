@@ -125,8 +125,16 @@ class ChatProvider:
    except CodexError as exc:raise ProviderError(str(exc),getattr(exc,'usage',None),diagnostics=getattr(exc,'diagnostics',None)) from None
   if cfg.get('provider')=='chatgpt_subscription':
    from .chatgpt_provider import generate,DirectError
-   try:return generate(payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
+   try:
+    if kind=='region' and not repair and cfg.get('_parallel_region'):
+     from .region_pipeline import generate as generate_region
+     return generate_region(context,payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
+    return generate(payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
    except DirectError as exc:raise ProviderError(str(exc),exc.usage,diagnostics={'transport':'direct_sse','category':exc.category}) from None
+   except Exception as exc:
+    from .region_pipeline import PipelineError
+    if isinstance(exc,PipelineError):raise ProviderError(str(exc),getattr(exc,'usage',None),diagnostics={'transport':'direct_sse','category':'assembly'}) from None
+    raise
   effort=reasoning_effort(cfg)
   if cfg.get('deepseek_options',True): payload['thinking']={'type':'disabled' if effort=='none' else 'enabled'}
   if effort!='default': payload['reasoning_effort']=effort
@@ -200,9 +208,9 @@ class Director:
   if language not in ('zh','en'):raise ProviderError('Unsupported language')
   effort=reasoning_effort(dict(cfg,deepseek_options=False,reasoning_effort=cfg.get('reasoning_effort','high'))) if subscription else reasoning_effort(cfg)
   if subscription and effort not in ('high','xhigh','max'):raise ProviderError('Luna subscription generation requires high or above.')
-  self.cfg=dict(provider=provider,language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=False if subscription else bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
+  self.cfg=dict(provider=provider,language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),parallel_region=bool(cfg.get('parallel_region',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=False if subscription else bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
   self.audit.add_secret(key)
-  self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit)
+  self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit,parallel_region=self.cfg['parallel_region'])
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
   self.generation+=1; self.failed.clear(); self.failures.clear(); self.failed_payloads.clear(); self.error=''; self.deferred=None; self.paused=False; self.wake.set()
  def start_worker(self):
@@ -288,15 +296,17 @@ class Director:
   active_tasks=[]
   for key in self.in_flight:
    epoch,kind,target=key;metrics=self.task_metrics.get(key,{})
-   active_tasks.append(dict(kind=kind,target=target,name=self._title(target),phase=metrics.get('phase','generating'),
+   active_tasks.append(dict(kind=kind,target=target,name=self._title(target),phase=metrics.get('phase','generating'),component=metrics.get('component'),components=metrics.get('components',{}),pipeline=bool(metrics.get('pipeline')),
      source=metrics.get('source','prefetch'),started_at=metrics.get('started_at'),started_steps=metrics.get('started_steps'),
      elapsed_seconds=round(time.monotonic()-metrics.get('_start',time.monotonic()),1),attempts=metrics.get('attempts',0),progress=metrics.get('progress')))
+  active_model_requests=sum(sum(state=='running' for state in metrics.get('components',{}).values()) if metrics.get('pipeline') else 1 for metrics in self.task_metrics.values())
   return copy.deepcopy(dict(failed_tasks=failed_tasks,active_tasks=active_tasks,task_history=self.task_history,repair_calls=self.repair_calls,normalized_responses=self.normalized_responses,normalization_count=self.normalization_count,recent_corrections=self.recent_corrections,
-   prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),provider=(self.cfg or {}).get('provider',''),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
+   prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),active_model_requests=active_model_requests,mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),provider=(self.cfg or {}).get('provider',''),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
  def _next_job(self):
   w=self.world; s=w.state
   if s and s.get('game_over'):return None
   if not s or not self.cfg or self.paused or len(self.in_flight)>=2: return None
+  if any(metrics.get('pipeline') for metrics in self.task_metrics.values()):return None
   if not self.cfg['offline'] and self.calls>=self.cfg['max_calls']:
    self.error='本次进程的模型调用已达上限。现有地图仍可玩；设置里可提高上限。'; return None
   if time.monotonic()-self.last_request<self.cfg['cooldown']: return None
@@ -355,8 +365,15 @@ class Director:
    if not job: return False
    ctx,cfg,generation=job; kind=ctx['kind']; target=ctx['target']; job_key=(ctx['epoch'],kind,target)
    if kind=='region' and not cfg['offline'] and self.world.state.get('adventure'):ctx['require_overworld_threats']=True
+   split_region=(kind=='region' and cfg.get('provider')=='chatgpt_subscription' and cfg.get('parallel_region',True)
+                 and not cfg['offline'] and bool(ctx.get('chapter_plan') or ctx.get('content_contract') or ctx.get('require_overworld_threats'))
+                 and not ctx.get('refresh')
+                 and not self.in_flight and self.calls+2<=cfg['max_calls'])
+   cfg['_parallel_region']=split_region
    self.in_flight[job_key]=('统筹冒险 ' if kind=='direction' else '规划章节 ' if kind=='campaign' else '落实委托 ' if ctx.get('commission_ids') else '续写 ' if kind=='reaction' else '生成 ')+self._title(target)
    self._begin_task(job_key,ctx)
+   self.task_metrics[job_key]['pipeline']=split_region
+   if split_region:self.task_metrics[job_key].update(component='parallel',components={'gameplay':'running','audiovisual':'pending'})
    self.busy=' / '.join(self.in_flight.values()); self.last_request=time.monotonic()
   raw=None; error=None;attempts=0
   cached=self.failed_payloads.get((kind,target))
@@ -382,21 +399,42 @@ class Director:
      request_ctx=dict(ctx,rejected_response=raw,validation_errors=as_issues(error)) if error and raw is not None else ctx
      repair=validation_report(error) if isinstance(error,InvalidPatch) else str(error) if error else ''
      request_started=time.monotonic()
-     self.audit.emit('model.request',kind=kind,target=target,call=request_number,repair=bool(repair),model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
+     self.audit.emit('model.request',kind=kind,target=target,call=request_number,component='gameplay' if cfg.get('_parallel_region') and not repair else None,repair=bool(repair),model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
      model_started=time.monotonic()
      cfg['_cancel_event']=self.stop_event
      cfg['_audit']=self.audit;cfg['_request_meta']=dict(kind=kind,target=target,call=request_number)
      if self.codex_partial_dir:cfg['_codex_partial_dir']=str(self.codex_partial_dir)
      def update_progress(progress):
       with self.world.lock:
-       if job_key in self.task_metrics:self.task_metrics[job_key]['progress']=progress
+       if job_key in self.task_metrics:
+        self.task_metrics[job_key]['progress']=progress
+        if progress.get('component'):self.task_metrics[job_key]['component']=progress['component']
      cfg.setdefault('_codex_progress',update_progress)
+     if cfg.get('_parallel_region'):
+      cfg['_region_validation_context']=self.world.validation_context(ctx)
+      def reserve_component(component):
+       with self.world.lock:
+        if self.calls>=cfg['max_calls']:raise ProviderError('区域并行制作所需的调用额度已经用完。')
+        self.calls+=1;call=self.calls
+        if job_key in self.task_metrics:
+         self.task_metrics[job_key].update(component=component,phase='generating')
+         self.task_metrics[job_key]['components'][component]='running'
+       self.audit.emit('model.request',kind=kind,target=target,call=call,component=component,repair=False,model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
+       return call
+      def component_done(component):
+       with self.world.lock:
+        if job_key in self.task_metrics:self.task_metrics[job_key]['components'][component]='done'
+       self.audit.emit('model.component.finished',kind=kind,target=target,component=component)
+      def can_repair_component():
+       with self.world.lock:return self.calls<cfg['max_calls']
+      cfg['_region_subrequest']=reserve_component;cfg['_region_component_done']=component_done;cfg['_region_can_repair']=can_repair_component
      try:raw,usage=ChatProvider(cfg).generate(request_ctx,kind,repair)
      finally:
       with self.world.lock:self.task_metrics[job_key]['request_seconds']+=time.monotonic()-model_started
      self.audit.emit('model.response',kind=kind,target=target,call=request_number,seconds=round(time.monotonic()-request_started,3),usage=usage,response_chars=len(raw))
      with self.world.lock:
       self._record_usage(usage)
+      if job_key in self.task_metrics and usage.get('pipeline_requests'):self.task_metrics[job_key]['pipeline_requests']=usage['pipeline_requests']
     changes=[]
     with self.world.lock:
      if not self._current(ctx,generation):break

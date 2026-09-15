@@ -1,6 +1,7 @@
 """Native integration test with an isolated standard-library server, no cloud calls."""
 from pathlib import Path
 import secrets
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -16,12 +17,23 @@ content_test='--content' in sys.argv
 hybrid_test='--hybrid' in sys.argv
 adventure_test='--adventure' in sys.argv
 threat_test='--threat' in sys.argv
+generated_test='--generated' in sys.argv
+generated_source=None
+if generated_test:
+    try:generated_source=Path(sys.argv[sys.argv.index('--generated')+1]).resolve()
+    except (IndexError,ValueError):raise SystemExit('--generated requires an existing world.sqlite3 path')
+    if not generated_source.is_file():raise SystemExit('generated world database does not exist')
 if content_test:(ROOT/'userdata/content-e2e').mkdir(parents=True,exist_ok=True)
 if hybrid_test:(ROOT/'userdata/hybrid-e2e').mkdir(parents=True,exist_ok=True)
 if adventure_test:(ROOT/'userdata/adventure-e2e').mkdir(parents=True,exist_ok=True)
 if threat_test:(ROOT/'userdata/threat-e2e').mkdir(parents=True,exist_ok=True)
 with tempfile.TemporaryDirectory() as td:
-    server=GameServer(('127.0.0.1',0),Path(td)/'world.sqlite3',secrets.token_urlsafe(32))
+    save_path=Path(td)/'world.sqlite3'
+    if generated_source:
+        source=sqlite3.connect(generated_source.as_uri()+'?mode=ro',uri=True);destination=sqlite3.connect(save_path)
+        try:source.backup(destination)
+        finally:source.close();destination.close()
+    server=GameServer(('127.0.0.1',0),save_path,secrets.token_urlsafe(32))
     if adventure_test or threat_test:
         sys.path.insert(0,str(ROOT/'tests'))
         from adventure_fixtures import adventure_plan,authored_adventure_region
@@ -71,7 +83,7 @@ with tempfile.TemporaryDirectory() as td:
     server.director.start_worker()
     worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
     try:
-        script='native_threat_e2e' if threat_test else 'native_adventure_e2e' if adventure_test else 'native_hybrid_e2e' if hybrid_test else 'native_content_e2e' if content_test else 'native_e2e'
+        script='native_generated_region' if generated_test else 'native_threat_e2e' if threat_test else 'native_adventure_e2e' if adventure_test else 'native_hybrid_e2e' if hybrid_test else 'native_content_e2e' if content_test else 'native_e2e'
         command=[find_godot(None),'--path',str(ROOT),'--script',f'res://tests/{script}.gd']
         if '--headless' in sys.argv: command+=['--headless']
         command+=['--','--backend-url=http://127.0.0.1:'+str(server.server_port),'--session-token='+server.token]
@@ -82,7 +94,7 @@ with tempfile.TemporaryDirectory() as td:
                 if output:print(output.decode('utf-8',errors='replace') if isinstance(output,bytes) else output)
             raise RuntimeError('Native test exceeded its deadline; see captured output') from None
         print(result.stdout);print(result.stderr)
-        marker='NATIVE_THREAT_E2E_OK' if threat_test else 'NATIVE_ADVENTURE_E2E_OK' if adventure_test else 'NATIVE_HYBRID_E2E_OK' if hybrid_test else 'NATIVE_CONTENT_E2E_OK' if content_test else 'NATIVE_E2E_OK'
+        marker='NATIVE_GENERATED_REGION_OK' if generated_test else 'NATIVE_THREAT_E2E_OK' if threat_test else 'NATIVE_ADVENTURE_E2E_OK' if adventure_test else 'NATIVE_HYBRID_E2E_OK' if hybrid_test else 'NATIVE_CONTENT_E2E_OK' if content_test else 'NATIVE_E2E_OK'
         assert result.returncode==0 and marker in result.stdout and 'SCRIPT ERROR' not in result.stderr
         assert server.director.calls==0
     finally:

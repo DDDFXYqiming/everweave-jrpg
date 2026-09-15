@@ -26,15 +26,15 @@ class GameServer(ThreadingHTTPServer):
   if address[0]!='127.0.0.1': raise ValueError('Only IPv4 loopback binding is supported')
   self.token=token; self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
   self.snapshot_sequence=0
-  self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','hybrid_content','language')
-  self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-5.6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,hybrid_content=True,language='zh')
+  self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','hybrid_content','parallel_region','language')
+  self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-5.6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,hybrid_content=True,parallel_region=True,language='zh')
   self.preference_path=None if str(save_path)==':memory:' else Path(save_path).with_name('settings.json')
   if self.preference_path and self.preference_path.exists():
    try:
     saved=json.loads(self.preference_path.read_text(encoding='utf-8'))
     if isinstance(saved,dict):
      if saved.get('provider')=='codex_subscription':saved=dict(saved,provider='chatgpt_subscription',model='gpt-5.6-luna',reasoning_effort='high',base_url='',deepseek_options=False)
-     allowed=self.preference_keys if saved.get('provider') else ('offline','max_calls','hybrid_content','language')
+     allowed=self.preference_keys if saved.get('provider') else ('offline','max_calls','hybrid_content','parallel_region','language')
      self.preferences.update({k:saved[k] for k in allowed if k in saved})
    except (OSError,ValueError): pass
   super().__init__(address,Handler)

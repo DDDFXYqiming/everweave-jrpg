@@ -301,5 +301,8 @@
   "等待浏览器授权……": "Waiting for browser authorization…",
   "凭据由当前 Windows 用户保护。": "Credential protected for this Windows user.",
   "浏览器中输入代码：": "Enter this code in the browser: ",
-  "尚未为 Everweave 授权。": "Everweave is not authorized yet."
+  "尚未为 Everweave 授权。": "Everweave is not authorized yet.",
+  " · 玩法与视听并行": " · Gameplay and AV in parallel",
+  " · 玩法制作": " · Gameplay build",
+  " · 视听制作": " · Audiovisual build"
 }

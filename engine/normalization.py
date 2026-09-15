@@ -476,11 +476,42 @@ class Normalizer:
             if isinstance(art.get('scenery'), list):
                 art['scenery'] = [self.ref('sprites', value, f'{root}.visuals.scenery[{i}]') for i,value in enumerate(art['scenery'])]
 
+    def boolean_state_defaults(self):
+        """A field only ever set true starts false; other missing values stay errors."""
+        if self.expected!='region' or not isinstance(self.body,dict):return
+        entities={e.get('id'):e for e in self.body.get('entities',[]) if isinstance(e,dict) and isinstance(e.get('id'),str)}
+        writes=defaultdict(set)
+        def visit(node,self_target=None):
+            if isinstance(node,list):
+                for value in node:visit(value,self_target)
+                return
+            if not isinstance(node,dict):return
+            if node.get('op')=='set' and isinstance(node.get('path'),str) and type(node.get('value')) is bool:
+                path=node['path'];match=re.fullmatch(r'objects\.([a-z][a-z0-9_]*)\.state\.([a-z][a-z0-9_]*)',path)
+                if match:writes[(match.group(1),match.group(2))].add(node['value'])
+                elif self_target:
+                    match=re.fullmatch(r'self\.state\.([a-z][a-z0-9_]*)',path)
+                    if match:writes[(self_target,match.group(1))].add(node['value'])
+            for value in node.values():visit(value,self_target)
+        program=self.body.get('program') or {}
+        for group in ('actions','objectives'):
+            visit(program.get(group,[]))
+        for hook in program.get('hooks',[]) if isinstance(program.get('hooks'),list) else []:
+            if isinstance(hook,dict):visit(hook,hook.get('target'))
+        for (object_id,field),values in writes.items():
+            entity=entities.get(object_id)
+            if entity is None or True not in values:continue
+            state=entity.setdefault('state',{})
+            if isinstance(state,dict) and field not in state:
+                state[field]=False
+                self.record(f'{self.expected}.entities.{object_id}.state.{field}','boolean_state_default',None,False)
+
     def run(self):
         self.formats()
         self.collect_definitions()
         self.identifiers()
         self.references()
+        self.boolean_state_defaults()
         return self.raw, self.corrections, self.errors
 
 

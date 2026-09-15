@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sqlite3
 import sys
+import threading
 import time
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
@@ -19,7 +20,7 @@ def main():
     parser.add_argument('--live',action='store_true');parser.add_argument('--source',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True);parser.add_argument('--timeout-seconds',type=int,default=660)
     parser.add_argument('--transport',choices=('direct','app-server'),default='direct')
-    parser.add_argument('--max-calls',type=int,default=3,help='Actual subscription requests; split regions need three')
+    parser.add_argument('--max-calls',type=int,default=2,help='Actual subscription requests; split regions need two')
     args=parser.parse_args()
     if not args.live or not 60<=args.timeout_seconds<=900 or not 1<=args.max_calls<=5:parser.error('--live, timeout 60..900 and max-calls 1..5 are required')
     out=args.output.resolve();out.mkdir(parents=True,exist_ok=True);db=out/'world.sqlite3'
@@ -35,6 +36,11 @@ def main():
     def progress(p):print(json.dumps({k:p[k] for k in ('stage','elapsed_seconds','last_event_age','reasoning_chars','output_chars','errors','retries')},ensure_ascii=False),flush=True)
     original=ChatProvider.generate;traces=[]
     def write(name,value):(out/name).write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf8')
+    components=[];component_lock=threading.Lock()
+    def capture_component(name,raw,usage):
+        with component_lock:
+            components.append(dict(component=name,raw=raw,usage=usage));write('components.json',components)
+    d.cfg['_region_component_output']=capture_component
     def generate(provider,ctx,kind,repair=''):
         assert provider.cfg['provider'] in ('chatgpt_subscription','codex_subscription') and provider.cfg['reasoning_effort']=='high'
         provider.cfg['_codex_progress']=progress
