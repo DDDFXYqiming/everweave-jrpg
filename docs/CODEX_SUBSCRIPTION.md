@@ -75,7 +75,7 @@ App Server 的实际 token 通知返回 `modelContextWindow=828400`，对应显�
 
 迁移前的 App Server 路径每次执行初始化、账户/模型/额度查询、临时线程和回合协议。迁移后直接进行 OAuth 刷新与 Responses SSE，不启用工具、文件、浏览器或智能体线程。
 
-早期速度对照曾读取另一个项目的短期 access token 到内存，没有复制 refresh token，也没有修改对方数据库。该迁移辅助代码已在公开前删除；当前测试和正式运行只使用 Everweave 自己的设备授权。
+早期速度对照使用过临时测试授权；该迁移辅助代码已在公开前删除。当前测试和正式运行只使用 Everweave 自己的设备授权。
 
 | 测试 | App Server | 直连 |
 |---|---:|---:|
