@@ -110,6 +110,7 @@ func path_to(target: String) -> Array[String]:
 		if id == target: break
 		for edge in data.get("edges",[]):
 			if bool(edge.get("locked",false)):continue
+			if edge.has("allowed_from") and not id in edge.allowed_from:continue
 			var next: String = str(edge.b) if str(edge.a) == id else str(edge.a) if str(edge.b) == id else ""
 			if not next.is_empty() and not parents.has(next):
 				parents[next] = id
@@ -186,6 +187,12 @@ func _draw() -> void:
 		if a in route and b in route and absi(route.find(a)-route.find(b)) == 1: ink = Color("e6c78b")
 		if bool(nodes[a].visited) and bool(nodes[b].visited) and not bool(edge.get("locked",false)): draw_line(positions[a],positions[b],ink,2,true)
 		else: draw_dashed_line(positions[a],positions[b],ink,2,9,true)
+		if bool(edge.get("one_way",false)):
+			var vector: Vector2 = (positions[b]-positions[a]).normalized()
+			if str(edge.get("from_id",""))==b:vector=-vector
+			var midpoint: Vector2 = (positions[a]+positions[b])*.5
+			var normal := Vector2(-vector.y,vector.x)
+			draw_polyline(PackedVector2Array([midpoint-vector*10+normal*5,midpoint,midpoint-vector*10-normal*5]),ink,2,true)
 	var font: Font = get_theme_default_font()
 	for id in nodes:
 		if concealed.has(id): continue

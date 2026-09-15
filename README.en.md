@@ -8,7 +8,13 @@
 
 **Campaign before map**
 
-An online world starts with a game specification and a campaign plan. The plan defines the chapter goal, 4 to 8 regions, bidirectional links, branches, loops, locked or hidden routes, shared flags, and a continuation gate. Regions use the route anchors from that plan, giving the world a persistent structure.
+An online world starts with a game specification and a campaign plan. The plan defines the chapter goal, 4 to 8 regions, links with optional one-way travel, branches, loops, locked or hidden routes, shared flags, and a continuation gate. Regions use the route anchors from that plan, giving the world a persistent structure.
+
+**A global director commissions concrete content**
+
+The director defines persistent cast, mission dependencies, skill briefs, resource gain limits and conditional endings. Content workers implement scenes, dialogue, encounters and rules. Accumulated gameplay events can trigger a review that adds commissions, adjusts unvisited region briefs or opens limited connections. Player choices update shared cast state, and earned abilities remain usable across regions. See the [director contract](docs/ADVENTURE_DIRECTOR.md) and [validation scope](docs/ADVENTURE_VALIDATION.md).
+
+[Fast autonomous playtesting](docs/FAST_PLAYTEST.md) uses normal game actions for continuous movement, stops at meaningful events and leaves exploration choices to the tester. Native Godot checks separately cover actual input and presentation.
 
 **The model creates executable content**
 

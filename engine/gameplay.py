@@ -15,6 +15,11 @@ def transaction(world, operation):
     world._batch = dict(regions={}, events=[], delete=set())
     try:
         result = operation()
+        if world.state.get('pending_ending') and not world.state['ui'] and not world.state['battle']:
+            ending=world.state.pop('pending_ending')
+            world.state['ui']=dict(kind='message',title=ending['name'],lines=[ending['description']])
+            if ending['final']:world.state['game_over']=True
+            world.persist()
         if world.state.get('game_spec') and world.region() and not world.state.get('game_over'):
             from .game_spec import active
             if active(world.state,'hp') and world.state['player']['hp']<=0 and world.state['game_spec']['failure_mode']!='none':
@@ -182,6 +187,9 @@ def action(world, a):
             if s['battle'] or s['ui'].get('kind') != 'actions': raise RuleError('没有可操作对象。')
             offered = {entry['id'] for entry in s['ui'].get('actions', [])}
             if a.get('id') not in offered: raise RuleError('无效操作。')
+            if s['ui'].get('scene_id'):
+                from .story_content import choose
+                choose(world,a['id']);return
             s['ui'] = {}
             vm = Runtime(world, r); definition = vm.invoke(a['id'], 'explore')
             event, _ = world.story('interaction', definition['label'], dict(action=definition['id']))
@@ -230,13 +238,13 @@ def interact(world, entity):
     return True
 
 
-def has_combat(region):
-    return any(a['scope'] == 'combat' for a in region.get('program', {}).get('actions', []))
+def has_combat(region,world=None):
+    return any(a['scope'] == 'combat' for a in (Runtime(world,region).actions() if world else region.get('program', {}).get('actions', [])))
 
 
 def combat(world, move):
     r = world.region(); s = world.state; b = s['battle']; p = s['player']
-    if not has_combat(r): return False
+    if not has_combat(r,world): return False
     if move == 'flee':
         s['battle'] = None; world.note('你撤出了战斗。'); world.persist(r); return True
     if not isinstance(move, str) or not move.startswith('rule:'): raise RuleError('请选择模型生成的战斗操作。')
@@ -254,9 +262,8 @@ def combat(world, move):
     if vm.end_result == 'escape': s['battle'] = None; world.persist(r); return True
     if b['hp'] <= 0 or vm.end_result == 'victory':
         vm.emit('victory', target=b['id']); world._win_battle(); return True
-    hooks = r.get('program', {}).get('hooks', [])
-    if any(h['on'] == 'enemy_turn' for h in hooks): vm.emit('enemy_turn', target=b['id'])
-    else:
+    acted=vm.emit('enemy_turn',target=b['id'])
+    if not acted:
         p['hp'] = max(0, p['hp']-b['attack']); b['log'].append(b['name']+f"造成 {b['attack']} 点伤害。")
     vm.emit('turn_end', target=b['id'], advance=True)
     b['log'] = (b['log']+vm.messages)[-7:]

@@ -2,6 +2,8 @@
 
 章节与游戏规格已在地区 DSL 上方接入，完整规划协议见 [CAMPAIGNS.md](CAMPAIGNS.md)。本文说明局部场景及其规则执行。
 
+当前还支持全局人物 `actor_id/cast`、可学习并跨区携带的 `abilities`、有后果的选择 `scenes`；协议及权限见 [冒险导演](ADVENTURE_DIRECTOR.md)。普通局部反应和受委托的内容工作器使用不同写入边界。
+
 ## 地区能表达什么
 
 在线新区域必须包含 `scene`、`program`、`visuals`。缺少它们会进入原有的最多一次修复，不能悄悄退回旧 PCG 地图。旧存档和显式离线自检保留原逻辑。

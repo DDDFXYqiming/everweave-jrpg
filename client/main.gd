@@ -979,6 +979,11 @@ func _render() -> void:
 		var goals: Array[String] = [str(journey.get("title","")),str(journey.get("goal",""))]
 		for milestone in journey.get("milestones",[]):goals.append(("✓ " if milestone.complete else "· ")+str(milestone.name))
 		quest_label.text="\n".join(goals+lines)
+	if state.get("adventure") is Dictionary:
+		var extra: Array[String] = []
+		for mission in state.adventure.get("missions",[]):
+			if not quest_label.text.contains(str(mission.name)):extra.append(("◇ " if mission.kind=="main" else "· ")+str(mission.name))
+		if not extra.is_empty():quest_label.text+="\n"+"\n".join(extra)
 	status_summary.text = View.summary(state)
 	var d: Dictionary = state.get("director", {})
 	var mode: String = str(d.get("mode", "not_configured"))
@@ -1126,6 +1131,22 @@ func _render_modal() -> void:
 			return
 		var modal_title: String = str(ui.get("title",""))
 		_label(modal_stack,L.t(modal_title) if ui.get("system_title",false) else modal_title,24,GOLD)
+		if not ui.get("portraits",[]).is_empty():
+			var portraits := HFlowContainer.new()
+			modal_stack.add_child(portraits)
+			for portrait in ui.portraits:
+				var row := HBoxContainer.new()
+				row.custom_minimum_size=Vector2(180,72)
+				portraits.add_child(row)
+				var face := TextureRect.new()
+				face.texture=Fieldbook.item_texture(self,{"icon_visual":portrait.visual})
+				face.custom_minimum_size=Vector2(56,64)
+				face.expand_mode=TextureRect.EXPAND_IGNORE_SIZE
+				face.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+				face.texture_filter=CanvasItem.TEXTURE_FILTER_NEAREST
+				row.add_child(face)
+				var name_label: Label = _label(row,str(portrait.name),15,GOLD)
+				name_label.autowrap_mode=TextServer.AUTOWRAP_OFF
 		var message_lines: Array[String] = []
 		for line in ui.get("lines", []): message_lines.append(str(line))
 		_label(modal_stack, "\n\n".join(message_lines), 18)

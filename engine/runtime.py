@@ -61,6 +61,7 @@ class Runtime:
         self.messages = []
         self.changed = False
         self.end_result = None
+        self.effects_executed=0
 
     def spend(self, amount=1):
         self.gas -= amount
@@ -88,6 +89,10 @@ class Runtime:
     def access(self, name, write=False):
         path(name, write)
         bits = name.split('.')
+        if bits[0]=='cast':
+            actor=self.s.get('adventure',{}).get('cast',{}).get(bits[1])
+            if not actor or bits[2] not in actor['state']:raise RuleError('unknown persistent actor field')
+            return actor['state'],bits[2]
         if bits[0]=='chapter':
             from .campaign import chapter
             c=chapter(self.s,self.region['id'])
@@ -169,6 +174,9 @@ class Runtime:
                 value = self.expr(c['delta'])
                 if type(value) not in (int, float): raise RuleError('stat delta must be numeric')
                 delta = max(-2000, min(2000, int(value))); name = c['name']
+                if c['target']=='player':
+                    from .adventure import check_gain
+                    check_gain(self.world,name,delta)
                 cap = target.get('max_'+name, 1_000_000)
                 if c['target']=='player' and self.s.get('game_spec'):
                     from .game_spec import resource
@@ -197,6 +205,20 @@ class Runtime:
                     obj['solid'] = value
                 else: obj['spent'] = True
                 self.changed = True
+            elif op=='actor':
+                actor=self.s.get('adventure',{}).get('cast',{}).get(c['id']);value=self.expr(c['value'])
+                if not actor or c['key'] not in actor['state'] or type(value) is not type(actor['state'][c['key']]):raise RuleError('actor state identity/type mismatch')
+                if c['key']=='alive' and not actor['state']['alive'] and value:raise RuleError('cannot resurrect committed dead cast')
+                actor['state'][c['key']]=max(-100,min(100,value)) if type(value) in (int,float) else value;self.changed=True
+            elif op=='learn':
+                skill=self.s.get('adventure',{}).get('skills',{}).get(c['id'])
+                if not skill or not skill.get('rule'):raise RuleError('portable skill has not been implemented')
+                learned=self.s['player'].setdefault('abilities',[])
+                if c['id'] not in learned:learned.append(c['id']);self.world.note(skill['name'])
+                self.changed=True
+            elif op=='scene':
+                from .story_content import show
+                show(self,c['id']);self.changed=True
             elif op == 'chapter':
                 from .campaign import chapter
                 cdata=chapter(self.s,self.region['id']);key=c['key'];value=self.expr(c['value'])
@@ -204,7 +226,9 @@ class Runtime:
                 cdata['flags'][key]=value;self.changed=True
             elif op == 'resource':
                 from .game_spec import change
-                change(self.s,c['id'],self.expr(c['delta']));self.changed=True
+                from .adventure import check_gain
+                delta=self.expr(c['delta']);check_gain(self.world,c['id'],delta)
+                change(self.s,c['id'],delta);self.changed=True
             elif op == 'paint':
                 spec = dict(rect=[self.expr(v) for v in c['rect']], tile=c['tile'])
                 if 'surface' in c: spec['surface'] = c['surface']
@@ -230,6 +254,7 @@ class Runtime:
                 if not self.s.get('battle'): raise RuleError('no battle to finish')
                 self.end_result = c['result']
             else: raise RuleError('unknown command')
+            if op!='if':self.effects_executed+=1
 
     def event_data(self, name, target='player', **data):
         canonical = self.s['battle']['id'] if target == 'enemy' and self.s.get('battle') else target
@@ -240,6 +265,7 @@ class Runtime:
         return dict(type=name, target=canonical.removeprefix(self.region['id']+':'), canonical_target=canonical, **data)
 
     def emit(self, name, target='player', advance=False, **data):
+        handled=0
         if advance:
             self.rt['clock'] += 1
             self.rt['history'].append({k: self.s['player'][k] for k in ('x', 'y')})
@@ -259,13 +285,19 @@ class Runtime:
                 self.spend()
                 key = 'hook:'+hook['id']
                 if hook['on'] != self.event['type'] or (hook['once'] and key in self.rt['used']): continue
+                if self.event['type']=='enemy_turn' and self.s.get('battle'):
+                    enemy=self.s['battle']['id'];owner=hook.get('target','player')
+                    if owner not in ('player','enemy','self',enemy,enemy.removeprefix(self.region['id']+':')):continue
                 self.actor = hook.get('target', 'player')
                 if self.expr(hook['when']):
+                    before=self.effects_executed
                     if hook['once']: self.rt['used'].append(key)
                     self.run(hook['effects'])
+                    if self.event['type']==name and self.effects_executed>before:handled+=1
             self.objectives()
         self.actor = 'player'
         validate_space(self.region, self.s['player'])
+        return handled
 
     def objectives(self):
         self.actor = 'player'
@@ -303,9 +335,16 @@ class Runtime:
         else:return ''
         return f'需要 {name} ×{needed}（当前 {current}）' if current<needed else ''
 
+    def actions(self):
+        result=list(self.region.get('program',{}).get('actions',[]))
+        for key in self.s['player'].get('abilities',[]):
+            skill=self.s.get('adventure',{}).get('skills',{}).get(key,{})
+            if skill.get('rule'):result.append(dict(skill['rule'],id='ability:'+key))
+        return result
+
     def available(self, target=None, scope=None):
         result = []; p = self.s['player']
-        for a in self.region.get('program', {}).get('actions', []):
+        for a in self.actions():
             if scope and a['scope'] != scope: continue
             if a['once'] and 'action:'+a['id'] in self.rt['used']: continue
             try:
@@ -328,7 +367,7 @@ class Runtime:
     def invoke(self, key, scope):
         options = {a['id']: a for a in self.available(scope=scope)}
         if key not in options or not options[key]['enabled']: raise RuleError('action not available here')
-        a = next(a for a in self.region['program']['actions'] if a['id'] == key)
+        a = next(a for a in self.actions() if a['id'] == key)
         self.actor = a['target']; self.event = self.event_data('invoke', a['target'], action=key)
         if a['once']: self.rt['used'].append('action:'+key)
         self.run(a['effects'])
@@ -372,6 +411,7 @@ def check_references(region, items):
             if 'surface' in node and node['surface'] not in sprites: bad(location+'.surface','undefined surface',node['surface'])
             for key,value in node.items(): walk(value,location+'.'+key)
     walk(region.get('program', {}),'region.program')
+    walk(region.get('scenes',[]),'region.scenes')
     for item in items.values():
         if item.get('origin') == region['id']: walk(item.get('use', {}),f'items[{item["id"]}].use')
     if errors:raise RuleError(issues=errors)

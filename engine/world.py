@@ -11,7 +11,7 @@ from .visuals import freeze_sprite,resolve_sprite
 from . import gameplay
 from .runtime import Runtime, install
 from .scene import solid_at, cells_for
-from . import campaign,game_spec
+from . import campaign,game_spec,adventure
 
 class GameError(ValueError): pass
 
@@ -42,10 +42,11 @@ class World:
  def region(self,rid=None):
   rid=rid or self.state['current']
   if rid in self.cache:
-   self.cache.move_to_end(rid);campaign.sync_gates(self,self.cache[rid]);return self.cache[rid]
+   self.cache.move_to_end(rid);campaign.sync_gates(self,self.cache[rid]);adventure.sync_cast(self,self.cache[rid]);return self.cache[rid]
   r=self.store.load_region(rid)
   if r:
    campaign.sync_gates(self,r)
+   adventure.sync_cast(self,r)
    from .scene import dress
    dress(r)
    self.cache[rid]=r
@@ -53,6 +54,8 @@ class World:
   return r
  def persist(self,*regions,event=None,delete=()):
   campaign.refresh(self)
+  adventure.refresh(self)
+  adventure.record(self,event)
   from .scene import dress
   for r in regions:dress(r)
   self.state['version']+=1
@@ -98,11 +101,14 @@ class World:
     if not s['topology'][neighbor]['visited']: targets.append((neighbor,distance+1))
   return targets
  def context(self,target=None,kind='region'):
+  if kind=='direction':return adventure.director_context(self)
   if kind=='campaign':
    s=self.state;b=s['campaign']
+   previous=copy.deepcopy(b['chapters'].get(b.get('active')))
+   if previous:previous.pop('adventure',None)
    return dict(kind=kind,target=s['current'],epoch=s['epoch'],story_revision=s['story_revision'],content_version=2,
     setting=s['setting'],campaign_revision=b['revision'],chapter_number=len(b['chapters'])+1,game_spec=s.get('game_spec'),
-    previous_chapter=copy.deepcopy(b['chapters'].get(b.get('active'))),recent_events=self.store.recent_events(12))
+    previous_chapter=previous,adventure_memory=adventure.memory(self),recent_events=self.store.recent_events(12))
   s=self.state; rid=target or s['current']; r=self.region(); n=s['topology'][rid]
   parent=self.region(n['parent']) if n['parent'] else None
   art=(parent or r or {}).get('visuals',{})
@@ -111,10 +117,12 @@ class World:
    available_items=[i for k,i in s['items'].items() if k in C.BASE_ITEMS or k.startswith(s['current']+':') or k in s['player']['inventory']],
    frontier=[dict(id=k,name=s['topology'][k]['name'],outline=s['topology'][k].get('outline'),visited=s['topology'][k]['visited']) for k in s['topology'][s['current']]['children']],
    known_locations=[dict(id=k,name=v['name'],visited=v['visited']) for k,v in list(s['topology'].items())[-18:]],
-   facts=dict(list(s['facts'].items())[-35:]),lore=list(s['lore'].values())[-16:],threads=list(s['threads'].values())[-10:],quests=list(s['quests'].values())[-10:],recent_events=self.store.recent_events(12),**campaign.context(self,rid))
+   facts=dict(list(s['facts'].items())[-35:]),lore=list(s['lore'].values())[-16:],threads=list(s['threads'].values())[-10:],quests=list(s['quests'].values())[-10:],recent_events=self.store.recent_events(12),**campaign.context(self,rid),**adventure.context(self,rid))
  def context_is_current(self,context):
   s=self.state
   if not s or context.get('epoch')!=s['epoch']:return False
+  if context.get('kind')=='direction':return bool(adventure.state(self) and context.get('adventure_revision')==s['adventure']['revision'] and context.get('story_revision')==s['story_revision'] and context.get('event_seq')==s['adventure']['event_seq'])
+  if context.get('content_contract') and context.get('adventure_revision')!=s['adventure']['revision']:return False
   if context.get('kind')=='campaign':return bool(campaign.book(s) and s['campaign']['pending'] and context.get('campaign_revision')==s['campaign']['revision'])
   node=s['topology'].get(context.get('target'))
   if node is None:return False
@@ -167,14 +175,26 @@ class World:
   return removed
  def validation_context(self,context):
   current=self.region() or {}
-  return dict(context,validation_items=list(self.state['items'].values()),validation_quests=list(self.state['quests'].values()),validation_props=current.get('props',[]),validation_bindings=current.get('visuals',{}).get('bindings',{}))
+  return dict(context,adventure_state=self.state.get('adventure'),validation_items=list(self.state['items'].values()),validation_quests=list(self.state['quests'].values()),validation_props=current.get('props',[]),validation_bindings=current.get('visuals',{}).get('bindings',{}),**({'validation_world':self} if context['kind']=='direction' else {}))
  def validate_patch(self,raw,context):
-  if context['kind']=='campaign':return dict(kind='campaign',campaign=campaign.validate(raw,not self.state.get('game_spec')))
+  if context['kind']=='campaign':return dict(kind='campaign',campaign=campaign.validate(raw,not self.state.get('game_spec'),self.state.get('adventure')))
+  if context['kind']=='direction':
+   data=adventure.validate_direction(self,raw)
+   from .storage import Store
+   store=Store(':memory:')
+   try:
+    regions=[self.region(rid) for rid,n in self.state['topology'].items() if n['ready']]
+    store.commit(copy.deepcopy(self.state),copy.deepcopy([r for r in regions if r]))
+    probe=World(store);adventure.apply_direction(probe,data,context)
+   finally:store.close()
+   return dict(kind='direction',direction=data)
   identities=self.validation_context(context)
   changes=[]
   p=parse_patch(raw,context['kind'],identities,changes)
   p['_corrections']=changes
   game_spec.check_plan(self.state,p[p['kind']])
+  from . import story_content
+  story_content.validate(self,p[p['kind']],context)
   c=campaign.chapter(self.state,context['target'])
   if c:
    def check_shared(v):
@@ -184,7 +204,7 @@ class World:
      key=v.get('key') if v.get('op')=='chapter' else str(v.get('get','')).split('.',1)[1] if str(v.get('get','')).startswith('chapter.') else None
      if key is not None and key not in c['flags']:raise InvalidPatch('undefined chapter flag '+str(key))
      for x in v.values():check_shared(x)
-   check_shared(p[p['kind']].get('program',{}))
+   check_shared(p[p['kind']])
    if p['kind']=='reaction' and (p['reaction'].get('locations') or p['reaction'].get('future_updates')):raise InvalidPatch('chapter routes are planned centrally; update shared flags or await the next chapter')
   if campaign.chapter(self.state,context['target']) and p['kind']=='region':
    if p['region'].get('destinations'):raise InvalidPatch('chapter locations use planned_routes; omit region.destinations')
@@ -196,18 +216,21 @@ class World:
     elif isinstance(v,dict):
      if v.get('op')=='chapter':writes.add(v['key'])
      for x in v.values():inspect(x)
-   inspect(p['region'].get('program',{}))
+   inspect(p['region'])
    required={k for k,v in c['flag_sources'].items() if v==context['target']}
    if not required<=writes:raise InvalidPatch('region must implement chapter flag producers: '+', '.join(sorted(required-writes)))
    if context['target']==c['continuation']['from']:
     if 'chapter_gate' not in p['region'].get('scene',{}).get('anchors',{}):raise InvalidPatch('reserve scene.anchors.chapter_gate for the next chapter')
+   if context.get('reserve_director_gates'):
+    for key in ('director_gate_0','director_gate_1'):
+     if key not in p['region'].get('scene',{}).get('anchors',{}):raise InvalidPatch('reserve '+key+' for future directed connections')
   if p['kind']=='region':
    if context['target']=='r0' and not context.get('hero_visual') and p['region'].get('visuals'):
     resolve_sprite('hero',p['region']['visuals'])
    from .loadout import validate
    validate(p['region'],context)
    if context.get('item_policy')=='authored' and any(e['kind']=='enemy' for e in p['region']['entities']):
-    if not any(a['scope']=='combat' for a in p['region'].get('program',{}).get('actions',[])):
+    if not any(a['scope']=='combat' for a in p['region'].get('program',{}).get('actions',[])) and not any(self.state.get('adventure',{}).get('skills',{}).get(k,{}).get('rule',{}).get('scope')=='combat' for k in self.state['player'].get('abilities',[])):
      raise InvalidPatch('enemies need authored player combat actions',path='region.program.actions',expected='at least one playable scope=combat action')
   if p['kind']=='region' and context.get('refresh') and context.get('existing_destinations'):
    expected={d['id'] for d in context['existing_destinations']}
@@ -237,10 +260,16 @@ class World:
    if campaign.chapter(self.state,rid):links=campaign.routes(self.state,rid)
    preview=build_region(p['region'],rid,C.stable_seed(self.state['setting'],rid),node['depth'],links);preview['plan']=p['region']
    if campaign.chapter(self.state,rid):preview['chapter_id']=node['chapter_id']
+   preview['scenes']=p['region'].get('scenes',[])
    gameplay.definitions(self,preview)
    if context.get('reserve_chapter_gate'):
     pos=preview['scene']['anchors']['chapter_gate']
     if tuple(pos) not in reachable(preview['tiles'],preview['spawn']) or any(tuple(pos) in cells_for(e) for e in preview['entities']+preview['props']):raise InvalidPatch('chapter_gate must reserve a free reachable cell')
+   if context.get('reserve_director_gates'):
+    positions=[preview['scene']['anchors'][k] for k in ('director_gate_0','director_gate_1')]
+    if positions[0]==positions[1]:raise InvalidPatch('director gates require distinct reserved cells')
+    for pos in positions:
+     if tuple(pos) not in reachable(preview['tiles'],preview['spawn']) or any(tuple(pos) in cells_for(e) for e in preview['entities']+preview['props']):raise InvalidPatch('director gate must reserve a free reachable cell')
   if p['kind']=='reaction':
    # Validate registration, executable references and causal geometry together
    # on an isolated copy so semantic failures enter the same bounded repair.
@@ -259,6 +288,7 @@ class World:
   if not self.context_is_current(context): return False
   p=self.validate_patch(raw,context) if _validated is None else _validated
   if p['kind']=='campaign':campaign.apply(self,p['campaign']);return True
+  if p['kind']=='direction':adventure.apply_direction(self,p['direction'],context);return True
   before=copy.deepcopy(s); cache_before=copy.deepcopy(self.cache)
   try:
    if p['kind']=='region':
@@ -288,6 +318,8 @@ class World:
     if rid=='r0':
      if 'world_title' in p: s['title']=p['world_title']
      self._enter_content(r); s['player']['x'],s['player']['y']=r['spawn']; self.note(r['description'])
+    from .story_content import install as install_story
+    install_story(self,r,p['region'],context)
     gameplay.definitions(self,r)
     if rid=='r0':gameplay.enter(self,r)
     self.persist(r,delete=discarded)
@@ -348,6 +380,8 @@ class World:
      if pos is None: raise InvalidPatch('no room for new connection')
      occupied.add(pos); occupied.add((pos[0],pos[1]-1)); children.append(target)
      r['entities'].append(dict(id=prefix+'gate_'+spec['id'],kind='exit',name='前往 '+spec['name'],target=target,direction='forward',x=pos[0],y=pos[1],spent=False))
+    from .story_content import install as install_story
+    install_story(self,r,re,context)
     gameplay.reaction(self,r,re)
     for index,update in enumerate(re.get('future_updates',[])):
      target=update['id'];node=s['topology'].get(target)
@@ -383,7 +417,7 @@ class World:
    ui['ready']=bool(node.get('ready'));ui['name']=node.get('name','下一个地区')
    ui['title']='下一地区已准备好' if ui['ready'] else '地区正在后台准备'
    ui['lines']=['可以进入 '+ui['name']+'。'] if ui['ready'] else ['这条道路尚未准备好。你可以继续探索，后台会提前生成。']
-  return copy.deepcopy(dict(game_over=bool(s.get('game_over')),game_spec=game_spec.snapshot(s),campaign=campaign.overview(s),audio_seq=s.get('audio_seq',0),audio_events=s.get('audio_events',[]),available_actions=generated_actions,content_version=2,started=True,version=s['version'],epoch=s['epoch'],title=s['title'],setting=s['setting'],story_revision=s['story_revision'],time=s['time'],
+  return copy.deepcopy(dict(adventure=adventure.public_view(self),game_over=bool(s.get('game_over')),game_spec=game_spec.snapshot(s),campaign=campaign.overview(s),audio_seq=s.get('audio_seq',0),audio_events=s.get('audio_events',[]),available_actions=generated_actions,content_version=2,started=True,version=s['version'],epoch=s['epoch'],title=s['title'],setting=s['setting'],story_revision=s['story_revision'],time=s['time'],
    region={k:v for k,v in r.items() if k not in ('plan','pending_lore','pending_threads')} if r else None,player=p,inventory=inv,quests=list(s['quests'].values())[-20:],threads=list(s['threads'].values())[-10:],journal=s['journal'][-10:],battle=s['battle'],ui=ui,map_count=sum(n['visited'] for n in s['topology'].values()),
    frontier=[dict(id=rid,name=s['topology'][rid]['name'],ready=s['topology'][rid]['ready']) for rid in (campaign.neighbors(s,s['current'],True) if campaign.book(s) else s['topology'][s['current']]['children'])]))
  def action(self,a):
@@ -487,7 +521,7 @@ class World:
    p['hp']=p['max_hp']; p['mp']=p['max_mp']; s['time']+=30; s['ui']=dict(kind='message',title=e['name'],lines=['在微光中休息，生命与魔力恢复。你的脚步已经保存。']); self.persist(); return
   if kind=='enemy':
    level=max(1,min(30,r['depth']+1)); tier=e['tier']; hp=e.get('stats',{}).get('hp',20+level*9+tier*10)
-   s['battle']=dict(authored=gameplay.has_combat(r),id=e['id'],name=e['name'],monster=e['monster'],sprite=e.get('sprite','enemy'),move=e['move'],tier=tier,level=level,hp=hp,max_hp=hp,attack=e.get('stats',{}).get('attack',5+level*2+tier),turn=0,burn=0,poison=0,guard=False,log=['你遭遇了 '+e['name']+'。']); s['ui']={}; self.persist()
+   s['battle']=dict(authored=gameplay.has_combat(r,self),id=e['id'],name=e['name'],monster=e['monster'],sprite=e.get('sprite','enemy'),move=e['move'],tier=tier,level=level,hp=hp,max_hp=hp,attack=e.get('stats',{}).get('attack',5+level*2+tier),turn=0,burn=0,poison=0,guard=False,log=['你遭遇了 '+e['name']+'。']); s['ui']={}; self.persist()
  def combat(self,move):
   if gameplay.combat(self,move):return
   s=self.state; p=s['player']; b=s['battle']; r=self.region()
@@ -531,7 +565,8 @@ class World:
  def _win_battle(self):
   s=self.state;p=s['player'];b=s['battle'];r=self.region()
   self.sound_event('victory')
-  e=next(e for e in r['entities'] if e['id']==b['id']); e['spent']=True; reward=(8+b['level']*5+b['tier']*4) if game_spec.active(s,'gold') else 0; p['gold']+=reward
+  e=next(e for e in r['entities'] if e['id']==b['id']); e['spent']=True; reward=(8+b['level']*5+b['tier']*4) if game_spec.active(s,'gold') and not adventure.state(self) else 0; p['gold']+=reward
+  if e.get('actor_id') and adventure.state(self):self.state['adventure']['cast'][e['actor_id']]['state']['alive']=False
   if game_spec.resource(s,'gold'):p['gold']=min(p['gold'],game_spec.resource(s,'gold')['max'])
   if game_spec.enabled(s,'progression'):p['xp']+=18+b['tier']*10
   while game_spec.enabled(s,'progression') and p['xp']>=p['level']*45:

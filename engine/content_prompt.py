@@ -207,6 +207,7 @@ Use current_audio for existing cue names. Audio is optional for legacy saved reg
 '''
 
 def prompt(kind,hybrid=False):
+    from .adventure_prompt import CONTENT
     from .campaign_prompt import REGIONAL
     focus=('Create only the requested region; following destinations need short outlines, not their complete rules or art. '
            'Realize this location as part of the supplied chapter goal and cross-region dependencies.'
@@ -214,7 +215,7 @@ def prompt(kind,hybrid=False):
     base=COMMON + (REGION if kind == 'region' else REACTION + '\nAn entity:' + REGION.split('An entity:')[1].split('landmarks <=')[0])
     if hybrid:
         base=base.replace('explicit, individually authored sprite','explicit sprite, usually from the compatible library')
-    return (base + '\n' + REGIONAL
+    return (base + '\n' + REGIONAL + '\n' + CONTENT
             + '\n' + (HYBRID if hybrid else VISUAL_PROMPT)
             + '\nEmit compact JSON. Omit default when:true, once:false, scope:explore, fail_when:false and empty optional lists. '
               'Do not repeat labels in descriptions unless there is new player-facing information. '
@@ -233,7 +234,7 @@ def model_context(context,kind,hybrid=False):
         return result
     keep=('content_version','item_policy','setting','world_title','target','target_depth','destination','refresh',
           'existing_destinations','visual_identity','planned_parent','story_revision','player','facts',
-          'lore','threads','known_locations','frontier','rejected_response','validation_errors','game_spec','chapter_plan','planned_routes','region_purpose','required_flag_writes','reserve_chapter_gate')
+          'lore','threads','known_locations','frontier','rejected_response','validation_errors','game_spec','chapter_plan','planned_routes','region_purpose','required_flag_writes','reserve_chapter_gate','content_contract','adventure_revision','reserve_director_gates','commission_ids')
     result={key:copy.deepcopy(context[key]) for key in keep if key in context}
     hero=context.get('hero_visual')
     result['hero_visual']={'reuse_canonical_identity':True,'sprite':'hero'} if hero else None

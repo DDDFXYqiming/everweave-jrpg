@@ -106,6 +106,13 @@ class ChatProvider:
    from .campaign_prompt import PROMPT
    payload['messages'][0]['content']=PROMPT
    payload['messages'][1]['content']=json.dumps(dict(world_context=context,validation_error=repair),ensure_ascii=False,separators=(',',':'))
+  if kind=='direction':
+   from .adventure_prompt import DIRECTOR
+   payload['messages'][0]['content']=DIRECTOR
+   payload['messages'][1]['content']=json.dumps(dict(world_context=context,validation_error=repair),ensure_ascii=False,separators=(',',':'))
+  elif context.get('commission_ids'):
+   from .adventure_prompt import WORKER
+   payload['messages'][0]['content']+='\n'+WORKER
   if repair and context.get('rejected_response'):
    payload['messages'][0]['content']+='\nRepair world_context.rejected_response using validation_error. Preserve its valid scene, art, IDs and mechanics; return the complete corrected JSON object, not a replacement design or a diff.'
   if cfg.get('language','zh')=='en':
@@ -194,7 +201,7 @@ class Director:
  def retry(self,target=None,kind=None,mode='repair'):
   if mode not in ('repair','redesign'):raise ProviderError('无效重试方式。')
   if mode=='redesign' and (not target or kind!='region'):raise ProviderError('重新创作需指定一个失败地区。')
-  if (target is None)!=(kind is None) or (target is not None and (not isinstance(target,str) or kind not in ('region','reaction','campaign'))):
+  if (target is None)!=(kind is None) or (target is not None and (not isinstance(target,str) or kind not in ('region','reaction','campaign','direction'))):
    raise ProviderError('重试需要地区 ID 和任务类型。')
   selected={key for key in self.failed if target is None or key==(kind,target)}
   if target is not None and not selected:raise ProviderError('这个生成任务已经不再处于失败状态。')
@@ -236,6 +243,9 @@ class Director:
   entry=dict(kind=key[0],target=key[1],name=self._title(key[1]),category=issues[0]['category'],
              message=str(error)[:1600],issues=issues[:20],attempts=attempts)
   self.failed.add(key);self.failures[key]=entry;self.error=entry['message'][:260]
+  for job_id in ctx.get('commission_ids',[]):
+   job=(self.world.state or {}).get('adventure',{}).get('jobs',{}).get(job_id)
+   if job is not None:job['last_error']=entry['message'][:400]
   self.audit.emit('generation.failed',level=logging.WARNING if isinstance(error,(InvalidPatch,ProviderError)) else logging.ERROR,
     exception=error,**entry)
   if isinstance(error,InvalidPatch) and raw is not None:
@@ -279,6 +289,13 @@ class Director:
   if s.get('campaign',{}).get('pending'):
    if not available('campaign',s['current']) or any(k[1]=='campaign' for k in self.in_flight):return None
    return w.context(s['current'],'campaign'),copy.deepcopy(self.cfg),self.generation
+  from . import adventure
+  if s['topology'][s['current']]['ready'] and not s['battle'] and not s['ui']:
+   jobs=adventure.ready_jobs(w,s['current'])
+   if jobs and available('reaction',s['current']):
+    ctx=w.context(kind='reaction');ctx['commission_ids']=[jobs[0]['id']];ctx['content_contract']['commissions']=[copy.deepcopy(jobs[0])]
+    return ctx,copy.deepcopy(self.cfg),self.generation
+   if adventure.review_due(w) and available('direction',s['current']):return w.context(kind='direction'),copy.deepcopy(self.cfg),self.generation
   pending=[(rid,distance) for rid,distance in w.prefetch_targets() if not s['topology'][rid]['ready'] and available('region',rid)]
   if s.get('campaign'):pending.sort(key=lambda item:(item[1],s['topology'][item[0]].get('chapter_id')!=s['campaign']['active']))
   if not s['topology'][s['current']]['ready']:
@@ -310,12 +327,12 @@ class Director:
    job=self._next_job()
    if not job: return False
    ctx,cfg,generation=job; kind=ctx['kind']; target=ctx['target']; job_key=(ctx['epoch'],kind,target)
-   self.in_flight[job_key]=('规划章节 ' if kind=='campaign' else '续写 ' if kind=='reaction' else '生成 ')+self._title(target)
+   self.in_flight[job_key]=('统筹冒险 ' if kind=='direction' else '规划章节 ' if kind=='campaign' else '落实委托 ' if ctx.get('commission_ids') else '续写 ' if kind=='reaction' else '生成 ')+self._title(target)
    self._begin_task(job_key,ctx)
    self.busy=' / '.join(self.in_flight.values()); self.last_request=time.monotonic()
   raw=None; error=None;attempts=0
   cached=self.failed_payloads.get((kind,target))
-  cache_fields=('epoch','target','kind','refresh','target_revision')+(('story_revision',) if kind=='reaction' else ())
+  cache_fields=('epoch','target','kind','refresh','target_revision','adventure_revision')+(('story_revision','commission_ids') if kind=='reaction' else ())
   if cached and cached['generation']==generation and all(cached['context'].get(k)==ctx.get(k) for k in cache_fields):
    raw=cached['raw'];error=cached['error']
   for attempt in range(2):

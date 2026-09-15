@@ -15,7 +15,7 @@ def conditions(raw,flags):
         out.append(copy.deepcopy(c))
     return out
 
-def validate(raw,first=True):
+def validate(raw,first=True,existing=None):
     from .schema import obj,arr,ident,text
     from .content import state_values,boolean
     if isinstance(raw,str):
@@ -23,7 +23,7 @@ def validate(raw,first=True):
         except (ValueError,TypeError) as exc:raise InvalidPatch('campaign must be valid JSON') from exc
     obj(raw,'campaign envelope',('kind','campaign'),('kind','campaign'))
     if raw['kind']!='campaign':raise InvalidPatch('expected kind=campaign')
-    r=obj(raw['campaign'],'campaign',('title','premise','goal','game_spec','flags','flag_sources','regions','links','milestones','complete_when','continuation'),('title','premise','goal','flags','flag_sources','regions','links','milestones','complete_when','continuation'))
+    r=obj(raw['campaign'],'campaign',('title','premise','goal','game_spec','flags','flag_sources','regions','links','milestones','complete_when','continuation','adventure'),('title','premise','goal','flags','flag_sources','regions','links','milestones','complete_when','continuation'))
     out={k:text(r[k],k,500) for k in ('title','premise','goal')};out['flags']=state_values(r['flags'])
     if first:
         if 'game_spec' not in r:raise InvalidPatch('opening campaign needs game_spec')
@@ -40,13 +40,13 @@ def validate(raw,first=True):
     if not isinstance(sources,dict) or set(sources)!=set(out['flags']) or any(not isinstance(v,str) or v not in ids for v in sources.values()):raise InvalidPatch('flag_sources must assign every flag to one chapter region')
     out['flag_sources']=copy.deepcopy(sources)
     for link in arr(r['links'],'chapter links',14,4):
-        obj(link,'chapter link',('id','a','b','hidden','discover','requires','blocked_reason'),('id','a','b'))
+        obj(link,'chapter link',('id','a','b','hidden','discover','requires','blocked_reason','one_way'),('id','a','b'))
         key=ident(link['id']);a=ident(link['a']);b=ident(link['b']);pair=tuple(sorted((a,b)))
         if key in link_ids:raise InvalidPatch('duplicate link ID',path='campaign.links',value=key)
         if a==b or a not in ids or b not in ids:raise InvalidPatch('link endpoints must be distinct declared region IDs',path='campaign.links.'+key,value=[a,b],expected=sorted(ids))
         hidden=boolean(link.get('hidden',False));discover=conditions(link.get('discover',[]),out['flags']);requires=conditions(link.get('requires',[]),out['flags'])
         if hidden and not discover:raise InvalidPatch('a hidden route needs discover conditions')
-        out['links'].append(dict(id=key,a=a,b=b,hidden=hidden,discover=discover,requires=requires,blocked_reason=text(link.get('blocked_reason','这条道路尚未打通。'),'blocked reason',160)))
+        out['links'].append(dict(id=key,a=a,b=b,hidden=hidden,one_way=boolean(link.get('one_way',False)),discover=discover,requires=requires,blocked_reason=text(link.get('blocked_reason','这条道路尚未打通。'),'blocked reason',160)))
         link_ids.add(key);pairs.add(pair);adj[a].add(b);adj[b].add(a)
     start=regions[0]['id'];seen={start};queue=deque([start])
     while queue:
@@ -55,7 +55,14 @@ def validate(raw,first=True):
     if max(map(len,adj.values()))>6:raise InvalidPatch('limit each location to six chapter routes')
     if any(sum(key in (e['a'],e['b']) for e in out['links'])>6 for key in ids):raise InvalidPatch('limit each location to six physical routes, including parallel routes')
     # The arrival cannot be stranded behind unknown flags.
-    if not any(start in (e['a'],e['b']) and not e['hidden'] and satisfied(e['requires'],out['flags']) for e in out['links']):raise InvalidPatch('arrival needs an initially usable visible route')
+    if not any((start==e['a'] or start==e['b'] and not e['one_way']) and not e['hidden'] and satisfied(e['requires'],out['flags']) for e in out['links']):raise InvalidPatch('arrival needs an initially usable visible route')
+    directed_seen={start};queue=deque([start])
+    while queue:
+        source=queue.popleft()
+        for edge in out['links']:
+            target=edge['b'] if source==edge['a'] else edge['a'] if source==edge['b'] and not edge['one_way'] else None
+            if target and target not in directed_seen:directed_seen.add(target);queue.append(target)
+    if directed_seen!=ids:raise InvalidPatch('one-way routes make a planned location structurally unreachable')
     out['milestones']=[];goal_ids=set()
     for m in arr(r['milestones'],'milestones',8,1):
         obj(m,'milestone',('id','name','description','when'),('id','name','description','when'))
@@ -67,6 +74,9 @@ def validate(raw,first=True):
     c=obj(r['continuation'],'continuation',('from','hook'),('from','hook'))
     if not isinstance(c['from'],str) or c['from'] not in ids:raise InvalidPatch('continuation.from must be a chapter region')
     out['continuation']=dict(c,hook=text(c['hook'],'continuation hook',400))
+    if 'adventure' in r:
+        from .adventure import validate as validate_adventure
+        out['adventure']=validate_adventure(r['adventure'],out['flags'],ids,existing)
     return out
 
 def satisfied(conditions,flags):return all(flags.get(c['flag'])==c['eq'] for c in conditions)
@@ -82,7 +92,7 @@ def links(state,rid,visible=False):
             if rid in (edge['a'],edge['b']) and (not visible or edge['revealed']):result.append(edge)
     return result
 
-def neighbors(state,rid,visible=False):return [e['b'] if e['a']==rid else e['a'] for e in links(state,rid,visible)]
+def neighbors(state,rid,visible=False):return [e['b'] if e['a']==rid else e['a'] for e in links(state,rid,visible) if rid==e['a'] or not e.get('one_way')]
 def routes(state,rid):
     return [dict(target=e['b'] if e['a']==rid else e['a'],direction='forward',label=state['topology'][e['b'] if e['a']==rid else e['a']]['name'],anchor=e.get('anchor_a' if e['a']==rid else 'anchor_b','link_'+hashlib.sha256(e['id'].encode()).hexdigest()[:12]),link_id=e['id']) for e in links(state,rid)]
 
@@ -107,6 +117,9 @@ def apply(world,plan):
         first=mapping[plan['regions'][0]['id']]
         c['links'].append(dict(id=cid+'_arrival',a=old['continuation']['from'],b=first,anchor_a='chapter_gate',chapter_id=cid,revealed=True,hidden=False,discover=[],requires=[],blocked_reason=''))
     b['chapters'][cid]=c;b.update(active=cid,pending=False,revision=b['revision']+1)
+    if plan.get('adventure'):
+        from .adventure import install
+        install(world,plan['adventure'],mapping,cid,cid)
     for m in c['milestones']:
         s['quests'][cid+':'+m['id']]=dict(id=cid+':'+m['id'],name=m['name'],description=m['description'],status='active',goal='campaign',region='',reward=0)
     world.note(plan['goal']);world.persist()
@@ -138,12 +151,19 @@ def sync_gates(world,region):
             if pos is None:raise InvalidPatch('missing reserved chapter route anchor '+route['anchor'])
             if any((e['x'],e['y'])==tuple(pos) for e in region['entities']):raise InvalidPatch('chapter route anchor is occupied')
             region['entities'].append(dict(id=region['id']+':gate_'+key,kind='exit',x=pos[0],y=pos[1],spent=False,solid=False,**route));existing[key]=region['entities'][-1]
-        e=existing[key];e.update(name=route['label'],spent=not edge['revealed'],locked=not satisfied(edge['requires'],s['campaign']['chapters'][edge['chapter_id']]['flags']),blocked_reason=edge['blocked_reason'])
+        e=existing[key];e.update(name=route['label'],spent=not edge['revealed'] or bool(edge.get('one_way') and region['id']==edge['b']),locked=not satisfied(edge['requires'],s['campaign']['chapters'][edge['chapter_id']]['flags']),blocked_reason=edge['blocked_reason'])
 
 def context(world,rid):
     s=world.state;c=chapter(s,rid)
     if not c:return {}
-    return dict(game_spec=s['game_spec'],chapter_plan={k:copy.deepcopy(c[k]) for k in ('id','title','premise','goal','flags','flag_sources','regions','milestones','complete_when')},region_purpose=s['topology'][rid]['outline']['purpose'],planned_routes=routes(s,rid),required_flag_writes=[k for k,v in c['flag_sources'].items() if v==rid],
+    authored_routes=routes(s,rid)
+    for route in authored_routes:
+        edge=next(e for e in links(s,rid) if e['id']==route['link_id'])
+        route.update({k:copy.deepcopy(edge.get(k,False if k=='one_way' else [] if k in ('requires','discover') else '')) for k in ('hidden','discover','requires','blocked_reason','one_way')})
+        owner=s['campaign']['chapters'][edge['chapter_id']]
+        route['condition_sources']={v['flag']:owner['flag_sources'].get(v['flag']) for v in edge['requires']+edge['discover']}
+        route['outbound']=rid==edge['a'] or not edge.get('one_way')
+    return dict(game_spec=s['game_spec'],chapter_plan={k:copy.deepcopy(c[k]) for k in ('id','title','premise','goal','flags','flag_sources','regions','milestones','complete_when')},region_purpose=s['topology'][rid]['outline']['purpose'],planned_routes=authored_routes,required_flag_writes=[k for k,v in c['flag_sources'].items() if v==rid],
                 reserve_chapter_gate=rid==c['continuation']['from'])
 
 def overview(state):

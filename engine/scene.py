@@ -97,7 +97,7 @@ def dress(region):
         for x,y in cells_for(e):
             reserved.update((x+dx,y+dy) for dy in range(-1,2) for dx in range(-1,2))
     for key,(x,y) in region.get('scene',{}).get('anchors',{}).items():
-        if key.startswith('link_') or key=='chapter_gate':reserved.update((x+dx,y+dy) for dy in range(-1,2) for dx in range(-1,2))
+        if key.startswith(('link_','director_gate_')) or key=='chapter_gate':reserved.update((x+dx,y+dy) for dy in range(-1,2) for dx in range(-1,2))
     candidates=[]
     for y in range(h):
         for x in range(w):

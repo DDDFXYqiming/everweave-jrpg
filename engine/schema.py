@@ -45,9 +45,10 @@ def dialogue(v):
  return [checked(f'[{index}]',text,x,'dialogue',280) for index,x in enumerate(arr(v,'dialogue',4,1))]
 
 def entity(v):
- e=obj(v,'entity',('id','kind','name','zone','appearance','role','dialogue','choices','monster','tier','move','item_id','sprite','at','solid','state','description','footprint','stats'),('id','kind','name'))
+ e=obj(v,'entity',('id','kind','name','zone','appearance','role','dialogue','choices','monster','tier','move','item_id','sprite','at','solid','state','description','footprint','stats','actor_id'),('id','kind','name'))
  out=dict(id=checked('id',ident,e['id']),kind=checked('kind',enum,e['kind'],C.KINDS+('object',),'kind'),name=checked('name',text,e['name'],'name',48),zone=checked('zone',enum,e.get('zone','center'),C.ZONES,'zone'))
  if 'sprite' in e:out['sprite']=checked('sprite',ident,e['sprite'])
+ if 'actor_id' in e:out['actor_id']=checked('actor_id',ident,e['actor_id'])
  if out['kind']=='npc':
   out.update(role=checked('role',enum,e.get('role','wanderer'),C.ROLES,'role'),appearance=checked('appearance',number,e.get('appearance',0),'appearance',0,7),dialogue=checked('dialogue',dialogue,e.get('dialogue',['旅人，你听见钟声了吗？'])),choices=[])
   for index,ch in enumerate(checked('choices',arr,e.get('choices',[]),'choices',3)):
@@ -81,13 +82,18 @@ def unique_ids(values,name):
 def parse_patch(raw,expected,context=None,corrections=None):
  if expected=='campaign':
   from .campaign import validate
-  return dict(kind='campaign',campaign=validate(raw,not (context or {}).get('game_spec')))
+  return dict(kind='campaign',campaign=validate(raw,not (context or {}).get('game_spec'),(context or {}).get('adventure_state')))
+ if expected=='direction':
+  from .adventure import validate_direction
+  return dict(kind='direction',direction=validate_direction((context or {})['validation_world'],raw))
  from .normalization import normalize_patch,decode
  from .modules import expand
  expanded,module_sources=expand(decode(raw),expected)
  normalized,changes,errors=normalize_patch(expanded,expected,context)
  if corrections is not None:corrections.extend(changes)
  errors.extend(_independent_errors(normalized,expected))
+ from .story_content import ability_contract_errors
+ errors.extend(ability_contract_errors(normalized.get(expected) if isinstance(normalized,dict) else None,expected,context))
  if errors:raise InvalidPatch(issues=unique_issues(errors),corrections=changes)
  try:
   result=_parse_patch(normalized,expected,context)
@@ -108,7 +114,7 @@ def _parse_patch(raw,expected,context=None):
   loc=f'threads[{index}]';checked(loc,obj,f,'thread',('id','title','note'),('id','title','note')); out['threads'].append(dict(id=checked(loc+'.id',ident,f['id']),title=checked(loc+'.title',text,f['title'],'thread',64),note=checked(loc+'.note',text,f['note'],'note')))
  if expected=='region':
   if 'reaction' in p: raise InvalidPatch('region cannot also react')
-  r=obj(p.get('region'),'region',('name','biome','layout','weather','rule','description','landmarks','entities','items','quests','destinations','visuals','scene','program','starting_loadout','audio'),('name','description','entities'))
+  r=obj(p.get('region'),'region',('name','biome','layout','weather','rule','description','landmarks','entities','items','quests','destinations','visuals','scene','program','starting_loadout','audio','abilities','scenes'),('name','description','entities'))
   reg=dict(name=text(r['name'],'region name',48),biome=text(r.get('biome','dream'),'biome',48) if 'scene' in r else enum(r['biome'],C.BIOMES,'biome'),layout=text(r.get('layout','authored'),'layout',48) if 'scene' in r else enum(r['layout'],C.LAYOUTS,'layout'),weather=enum(r.get('weather','clear'),C.WEATHERS,'weather'),rule=enum(r.get('rule','normal'),C.RULES,'rule'),description=text(r['description'],'description',450),entities=[entity(e) for e in arr(r['entities'],'entities',32,1)],items=[item(i) for i in arr(r.get('items',[]),'items',8)],landmarks=[],quests=[])
   for lm in arr(r.get('landmarks',[]),'landmarks',24):
    obj(lm,'landmark',('type','zone','sprite','id','at','solid','footprint'),('type','zone')); landmark=dict(type=enum(lm['type'],C.LANDMARKS,'type'),zone=enum(lm['zone'],C.ZONES,'zone'))
@@ -168,10 +174,16 @@ def _parse_patch(raw,expected,context=None):
   if 'audio' in r:
    from .audio import validate_audio
    reg['audio']=checked('region.audio',validate_audio,r['audio'])
+  from .story_content import parse_abilities,parse_scenes
+  if 'abilities' in r:reg['abilities']=parse_abilities(r['abilities'])
+  if 'scenes' in r:reg['scenes']=parse_scenes(r['scenes'])
   out['region']=reg
  elif expected=='reaction':
   if 'region' in p: raise InvalidPatch('reaction cannot replace visited maps')
-  r=obj(p.get('reaction'),'reaction',('text','weather','rule','npc_lines','spawns','items','quests','locations','visuals','paint','program','object_updates','future_updates','audio'),('text',)); out['reaction']=dict(text=text(r['text'],'reaction text',450),npc_lines=[],spawns=[],items=[],quests=[],locations=[])
+  r=obj(p.get('reaction'),'reaction',('text','weather','rule','npc_lines','spawns','items','quests','locations','visuals','paint','program','object_updates','future_updates','audio','abilities','scenes'),('text',)); out['reaction']=dict(text=text(r['text'],'reaction text',450),npc_lines=[],spawns=[],items=[],quests=[],locations=[])
+  from .story_content import parse_abilities,parse_scenes
+  if 'abilities' in r:out['reaction']['abilities']=parse_abilities(r['abilities'])
+  if 'scenes' in r:out['reaction']['scenes']=parse_scenes(r['scenes'])
   if 'audio' in r:
    from .audio import validate_audio
    out['reaction']['audio']=checked('reaction.audio',validate_audio,r['audio'],(context or {}).get('current_audio'))

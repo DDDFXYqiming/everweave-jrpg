@@ -2,9 +2,10 @@ PROMPT='''Design one coherent CHAPTER of a continuing playable adventure, not a 
 Return JSON {"kind":"campaign","campaign":{...}}. Write player-facing text in Chinese unless instructed otherwise.
 campaign fields: title, premise, goal (clear player objective, stakes and direction), flags:{bare_id:bool/int/string},
 flag_sources:{FLAG:REGION_ID}, regions:[{id,name,description,purpose}], links:[{id,a,b,hidden?:bool,
-discover?:[{flag,eq}],requires?:[{flag,eq}],blocked_reason?:text}], milestones:[{id,name,description,when:[{flag,eq}]}],
+discover?:[{flag,eq}],requires?:[{flag,eq}],blocked_reason?:text,one_way?:bool}], milestones:[{id,name,description,when:[{flag,eq}]}],
 complete_when:[{flag,eq}], continuation:{from:REGION_ID,hook:next chapter promise}.
-4..8 regions, 4..14 bidirectional links, one connected graph with a loop and a junction of degree>=3 (max6).
+4..8 regions, 4..14 links (bidirectional unless one_way=true from a to b), a graph with a loop and a junction of degree>=3 (max6).
+Every region must be structurally reachable from the first, respecting direction. Do not trap required progress behind a one-way return.
 Region IDs <=20, link IDs <=40 lowercase snake_case. The FIRST region is the arrival; allow an initially open visible route from it.
 Include meaningful branches, optional encounters and a discoverable hidden shortcut when appropriate.
 Use clear cross-region dependencies: investigate A -> gain a shared clue/ability -> open a route or solve a goal in B.
@@ -28,12 +29,14 @@ Equipment requires inventory. Subsequent chapters MUST omit game_spec and preser
 Modern hospitals, infection horror and laboratories must keep their modern identity. Do not turn them into medieval dungeons.
 Reuse suitable library assets later; original drawing remains available when the library lacks a fitting asset.
 '''
+from .adventure_prompt import PLAN
+PROMPT+='\n'+PLAN
 
 REGIONAL='''
 WHEN chapter_plan is supplied, it overrides the legacy destination rules:
 Do NOT invent region.destinations, back, or forward_N routes. Omit destinations entirely.
 For EACH planned_routes entry provide scene.anchors[entry.anchor] at a distinct free reachable tile,
-including hidden/locked routes. The engine creates bidirectional exits from the chapter graph.
+including hidden/locked/inbound-only routes. The engine creates exits with the chapter graph's allowed direction.
 If reserve_chapter_gate=true also reserve a free reachable scene.anchors.chapter_gate for continuation.
 Follow region_purpose: NPC motives, threats, clues and consequences must advance this chapter's goal.
 Every required_flag_writes key MUST have a purposeful player action/hook writing it with

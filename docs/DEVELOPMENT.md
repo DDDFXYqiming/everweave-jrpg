@@ -22,6 +22,7 @@ python -m unittest discover -s tests -v
 ```powershell
 python tools/test_native.py --content --headless
 python tools/test_native.py --hybrid --headless
+python tools/test_native.py --adventure --headless
 ```
 
 单独检查 Godot 脚本和图形编译可以使用引擎命令行。
@@ -34,6 +35,10 @@ godot --headless --path . --script res://tests/campaign_client_smoke.gd
 ```
 
 这些回归使用固定测试数据，不调用在线模型。在线生成验证会消耗服务额度，应使用独立存档和有限的调用预算。请保留失败样本用于排查，不把截图渲染结果当作交互已经成功的证明。
+
+未知世界的自主探索使用 [快速试玩工具](FAST_PLAYTEST.md)：由测试者选择目标，本机连续执行正常动作，在事件处停止。关键画面与原生输入另行验证，避免逐格截图。全局导演、人物关系、跨区技能、实际输入与在线联调记录见 [冒险验收](ADVENTURE_VALIDATION.md)。
+
+已有试玩存档可用 `tools/review_adventure_live.py --live --source PATH/world.sqlite3 --output NEW_DIR --steps 1 --max-calls 2` 做有限联调。脚本用 SQLite 备份到新目录，再运行正常调度器；可能得到导演复盘、地区或委托任务，具体以 trace 为准。
 
 章节专项位于 `tests/test_campaign.py`，覆盖共享状态、图连接、隐藏/锁闭路线、接续、资源和失败模式。客户端专项需要先生成 `userdata/campaign-fixture` 测试数据；这不是在线游戏的备用世界。上一轮验证结果及未试玩部分见 [交付记录](CAMPAIGN_VALIDATION.md)。
 
