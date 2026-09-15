@@ -17,5 +17,11 @@ for rid,node in w.state['topology'].items():node['visited']=True
 snap=w.snapshot()
 (folder/'snapshot.json').write_text(json.dumps(snap,ensure_ascii=False),encoding='utf8')
 (folder/'atlas.json').write_text(json.dumps(atlas(w),ensure_ascii=False),encoding='utf8')
+w.state['campaign']['chapters']['c1']['flags']['power']=True
+w.persist()
+(folder/'atlas-unlocked.json').write_text(json.dumps(atlas(w),ensure_ascii=False),encoding='utf8')
+w.state['campaign']['chapters']['c1']['links'][0]['one_way']=True
+w.state['current']='c1_station'
+(folder/'atlas-one-way.json').write_text(json.dumps(atlas(w),ensure_ascii=False),encoding='utf8')
 w.store.close()
 print('CAMPAIGN_FIXTURE_OK')

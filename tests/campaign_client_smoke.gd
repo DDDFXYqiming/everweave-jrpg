@@ -20,9 +20,12 @@ func _run() -> void:
 	main.atlas_panel.canvas.set_graph(graph)
 	assert(graph.edges.size()==4)
 	assert(main.atlas_panel.canvas.path_to("c1_vault").is_empty(),"Route planner ignored a locked link")
-	for edge in graph.edges:edge.locked=false
+	graph=JSON.parse_string(FileAccess.get_file_as_string("res://userdata/campaign-fixture/atlas-unlocked.json"))
 	main.atlas_panel.canvas.set_graph(graph)
 	assert(main.atlas_panel.canvas.path_to("c1_vault").size()==3)
+	graph=JSON.parse_string(FileAccess.get_file_as_string("res://userdata/campaign-fixture/atlas-one-way.json"))
+	main.atlas_panel.canvas.set_graph(graph)
+	assert(main.atlas_panel.canvas.path_to("r0").size()==3,"Reverse travel must take the detour around a one-way link")
 	state.game_spec.resources=[{"id":"hp","label":"机体完整度","value":70,"max":90,"display":"bar"},{"id":"ammo","label":"弹药","value":4,"max":8,"display":"number"}]
 	state.game_spec.identity="维修员"
 	state.version=int(state.version)+1

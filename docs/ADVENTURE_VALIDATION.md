@@ -49,6 +49,8 @@
 - `--content --headless` 和 `--hybrid --headless` 通过，保留原有动态动作、机关、战斗、旅图、音频和混合素材链路。
 - CI 加入冒险原生测试；所有固定回归均为零模型调用。
 
+首次云端检查暴露旧旅图测试只切换 `locked`、未更新允许方向投影的问题。已改为从后端旗标生成完整的解锁旅图，并添加单向路必须绕行的客户端断言。
+
 原生截图在 `userdata/adventure-e2e/`，真实模型场景的只读 Godot 重渲染在 `userdata/adventure-validation/current-gallery/`。截图用于视觉检查，实际交互证据另由动作日志和原生测试给出。
 
 ## 尚未达到的效果
