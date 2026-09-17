@@ -68,6 +68,8 @@
   "离线演示": "Offline demo",
   "新内容优先使用本地素材库": "Prefer the local content library",
   "给模型提供匹配的图像、音频和能力候选，缺少的部分仍可原创。": "Offer matching art, audio, and gameplay modules; create original content when needed.",
+  "使用官方 Jev 筛选素材并检查内容语义": "Use official Jev for asset selection and semantic review",
+  "通过 TypeSafe 官方 API 做只读判断；不可用时保留原流程并标记未审查。": "Make read-only judgments through the official TypeSafe API; preserve the original flow and mark reviews incomplete when unavailable.",
   "服务地址": "Service URL",
   "模型": "Model",
   "密钥": "API key",
@@ -144,6 +146,7 @@
   "\n请求 %d / %d · 其中修复 %d": "\nRequests %d / %d · Repairs %d",
   "\n已应用 %d · 过期 %d · 失败任务 %d": "\nApplied %d · Stale %d · Failed tasks %d",
   "\n在途 %d · 本地纠正 %d 处\n输入 %d / 输出 %d tokens": "\nIn flight %d · Local corrections %d\nInput %d / Output %d tokens",
+  "\nJev 判断 %d · 疑点 %d · 未完成 %d\nJev 输入 %d / 输出 %d tokens": "\nJev requests %d · Concerns %d · Incomplete %d\nJev input %d / output %d tokens",
   "\n提前两层 · 已准备 %d / %d 区域": "\nTwo regions ahead · Ready %d / %d",
   "\n图形：引用 %d · 组合 %d · 原创 %d\n地表材质 %d · 能力模块 %d": "\nArt: library %d · composed %d · original %d\nMaterials %d · Gameplay modules %d",
   "可进入": "Ready",
@@ -304,5 +307,6 @@
   "尚未为 Everweave 授权。": "Everweave is not authorized yet.",
   " · 玩法与视听并行": " · Gameplay and AV in parallel",
   " · 玩法制作": " · Gameplay build",
-  " · 视听制作": " · Audiovisual build"
+  " · 视听制作": " · Audiovisual build",
+  " · Jev 语义审查": " · Jev semantic review"
 }

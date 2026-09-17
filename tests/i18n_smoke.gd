@@ -38,6 +38,7 @@ func _run() -> void:
 	assert("New journey" in texts(main.home))
 	assert(main.task_button.tooltip_text=="Objectives · Q")
 	assert("Music volume" in texts(main.home))
+	assert("Use official Jev for asset selection and semantic review" in texts(main.home))
 	var snapshot: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/demo_snapshot.json"))
 	main._accept_snapshot(snapshot)
 	var original: String = JSON.stringify(main.state)

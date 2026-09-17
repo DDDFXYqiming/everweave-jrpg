@@ -20,7 +20,7 @@ The current objective sits in the upper-left map corner; click it or press Q to 
 
 **The model creates executable content**
 
-The model produces `scene`, `program`, `visuals`, and `audio`. The `program` field is a bounded rule DSL that can read object state, chapter flags, resources, inventory, and recent position history. It can express switches, resource trades, combat conditions, and puzzles that depend on what happened earlier. The model submits JSON, the Python runtime validates and executes it, and Godot presents the result.
+The model produces `scene`, `program`, `visuals`, and `audio`. An optional official Jev integration ranks assets inside the audiovisual branch and checks player-facing promises against executable effects after hard validation. It records located concerns; it does not rewrite story content or trigger whole-region retries. See [Jev integration and validation](docs/JEV_SEMANTIC_REVIEW.md). The `program` field is a bounded rule DSL that can read object state, chapter flags, resources, inventory, and recent position history. It can express switches, resource trades, combat conditions, and puzzles that depend on what happened earlier. The model submits JSON, the Python runtime validates and executes it, and Godot presents the result.
 
 **World specifications shape the game**
 
@@ -60,6 +60,12 @@ See [Showcase](docs/SHOWCASE.md) for more scene descriptions.
 
 You need Python 3.11 or newer and Godot 4 Standard. The project is currently tested with Godot 4.7.2.
 
+Install the pinned official SDK before enabling Jev:
+
+```powershell
+py -3 -m pip install -r requirements.txt
+```
+
 On Windows, place the Godot executable in the project root or in `tools/`, then double-click `Start.cmd`. You can also start it from PowerShell.
 
 ```powershell
@@ -75,6 +81,15 @@ The default is **direct ChatGPT subscription · GPT-5.6 Luna / high**. Authorize
 An online new world first generates its game specification and campaign plan, then prepares the starting region. The settings control request limits and budget; subscription mode is fixed at high, while compatible APIs expose the reasoning levels they support. The generation director prepares nearby regions, and failed tasks expose their diagnostic details with a retry action.
 
 Subscription mode shares your Codex usage allowance; it is not unlimited. DeepSeek and compatible paid APIs remain explicit manual choices, and the launcher no longer loads a DeepSeek key by default. Initial world creation and new region preparation can take time. Use the offline check to verify installation and basic controls without model calls.
+
+Jev uses a separate TypeSafe official credential. You can store the API key as a Windows-user DPAPI ciphertext in `typesafe.local.key`, then explicitly load it for a process that should call the service:
+
+```powershell
+Read-Host -AsSecureString | ConvertFrom-SecureString | Set-Content .\typesafe.local.key
+.\Start.ps1 -LoadTypeSafeKey
+```
+
+The connection screen can disable Jev. When its SDK, credential, or service is unavailable, asset selection falls back to the original catalog and semantic review is reported as incomplete rather than passed.
 
 ```powershell
 python launch.py --demo --data-dir ./userdata/offline-demo

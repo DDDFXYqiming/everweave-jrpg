@@ -8,7 +8,7 @@ from unittest.mock import patch
 from adventure_fixtures import adventure_plan,authored_adventure_region
 from content_fixtures import authored_patch
 from engine.director import Director
-from engine.region_pipeline import PipelineError,assemble,contract,generate
+from engine.region_pipeline import PipelineError,assemble,contract,generate,worker_contexts
 from engine.schema import parse_patch
 from engine.storage import Store
 from engine.world import World
@@ -30,6 +30,23 @@ def components(binding):
 
 
 class RegionPipelineTests(unittest.TestCase):
+    def test_worker_projection_preserves_modules_and_visual_identity_for_the_right_owner(self):
+        world={'setting':'test','visual_identity':{'style':'ink','terrain':'metal','palette':{'base':'#111111'}},
+               'library_candidates':{'profile':'sci_fi','images':[{'id':'image'}],'audio':[{'id':'sound'}],
+                                     'materials':[{'id':'metal'}],'modules':[{'id':'trade_v1'}]}}
+        binding=contract({'destination':{'name':'站台','description':'test'},'region_purpose':'test','hero_visual':{}})
+        gameplay,audiovisual,_=worker_contexts(json.dumps({'world_context':world}),binding)
+        game_world=json.loads(gameplay)['world_context'];av_world=json.loads(audiovisual)['world_context']
+        self.assertEqual(game_world['library_candidates']['modules'],[{'id':'trade_v1'}])
+        self.assertNotIn('images',game_world['library_candidates'])
+        self.assertEqual(av_world['visual_identity']['terrain'],'metal')
+        self.assertEqual(av_world['library_candidates']['images'],[{'id':'image'}])
+
+    def test_slot_briefs_are_derived_without_an_extra_design_request(self):
+        binding=contract({'destination':{'name':'档案站','description':'保存失踪人员记忆的档案终端'},'region_purpose':'调查档案'})
+        self.assertEqual(binding['slot_briefs']['focal']['identity'],'保存失踪人员记忆的档案终端')
+        self.assertIn('ground_surface',binding['slot_briefs']);self.assertIn('hero',binding['slot_briefs'])
+
     def test_workers_overlap_and_merge_without_duplicate_placeholder_art(self):
         context={'destination':{'name':'回声藏书馆','description':'test'},'region_purpose':'test','game_spec':{'visual_theme':'clockwork'}}
         binding=contract(context);game,audiovisual=components(binding);entered=threading.Event();lock=threading.Lock();branches=[];reserved=[]
@@ -47,6 +64,23 @@ class RegionPipelineTests(unittest.TestCase):
         self.assertEqual(result['region']['visuals']['sprites'],audiovisual['visuals']['sprites'])
         self.assertIn('explore',result['region']['audio']['music']);self.assertNotIn('audio',game['region']);self.assertNotIn('visuals',game['region'])
         self.assertEqual((usage['pipeline_requests'],usage['input_tokens'],usage['output_tokens'],usage['reasoning_tokens']),(2,40,14,6))
+
+    def test_jev_asset_selection_waits_only_in_the_audiovisual_branch(self):
+        context={'destination':{'name':'回声藏书馆','description':'test'},'region_purpose':'test','game_spec':{'visual_theme':'clockwork'}}
+        binding=contract(context);game,audiovisual=components(binding);gameplay_started=threading.Event();events=[]
+        def request(system,user,cfg):
+            component=cfg['_request_meta']['component']
+            if component=='gameplay':gameplay_started.set()
+            value=game if component=='gameplay' else audiovisual
+            return json.dumps(value),{}
+        def rank_assets(region_context,region_design,fallback,cancel_event):
+            self.assertTrue(gameplay_started.wait(2),'gameplay must start before semantic asset selection finishes')
+            return fallback,{'status':'ranked','requests':1,'usage':{'input_tokens':10,'output_tokens':2},'gaps':[]}
+        cfg={'hybrid_content':True,'jev_enabled':True,'_request_meta':{'kind':'region','target':'r0','call':1},
+             '_region_subrequest':lambda component:2,'_jev_event':lambda stage,report:events.append((stage,report['status']))}
+        with patch('engine.chatgpt_provider.generate',side_effect=request),patch('engine.jev_judgments.rank_assets',side_effect=rank_assets):
+            raw,_=generate(context,'region system',json.dumps({'world_context':context}),cfg)
+        self.assertEqual(events,[('asset_selection','ranked')]);self.assertIn('visuals',json.loads(raw)['region'])
 
     def test_only_failed_audiovisual_component_is_repaired(self):
         context={'destination':{'name':'回声藏书馆','description':'test'},'region_purpose':'test','hero_visual':{}}
@@ -112,6 +146,19 @@ class DirectorPipelineTests(unittest.TestCase):
         with patch('engine.chatgpt_provider.generate',return_value=(raw,{})) as direct,patch('engine.region_pipeline.generate',side_effect=AssertionError('must not split')):
             self.assertTrue(director.step())
         self.assertEqual((director.calls,director.accepted,direct.call_count),(1,1,1))
+
+    def test_semantic_review_is_separately_metered_and_does_not_block_delivery(self):
+        director=Director(self.world);director.configure({'provider':'chatgpt_subscription','offline':False,'max_calls':2,'jev_enabled':True});director.cfg['cooldown']=0
+        def pipeline(context,system,user,cfg):
+            cfg['_region_subrequest']('audiovisual')
+            return json.dumps(authored_adventure_region(self.world,context['target'])),{'input_tokens':30,'output_tokens':20,'pipeline_requests':2}
+        report={'status':'reviewed','requests':1,'model':'jev-1.13.0','usage':{'input_tokens':80,'output_tokens':12},
+                'concerns':[{'path':'region.program.actions[0]','verdict':'insufficient'}]}
+        with patch('engine.region_pipeline.generate',side_effect=pipeline),patch('engine.semantic_review.review',return_value=report):
+            self.assertTrue(director.step())
+        self.assertEqual((director.calls,director.accepted),(2,1))
+        self.assertEqual((director.jev_requests,director.jev_tokens_in,director.jev_tokens_out,director.jev_concerns),(1,80,12,1))
+        self.assertEqual(director.status()['jev_reports'][-1]['stage'],'content_review')
 
 
 if __name__=='__main__':unittest.main()

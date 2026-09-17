@@ -19,6 +19,10 @@ func _run() -> void:
 	assert(main._configuration().reasoning_effort == "high")
 	assert(main._configuration().provider=="chatgpt_subscription")
 	assert(main._configuration().model=="gpt-5.6-luna" and main._configuration().api_key=="")
+	assert(main._configuration().jev_enabled and main.jev_select.button_pressed)
+	main.jev_select.button_pressed=false
+	assert(not main._configuration().jev_enabled)
+	main.jev_select.button_pressed=true
 	assert(not main.key_input.visible)
 	assert(main.subscription_button.visible and not main.subscription_button.disabled)
 	main._set_effort("max")
@@ -41,9 +45,12 @@ func _run() -> void:
 	main.state.director.mode="live_llm"
 	main.state.director.model="gpt-5.6-luna"
 	main.state.director.reasoning_effort="high"
+	main.state.director.jev_enabled=true
+	main.state.director.jev_requests=2
+	main.state.director.jev_concerns=1
 	main.state.director.active_tasks=[{"kind":"region","target":"r0","name":"测试地区","source":"prefetch","elapsed_seconds":42.0,"phase":"generating","progress":{"stage":"reasoning","output_chars":0}}]
 	main._render()
-	assert(main.director_label.text.contains("订阅") and main.director_label.text.contains("模型正在推理"))
+	assert(main.director_label.text.contains("订阅") and main.director_label.text.contains("模型正在推理") and main.director_label.text.contains("Jev 判断 2"))
 	var old = {"started":false,"version":0}
 	main._accept_snapshot(old)
 	assert(main.state.started)

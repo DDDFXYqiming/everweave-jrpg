@@ -189,6 +189,7 @@ class Director:
   self.failures={}; self.failed_payloads={}; self.repair_calls=0
   self.normalized_responses=0; self.normalization_count=0; self.recent_corrections=[]
   self.task_metrics={}; self.task_history=[];self.task_sequence=0
+  self.jev_requests=0;self.jev_tokens_in=0;self.jev_tokens_out=0;self.jev_failures=0;self.jev_unavailable=0;self.jev_concerns=0;self.jev_reports=[]
   self.audit=NullAudit()
   self.codex_partial_dir=None
  def configure(self,cfg):
@@ -208,9 +209,9 @@ class Director:
   if language not in ('zh','en'):raise ProviderError('Unsupported language')
   effort=reasoning_effort(dict(cfg,deepseek_options=False,reasoning_effort=cfg.get('reasoning_effort','high'))) if subscription else reasoning_effort(cfg)
   if subscription and effort not in ('high','xhigh','max'):raise ProviderError('Luna subscription generation requires high or above.')
-  self.cfg=dict(provider=provider,language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),parallel_region=bool(cfg.get('parallel_region',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=False if subscription else bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
+  self.cfg=dict(provider=provider,language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),parallel_region=bool(cfg.get('parallel_region',True)),jev_enabled=bool(cfg.get('jev_enabled',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=False if subscription else bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
   self.audit.add_secret(key)
-  self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit,parallel_region=self.cfg['parallel_region'])
+  self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit,parallel_region=self.cfg['parallel_region'],jev_enabled=self.cfg['jev_enabled'])
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
   self.generation+=1; self.failed.clear(); self.failures.clear(); self.failed_payloads.clear(); self.error=''; self.deferred=None; self.paused=False; self.wake.set()
  def start_worker(self):
@@ -283,6 +284,20 @@ class Director:
  def _record_usage(self,usage):
   self.tokens_in+=usage.get('input_tokens',0); self.tokens_out+=usage.get('output_tokens',0)
   self.tokens_reasoning+=usage.get('reasoning_tokens',0); self.reasoning_responses+=int(usage.get('reasoning_observed',False))
+ def _record_jev(self,stage,report,ctx,job_key):
+  usage=report.get('usage') or {};status=report.get('status','error')
+  self.jev_requests+=int(report.get('requests',0));self.jev_tokens_in+=int(usage.get('input_tokens',0));self.jev_tokens_out+=int(usage.get('output_tokens',0))
+  self.jev_failures+=int(status=='error');self.jev_unavailable+=int(status=='unavailable')
+  concerns=report.get('concerns') or [];self.jev_concerns+=len(concerns)
+  public_concerns=[{key:value[key] for key in ('kind','verdict','confidence','content_id','path') if key in value} for value in concerns[:20]]
+  entry=dict(stage=stage,status=status,target=ctx.get('target'),kind=ctx.get('kind'),model=report.get('model',''),
+             reason=report.get('reason',''),cached=bool(report.get('cached',False)),gaps=report.get('gaps',[])[:24],
+             concerns=public_concerns,question_version=report.get('question_version'))
+  self.jev_reports.append(entry);self.jev_reports=self.jev_reports[-8:]
+  if job_key in self.task_metrics:
+   self.task_metrics[job_key]['jev_status']=status;self.task_metrics[job_key]['jev_concerns']=len(concerns)
+  self.audit.emit('jev.finished',stage=stage,status=status,target=ctx.get('target'),kind=ctx.get('kind'),
+                  requests=report.get('requests',0),usage=usage,concerns=concerns[:20],gaps=report.get('gaps',[])[:24],reason=report.get('reason'))
  def status(self):
   for kind,target in list(self.failed):
    node=((self.world.state or {}).get('topology') or {}).get(target)
@@ -301,6 +316,7 @@ class Director:
      elapsed_seconds=round(time.monotonic()-metrics.get('_start',time.monotonic()),1),attempts=metrics.get('attempts',0),progress=metrics.get('progress')))
   active_model_requests=sum(sum(state=='running' for state in metrics.get('components',{}).values()) if metrics.get('pipeline') else 1 for metrics in self.task_metrics.values())
   return copy.deepcopy(dict(failed_tasks=failed_tasks,active_tasks=active_tasks,task_history=self.task_history,repair_calls=self.repair_calls,normalized_responses=self.normalized_responses,normalization_count=self.normalization_count,recent_corrections=self.recent_corrections,
+    jev_enabled=(self.cfg or {}).get('jev_enabled',True),jev_requests=self.jev_requests,jev_input_tokens=self.jev_tokens_in,jev_output_tokens=self.jev_tokens_out,jev_failures=self.jev_failures,jev_unavailable=self.jev_unavailable,jev_concerns=self.jev_concerns,jev_reports=self.jev_reports,
    prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),active_model_requests=active_model_requests,mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),provider=(self.cfg or {}).get('provider',''),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
  def _next_job(self):
   w=self.world; s=w.state
@@ -403,6 +419,9 @@ class Director:
      model_started=time.monotonic()
      cfg['_cancel_event']=self.stop_event
      cfg['_audit']=self.audit;cfg['_request_meta']=dict(kind=kind,target=target,call=request_number)
+     def record_jev(stage,report):
+      with self.world.lock:self._record_jev(stage,report,ctx,job_key)
+     cfg['_jev_event']=record_jev
      if self.codex_partial_dir:cfg['_codex_partial_dir']=str(self.codex_partial_dir)
      def update_progress(progress):
       with self.world.lock:
@@ -455,11 +474,20 @@ class Director:
       raise InvalidPatch('content v2 requires region.scene and region.program: author the spatial plan and executable interactions, not legacy templates')
      if cfg.get('hybrid_content',True) and not parsed['region'].get('audio',{}).get('music',{}).get('explore'):
       raise InvalidPatch('hybrid region needs an exploration music choice',path='region.audio.music.explore',expected='a library music asset or a short score; see library_candidates.audio')
+    validated=None
     with self.world.lock:
      if self._current(ctx,generation):
       validation_started=time.monotonic()
-      try:self.world.validate_patch(raw,ctx)
+      try:validated=self.world.validate_patch(raw,ctx)
       finally:self.task_metrics[job_key]['validation_seconds']+=time.monotonic()-validation_started
+    if validated is not None and not cfg['offline'] and kind=='region':
+     with self.world.lock:
+      if job_key in self.task_metrics:self.task_metrics[job_key]['phase']='semantic_review'
+     from .semantic_review import review as semantic_review
+     jev_report=semantic_review(validated,ctx,cfg)
+     with self.world.lock:
+      self._record_jev('content_review',jev_report,ctx,job_key)
+      if not self._current(ctx,generation):break
     error=None; break
    except InvalidPatch as exc:
     self.audit.emit('generation.rejected',level=logging.WARNING,kind=kind,target=target,call=request_number,attempt=attempt+1,issues=exc.issues)

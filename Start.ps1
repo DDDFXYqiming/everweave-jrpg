@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Godot = '', [switch]$Demo, [switch]$ServerOnly, [string]$DataDir = '', [switch]$LoadDeepSeekKey)
+param([string]$Godot = '', [switch]$Demo, [switch]$ServerOnly, [string]$DataDir = '', [switch]$LoadDeepSeekKey, [switch]$LoadTypeSafeKey)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $env:PYTHONUTF8 = '1'
@@ -7,6 +7,12 @@ $keyFile = Join-Path $PSScriptRoot 'deepseek.local.key'
 if ($LoadDeepSeekKey -and -not $env:DEEPSEEK_API_KEY -and (Test-Path -LiteralPath $keyFile)) {
     $secureKey = (Get-Content -LiteralPath $keyFile -Raw).Trim() | ConvertTo-SecureString
     $env:DEEPSEEK_API_KEY = [System.Net.NetworkCredential]::new('', $secureKey).Password
+}
+$typeSafeKeyFile = Join-Path $PSScriptRoot 'typesafe.local.key'
+if ($LoadTypeSafeKey -and -not $env:TYPESAFE_API_KEY) {
+    if (-not (Test-Path -LiteralPath $typeSafeKeyFile)) { throw 'typesafe.local.key was not found. Create the DPAPI-encrypted file first.' }
+    $secureTypeSafeKey = (Get-Content -LiteralPath $typeSafeKeyFile -Raw).Trim() | ConvertTo-SecureString
+    $env:TYPESAFE_API_KEY = [System.Net.NetworkCredential]::new('', $secureTypeSafeKey).Password
 }
 $python = Get-Command py -ErrorAction SilentlyContinue
 $prefix = @('-3')

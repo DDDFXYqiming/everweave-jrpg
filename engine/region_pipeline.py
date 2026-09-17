@@ -18,8 +18,10 @@ Keep the playable result focused: 24..44 by 16..30 tiles, at most 14 paint comma
 
 AV_PROMPT='''You are the audiovisual worker for one already designed region. Return JSON only:
 {"kind":"region_av","visuals":VISUALS,"audio":AUDIO}.
-Implement every allowed sprite and surface slot in region_design as a sprite or binding. Use compatible library candidates first, compose when useful,
-and draw distinctive missing focal objects. Do not invent entities/items, coordinates, rules, dialogue or story facts.
+Implement every allowed sprite and surface slot in region_design as a sprite or binding. Read region_design.slot_briefs
+as the identity/function contract for each slot. Use compatible library candidates when they preserve that contract,
+compose when useful, and draw distinctive missing focal objects. A listed gap explicitly means original drawing is
+preferred; there is no reuse quota. Do not invent entities/items, coordinates, rules, dialogue or story facts.
 Visuals has exactly style,terrain,palette,sprites,scenery,density,bindings; never put scene or paint inside visuals.
 Audio must include exploration music and suitable sparse cues. Keep <=10 sprite definitions by using bindings and
 shared role art where it fits; reuse materials/scenery locally.'''
@@ -47,8 +49,25 @@ def contract(context):
                          purpose=text((actor.get('role','')+'; '+actor.get('motive','')).strip('; '),'actor purpose',300)))
     slots=['npc','enemy','object','building','vegetation','item','focal']+[a['sprite'] for a in cast]
     if not context.get('hero_visual'):slots.append('hero')
+    shared={'region_identity':description,'visual_direction':(context.get('game_spec') or {}).get('visual_theme') or description}
+    briefs={
+        'npc':dict(shared,identity='A local non-player character',visual_function='Readable conversational character'),
+        'enemy':dict(shared,identity='A local threat or opponent',visual_function='Readable danger silhouette'),
+        'object':dict(shared,identity='A general interactive object',visual_function='Readable as an interactable prop'),
+        'building':dict(shared,identity='A place-defining structure',visual_function='Readable top-down landmark or structure'),
+        'vegetation':dict(shared,identity='Setting-appropriate vegetation',visual_function='Environmental dressing that preserves paths'),
+        'item':dict(shared,identity='A portable item',visual_function='Small readable inventory or pickup object'),
+        'focal':dict(shared,identity=description,visual_function='The distinctive object that communicates this region purpose'),
+        'hero':dict(shared,identity='The player character requested by the setting',visual_function='Readable controllable protagonist'),
+        'ground_surface':dict(shared,identity='Large walkable base surface',visual_function='Low-noise ground with character contrast'),
+        'path_surface':dict(shared,identity='Walkable route surface',visual_function='Makes routes legible without visual clutter'),
+        'wall_surface':dict(shared,identity='Blocking wall surface',visual_function='Clearly separates blocked space from floors'),
+        'accent_surface':dict(shared,identity='Small-area accent surface',visual_function='Highlights important local areas'),
+    }
+    for actor in cast:briefs[actor['sprite']]=dict(shared,identity=actor['name'],visual_function=actor['purpose'])
     return dict(name=name,description=description,cast=cast,sprite_slots=list(dict.fromkeys(slots)),
                 surfaces=['ground_surface','path_surface','wall_surface','accent_surface'],
+                slot_briefs={slot:briefs[slot] for slot in list(dict.fromkeys(slots))+['ground_surface','path_surface','wall_surface','accent_surface']},
                 gameplay_direction=text(context.get('region_purpose') or description,'gameplay direction',450),
                 visual_direction=text(((context.get('game_spec') or {}).get('visual_theme') or description),'visual direction',450),
                 audio_direction=text('Support this region mood, danger and interaction feedback without masking dialogue.','audio direction',300))
@@ -125,8 +144,13 @@ def worker_contexts(user,contract):
     if not isinstance(world,dict):raise PipelineError('region request omitted world_context')
     game_drop={'library_candidates','hero_visual','current_audio','known_sprites','asset_history'}
     audiovisual_keys={'setting','world_title','target','destination','region_purpose','game_spec','visual_theme',
-                      'library_candidates','hero_visual','current_audio','design_history','asset_history','language'}
-    game={'world_context':{k:v for k,v in world.items() if k not in game_drop},'region_design':contract}
+                      'library_candidates','hero_visual','current_audio','design_history','asset_history','language',
+                      'visual_identity','current_visual_identity'}
+    game_world={k:v for k,v in world.items() if k not in game_drop}
+    library=world.get('library_candidates')
+    if isinstance(library,dict) and library.get('modules'):
+        game_world['library_candidates']={k:copy.deepcopy(library[k]) for k in ('profile','modules') if k in library}
+    game={'world_context':game_world,'region_design':contract}
     audiovisual={'world_context':{k:v for k,v in world.items() if k in audiovisual_keys},'region_design':contract}
     compact=lambda value:json.dumps(value,ensure_ascii=False,separators=(',',':'))
     return compact(game),compact(audiovisual),world
@@ -152,9 +176,19 @@ def generate(context,system,user,cfg):
     gameplay_system=system.split('\nHYBRID CONTENT:',1)[0].split('\nFor regions, visuals is REQUIRED;',1)[0]+GAMEPLAY_COMPONENT
     av_system=AV_PROMPT+'\n'+(HYBRID if cfg.get('hybrid_content',True) else VISUAL_PROMPT)
     systems={'gameplay':gameplay_system,'audiovisual':av_system};inputs={'gameplay':game_context,'audiovisual':av_context}
+    def run_audiovisual():
+        if cfg.get('jev_enabled',True) and cfg.get('hybrid_content',True):
+            value=parsed(inputs['audiovisual'],'audiovisual context');av_world=value['world_context']
+            from .jev_judgments import rank_assets
+            ranked,report=rank_assets(context,contract_value,av_world.get('library_candidates',{}),cfg.get('_cancel_event'))
+            av_world['library_candidates']=ranked
+            inputs['audiovisual']=json.dumps(value,ensure_ascii=False,separators=(',',':'))
+            notify=cfg.get('_jev_event')
+            if notify:notify('asset_selection',report)
+        return run('audiovisual',av_system,inputs['audiovisual'])
     with ThreadPoolExecutor(max_workers=2,thread_name_prefix='region-component') as pool:
         gameplay_future=pool.submit(run,'gameplay',gameplay_system,game_context,True)
-        av_future=pool.submit(run,'audiovisual',av_system,av_context)
+        av_future=pool.submit(run_audiovisual)
         gameplay_raw,gameplay_usage=gameplay_future.result();av_raw,av_usage=av_future.result()
     usages.extend((gameplay_usage,av_usage))
     responses={'gameplay':gameplay_raw,'audiovisual':av_raw};repaired=set()

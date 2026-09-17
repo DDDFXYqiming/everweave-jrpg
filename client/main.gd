@@ -77,6 +77,7 @@ var subscription_label: Label
 var subscription_code_opened: String = ""
 var mode_select: OptionButton
 var hybrid_select: CheckBox
+var jev_select: CheckBox
 var online_settings: VBoxContainer
 var custom_fields: GridContainer
 var provider_summary: Label
@@ -382,6 +383,11 @@ func _build_home() -> void:
 	hybrid_select.button_pressed = true
 	hybrid_select.tooltip_text = L.t("给模型提供匹配的图像、音频和能力候选，缺少的部分仍可原创。")
 	online_settings.add_child(hybrid_select)
+	jev_select = CheckBox.new()
+	jev_select.text = L.t("使用官方 Jev 筛选素材并检查内容语义")
+	jev_select.button_pressed = true
+	jev_select.tooltip_text = L.t("通过 TypeSafe 官方 API 做只读判断；不可用时保留原流程并标记未审查。")
+	online_settings.add_child(jev_select)
 	provider_summary = _label(online_settings,"DeepSeek Flash",14,GOLD)
 	subscription_button=_button(online_settings,L.t("登录 ChatGPT 订阅"),func() -> void:_post("/subscription/login",{}))
 	subscription_label=_label(online_settings,"",12,MUTED)
@@ -747,8 +753,8 @@ func _bar(parent: Node, fill: Color) -> ProgressBar:
 func _configuration() -> Dictionary:
 	var custom: bool = mode_select.selected == 1
 	if mode_select.selected==3:
-		return {"provider":"chatgpt_subscription","language":L.language,"hybrid_content":hybrid_select.button_pressed,"parallel_region":true,"offline":false,"base_url":"","model":"gpt-5.6-luna","api_key":"","deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
-	return {"provider":"chat_completions","language":L.language,"hybrid_content":hybrid_select.button_pressed,"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
+		return {"provider":"chatgpt_subscription","language":L.language,"hybrid_content":hybrid_select.button_pressed,"parallel_region":true,"jev_enabled":jev_select.button_pressed,"offline":false,"base_url":"","model":"gpt-5.6-luna","api_key":"","deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
+	return {"provider":"chat_completions","language":L.language,"hybrid_content":hybrid_select.button_pressed,"jev_enabled":jev_select.button_pressed,"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
 
 func _set_effort(effort: String) -> void:
 	for i in range(effort_select.item_count):
@@ -803,6 +809,7 @@ func _sync_configuration() -> void:
 	model_input.text = str(cfg.get("model", "deepseek-flash"))
 	budget_input.value = int(cfg.get("max_calls", 60))
 	hybrid_select.button_pressed = bool(cfg.get("hybrid_content",true))
+	jev_select.button_pressed = bool(cfg.get("jev_enabled",true))
 	var index: int = 2 if bool(cfg.get("offline", false)) else (0 if base_input.text == "https://api.deepseek.com" and model_input.text == "deepseek-flash" and bool(cfg.get("deepseek_options", true)) else 1)
 	if not bool(cfg.get("offline",false)) and cfg.get("provider","") in ["chatgpt_subscription","codex_subscription"]:index=3
 	mode_select.select(index)
@@ -1040,7 +1047,8 @@ func _render() -> void:
 	var active_lines: Array[String] = []
 	for task in d.get("active_tasks", []):
 		var purpose: String = L.t("世界变化") if str(task.kind) == "reaction" else (L.t("更新草案") if str(task.get("source", "")) == "refresh" else L.t("自动预生成"))
-		var stage: String = L.t(" · 修复中") if str(task.get("phase", "")) == "repairing" else (L.t(" · 校验中") if str(task.get("phase", "")) == "validating" else "")
+		var phase_name: String = str(task.get("phase", ""))
+		var stage: String = L.t(" · 修复中") if phase_name == "repairing" else (L.t(" · Jev 语义审查") if phase_name == "semantic_review" else (L.t(" · 校验中") if phase_name == "validating" else ""))
 		var component: String = str(task.get("component", ""))
 		if component=="parallel":stage+=L.t(" · 玩法与视听并行")
 		elif component=="gameplay":stage+=L.t(" · 玩法制作")
@@ -1056,6 +1064,8 @@ func _render() -> void:
 	director_label.text += L.t("\n请求 %d / %d · 其中修复 %d") % [int(d.get("calls", 0)), int(d.get("max_calls", 60)), int(d.get("repair_calls", 0))]
 	director_label.text += L.t("\n已应用 %d · 过期 %d · 失败任务 %d") % [int(d.get("accepted", 0)), int(d.get("stale", 0)), failed_tasks.size()]
 	director_label.text += L.t("\n在途 %d · 本地纠正 %d 处\n输入 %d / 输出 %d tokens") % [int(d.get("active_model_requests", d.get("active_requests", 0))), int(d.get("normalization_count", 0)), int(d.get("input_tokens", 0)), int(d.get("output_tokens", 0))]
+	if bool(d.get("jev_enabled",false)):
+		director_label.text += L.t("\nJev 判断 %d · 疑点 %d · 未完成 %d\nJev 输入 %d / 输出 %d tokens") % [int(d.get("jev_requests",0)),int(d.get("jev_concerns",0)),int(d.get("jev_failures",0))+int(d.get("jev_unavailable",0)),int(d.get("jev_input_tokens",0)),int(d.get("jev_output_tokens",0))]
 	director_label.text += L.t("\n提前两层 · 已准备 %d / %d 区域") % [int(d.get("prefetch_ready", 0)), int(d.get("prefetch_total", 0))]
 	var library_usage: Dictionary = r.get("library_usage",{})
 	if not library_usage.is_empty():

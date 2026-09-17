@@ -26,8 +26,8 @@ class GameServer(ThreadingHTTPServer):
   if address[0]!='127.0.0.1': raise ValueError('Only IPv4 loopback binding is supported')
   self.token=token; self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
   self.snapshot_sequence=0
-  self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','hybrid_content','parallel_region','language')
-  self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-5.6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,hybrid_content=True,parallel_region=True,language='zh')
+  self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','hybrid_content','parallel_region','jev_enabled','language')
+  self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-5.6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,hybrid_content=True,parallel_region=True,jev_enabled=True,language='zh')
   self.preference_path=None if str(save_path)==':memory:' else Path(save_path).with_name('settings.json')
   if self.preference_path and self.preference_path.exists():
    try:
@@ -60,6 +60,8 @@ class GameServer(ThreadingHTTPServer):
   s['subscription']=self.subscription.public()
   self.snapshot_sequence+=1; s['snapshot_sequence']=self.snapshot_sequence
   s['configuration']={k:(self.director.cfg or self.preferences)[k] for k in self.preference_keys}
+  from .jev_judgments import capability as jev_capability
+  s['configuration']['jev']=jev_capability()
   base=s['configuration']['base_url']
   if s['configuration']['provider']=='chatgpt_subscription':
    s['configuration']['credential_available']=bool(s['subscription']['ready'])
