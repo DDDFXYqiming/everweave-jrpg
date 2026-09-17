@@ -1,0 +1,37 @@
+[gd_resource type="Theme" load_steps=6 format=3]
+
+[ext_resource type="FontFile" path="res://assets/fonts/LXGWWenKaiScreen.ttf" id="1"]
+[ext_resource type="FontFile" path="res://assets/fonts/FusionPixel.ttf" id="2"]
+[ext_resource type="Texture2D" path="res://client/ui/theme/frame.svg" id="3"]
+
+[sub_resource type="StyleBoxTexture" id="Frame"]
+texture = ExtResource("3")
+texture_margin_left = 12.0
+texture_margin_right = 12.0
+texture_margin_top = 12.0
+texture_margin_bottom = 12.0
+content_margin_left = 24.0
+content_margin_right = 24.0
+content_margin_top = 20.0
+content_margin_bottom = 20.0
+
+[sub_resource type="StyleBoxFlat" id="Button"]
+bg_color = Color(0.10, 0.17, 0.16, 1)
+border_width_bottom = 2
+border_color = Color(0.52, 0.48, 0.35, 1)
+content_margin_left = 16.0
+content_margin_right = 16.0
+content_margin_top = 8.0
+content_margin_bottom = 8.0
+
+[resource]
+default_font = ExtResource("1")
+default_font_size = 18
+Button/fonts/font = ExtResource("2")
+Button/font_sizes/font_size = 24
+Button/styles/normal = SubResource("Button")
+Button/colors/font_color = Color(0.89, 0.86, 0.75, 1)
+Label/colors/font_color = Color(0.89, 0.86, 0.75, 1)
+PanelContainer/styles/panel = SubResource("Frame")
+VBoxContainer/constants/separation = 12
+HBoxContainer/constants/separation = 12

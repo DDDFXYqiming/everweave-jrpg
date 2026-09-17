@@ -45,7 +45,7 @@ class JevAssetTests(unittest.TestCase):
 
 class JevSemanticTests(unittest.TestCase):
     def test_evidence_covers_actions_story_choices_and_npc_choices(self):
-        region={'program':{'actions':[{'id':'pay','label':'交出一张票','description':'通过闸门','blocked_hint':'需要一张票','when':{'item':'ticket'},'effects':[{'op':'item','id':'ticket','count':-1}]}],
+        region={'program':{'actions':[{'id':'pay','label':'交出一张票','description':'通过闸门','blocked_hint':'需要一张票','target':'gate','scope':'explore','when':{'item':'ticket'},'effects':[{'op':'item','id':'ticket','count':-1},{'op':'scene','id':'archive'}]}],
                            'hooks':[{'id':'open','on':'invoke','target':'player','when':True,'effects':[{'op':'set','path':'vars.open','value':True}],'once':True}],
                            'objectives':[{'id':'leave','name':'离站','description':'离站','when':{'get':'vars.open'},'fail_when':False,'reward':[]} ]},
                 'items':[{'id':'ticket','name':'通行票','kind':'key','description':'一次通行'}],
@@ -55,6 +55,7 @@ class JevSemanticTests(unittest.TestCase):
         self.assertEqual(kinds,{'action','scene_choice','npc_choice'})
         action=next(v for v in result['units'] if v['kind']=='action')
         self.assertEqual(action['path'],'region.program.actions[0]');self.assertEqual(action['triggered_hooks'][0]['id'],'open')
+        self.assertEqual(action['referenced_scenes'][0]['id'],'archive');self.assertEqual(action['execution_context']['target'],'gate')
         npc=next(v for v in result['units'] if v['kind']=='npc_choice')
         self.assertEqual(npc['direct_effects'][0]['value'],'asked')
 

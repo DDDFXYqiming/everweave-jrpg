@@ -63,7 +63,7 @@ var modal_signature: String = ""
 var hp_tint: StyleBoxFlat
 var music: AudioStreamPlayer
 var soundscape
-var music_muted: bool = false
+var audio_settings_panel
 
 var home: Control
 var game: Control
@@ -151,6 +151,7 @@ func _ready() -> void:
 	soundscape = preload("res://client/soundscape.gd").new()
 	add_child(soundscape)
 	music = soundscape.music_players[0]
+	if AudioPrefs.fullscreen: get_window().mode = Window.MODE_FULLSCREEN
 	home.show()
 	game.hide()
 	_poll()
@@ -165,16 +166,11 @@ func _exit_tree() -> void:
 	if is_instance_valid(journal_http): journal_http.cancel_request()
 
 func _configure_theme() -> void:
-	var font := SystemFont.new()
-	font.font_names = PackedStringArray(["Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "WenQuanYi Zen Hei", "sans-serif"])
-	var t := Theme.new()
-	t.default_font = font
-	t.default_font_size = 16
+	var t: Theme = preload("res://client/ui/theme/everweave_theme.tres").duplicate()
 	t.set_color("font_color", "Label", Color("e8e4d8"))
 	t.set_color("font_color", "Button", Color("e8e4d8"))
 	t.set_color("font_hover_color", "Button", Color("fff2ce"))
 	t.set_color("font_disabled_color", "Button", Color("6f796c"))
-	t.set_stylebox("normal", "Button", _box(Color("28332b"), Color("465242"), 3))
 	t.set_stylebox("hover", "Button", _box(Color("364331"), MINT, 7))
 	t.set_stylebox("pressed", "Button", _box(Color("1d261f"), GOLD, 7))
 	t.set_stylebox("disabled", "Button", _box(Color("1a211c"), Color("30392e"), 3))
@@ -185,7 +181,6 @@ func _configure_theme() -> void:
 	t.set_color("font_color", "LineEdit", Color("ede8d9"))
 	t.set_color("font_color", "TextEdit", Color("ede8d9"))
 	t.set_color("font_color", "CheckBox", Color("cbd6da"))
-	t.set_stylebox("panel", "PanelContainer", _box(PANEL, Color("3c4738"), 3))
 	t.set_color("font_color", "OptionButton", Color("e8e4d8"))
 	for style in ["normal", "hover", "pressed", "disabled"]:
 		t.set_stylebox(style, "OptionButton", t.get_stylebox(style,"Button"))
@@ -199,7 +194,8 @@ func _box(fill: Color, outline: Color, radius: int = 3) -> StyleBoxFlat:
 	s.bg_color = fill
 	s.border_color = outline
 	s.set_border_width_all(1)
-	s.set_corner_radius_all(radius)
+	s.set_corner_radius_all(0)
+	s.border_width_bottom = 2 if radius > 3 else 1
 	s.content_margin_left = 14
 	s.content_margin_right = 14
 	s.content_margin_top = 10
@@ -212,9 +208,7 @@ func _label(parent: Node, text: String, font_size: int = 16, color: Color = Colo
 	label.add_theme_font_size_override("font_size", font_size)
 	label.add_theme_color_override("font_color", color)
 	if font_size >= 24:
-		var heading_font := SystemFont.new()
-		heading_font.font_names = PackedStringArray(["Noto Serif CJK SC", "SimSun", "serif"])
-		label.add_theme_font_override("font",heading_font)
+		label.add_theme_font_override("font",preload("res://assets/fonts/FusionPixel.ttf"))
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(label)
@@ -223,6 +217,8 @@ func _label(parent: Node, text: String, font_size: int = 16, color: Color = Colo
 func _button(parent: Node, text: String, callback: Callable) -> Button:
 	var button := Button.new()
 	button.text = text
+	button.add_theme_font_override("font",preload("res://assets/fonts/LXGWWenKaiScreen.ttf"))
+	button.add_theme_font_size_override("font_size",18)
 	button.custom_minimum_size.y = 38
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(callback)
@@ -298,7 +294,7 @@ func _build_home() -> void:
 	spacer.custom_minimum_size.y = 120
 	identity.add_child(spacer)
 	_label(identity,L.t("写下一个地方，\n和你要扮演的人。"),22,GOLD)
-	_label(identity,L.t("移动  WASD\n交互  E    行囊  I    手记  J\n全屏  F11"),13,MUTED)
+	_label(identity,L.t("一页尚未写完的旅途。"),18,MUTED)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size.x = 650
 	layout.add_child(panel)
@@ -345,28 +341,12 @@ func _build_home() -> void:
 	var display: Control = home_pages[1]
 	_label(display,L.t("显示与声音"),30,GOLD)
 	_label(display,L.t("窗口随屏幕比例展开，画面与文字保持原有比例。"),15,MUTED)
-	display_button = _button(display,L.t("切换全屏  ·  F11"),_toggle_fullscreen)
+	display_button = _button(display,L.t("切换全屏 · Alt+Enter"),_toggle_fullscreen)
 	display_button.icon = Icons.get_icon("screen")
 	display_button.add_theme_constant_override("icon_max_width",22)
-	var volume := HSlider.new()
-	volume.min_value = 0
-	volume.max_value = 100
-	volume.value = soundscape.music_gain*100 if is_instance_valid(soundscape) else 65
-	display.add_child(volume)
-	_label(display,L.t("音乐音量"),15,MUTED)
-	volume.value_changed.connect(func(value: float) -> void:
-		if is_instance_valid(soundscape): soundscape.music_gain = value / 100.0
-	)
-	var effects_volume := HSlider.new()
-	effects_volume.min_value = 0
-	effects_volume.max_value = 100
-	effects_volume.value = soundscape.effects_gain*100 if is_instance_valid(soundscape) else 70
-	display.add_child(effects_volume)
-	_label(display,L.t("音效与环境声"),15,MUTED)
-	effects_volume.value_changed.connect(func(value: float) -> void:
-		if is_instance_valid(soundscape):soundscape.effects_gain = value/100.0
-	)
-	_button(display,L.t("开启 / 关闭音乐  ·  M"),_toggle_music)
+	audio_settings_panel = preload("res://client/ui/audio_settings_panel.tscn").instantiate()
+	display.add_child(audio_settings_panel)
+	_button(display,L.t("开发诊断 · Ctrl+D"),_toggle_diagnostics)
 	var connection: Control = home_pages[2]
 	_label(connection,L.t("世界连接"),30,GOLD)
 	_label(connection,L.t("选择内容生成服务。更改将在下次继续旅程时应用。"),14,MUTED)
@@ -458,7 +438,7 @@ func _change_language(index: int, persist: bool = true, notify_backend: bool = t
 	if value==L.language:return
 	var page: int = home_page_index
 	var showing_game: bool = game.visible
-	var fields := {"setting":setting_input.text,"base":base_input.text,"model":model_input.text,"key":key_input.text,"mode":mode_select.selected,"effort":effort_select.get_item_metadata(effort_select.selected),"budget":budget_input.value,"hybrid":hybrid_select.button_pressed}
+	var fields := {"setting":setting_input.text,"base":base_input.text,"model":model_input.text,"key":key_input.text,"mode":mode_select.selected,"effort":effort_select.get_item_metadata(effort_select.selected),"budget":budget_input.value,"hybrid":hybrid_select.button_pressed,"jev":jev_select.button_pressed}
 	var example: String = L.t("群山间有一座建在巨树上的驿站。我是一名失去地图的信使，随身带着一封没有收件人的信。")
 	var keep_setting: bool = bool(state.get("started",false)) or setting_input.text!=example
 	L.set_language(value,persist)
@@ -483,6 +463,7 @@ func _change_language(index: int, persist: bool = true, notify_backend: bool = t
 	key_input.text=fields.key
 	budget_input.value=fields.budget
 	hybrid_select.button_pressed=fields.hybrid
+	jev_select.button_pressed=fields.jev
 	start_button.disabled=not connection_ready
 	continue_button.disabled=not connection_ready or not bool(state.get("started",false))
 	start_button.text=L.t("开始另一段旅程") if bool(state.get("started",false)) else L.t("开始新旅程")
@@ -518,17 +499,30 @@ func _toggle_fullscreen() -> void:
 	else:
 		previous_window_mode = window.mode
 		window.mode = Window.MODE_FULLSCREEN
-	display_button.text = L.t("退出全屏  ·  F11") if window.mode == Window.MODE_FULLSCREEN else L.t("切换全屏  ·  F11")
+	AudioPrefs.set_fullscreen(window.mode == Window.MODE_FULLSCREEN)
+	display_button.text = L.t("退出全屏 · Alt+Enter") if AudioPrefs.fullscreen else L.t("切换全屏 · Alt+Enter")
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_D and event.ctrl_pressed and bool(state.get("started",false)):
+			_toggle_diagnostics()
+			get_viewport().set_input_as_handled()
+			return
+		if event.keycode == KEY_M and not get_viewport().gui_get_focus_owner() is TextEdit and not get_viewport().gui_get_focus_owner() is LineEdit:
+			_toggle_music()
+			get_viewport().set_input_as_handled()
+			return
+		if event.keycode == KEY_TAB and game.visible:
+			_toggle_aux("journey")
+			get_viewport().set_input_as_handled()
+			return
 		if event.keycode == KEY_ESCAPE and not local_panel.is_empty() and not replace_dialog.visible and not redesign_dialog.visible:
 			local_panel = ""
 			modal_signature = ""
 			_render_modal()
 			get_viewport().set_input_as_handled()
 			return
-		if event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed):
+		if event.keycode == KEY_ENTER and event.alt_pressed:
 			_toggle_fullscreen()
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_ESCAPE and home.visible and bool(state.get("started",false)) and not replace_dialog.visible:
@@ -597,145 +591,19 @@ func _refresh_journal() -> void:
 	_render_modal()
 
 func _build_game() -> void:
-	game = Control.new()
+	game = preload("res://client/ui/game_hud.tscn").instantiate()
 	add_child(game)
-	game.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var bg := ColorRect.new()
-	bg.color = BG
-	game.add_child(bg)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var margin := _margin(game, 16)
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var all := _vbox(margin)
-	var header := HBoxContainer.new()
-	all.add_child(header)
-	var heading := _vbox(header)
-	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_label = _label(heading, L.t("未写之境"), 27, GOLD)
-	subtitle_label = _label(heading, L.t("正在织出第一片土地"), 13, MUTED)
-	stats_label = _label(header, "", 16)
-	stats_label.custom_minimum_size.x = 220
-	stats_label.size_flags_horizontal = Control.SIZE_SHRINK_END
-	for entry in [[L.t("行囊  I"),"bag","inventory"],[L.t("手记  J"),"book","journal"],[L.t("设置"),"settings","settings"]]:
-		var callback: Callable = _show_home if entry[2] == "settings" else _toggle_panel.bind(entry[2])
-		var b := _button(header,entry[0],callback)
-		panel_buttons[entry[2]]=b
-		b.icon = Icons.get_icon(entry[1])
-		b.add_theme_constant_override("icon_max_width",24)
-	var middle := HBoxContainer.new()
-	middle.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	all.add_child(middle)
-	var map_panel := PanelContainer.new()
-	map_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	map_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	middle.add_child(map_panel)
-	var map_stack := Control.new()
-	map_stack.custom_minimum_size = Vector2(520, 400)
-	map_panel.add_child(map_stack)
-	world_view = WorldView.new()
-	map_stack.add_child(world_view)
-	world_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	world_view.entity_clicked.connect(func(id: String) -> void: _send_action({"op": "interact", "id": id}))
-	world_view.map_requested.connect(func() -> void: _toggle_panel("atlas"))
-	task_button=_button(map_stack,"",_toggle_panel.bind("missions"))
-	task_button.position=Vector2(16,16)
-	task_button.size=Vector2(290,80)
-	task_button.tooltip_text=L.t("行动记录 · Q")
-	var task_margin: MarginContainer=_margin(task_button,12)
-	task_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	task_margin.mouse_filter=Control.MOUSE_FILTER_IGNORE
-	var task_stack: VBoxContainer=_vbox(task_margin)
-	task_stack.mouse_filter=Control.MOUSE_FILTER_IGNORE
-	var task_caption: Label=_label(task_stack,L.t("◇  当前行动                                      Q"),11,MINT)
-	task_caption.mouse_filter=Control.MOUSE_FILTER_IGNORE
-	quest_label=_label(task_stack,"",14)
-	quest_label.max_lines_visible=2
-	quest_label.text_overrun_behavior=TextServer.OVERRUN_TRIM_ELLIPSIS
-	quest_label.mouse_filter=Control.MOUSE_FILTER_IGNORE
-	loading_overlay = CenterContainer.new()
-	loading_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	map_stack.add_child(loading_overlay)
-	loading_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var loading_panel := PanelContainer.new()
-	loading_panel.custom_minimum_size.x = 490
-	loading_overlay.add_child(loading_panel)
-	var loading_text := _vbox(loading_panel)
-	_label(loading_text,L.t("第一处落脚地"),30,GOLD)
-	loading_premise = _label(loading_text,"",17)
-	_label(loading_text,L.t("正在准备地点、人物与画面。完成后会直接进入旅程。"),14,MUTED)
-	modal_overlay = Control.new()
-	map_stack.add_child(modal_overlay)
-	modal_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	modal_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	var dim := ColorRect.new()
-	dim.color = Color(0.025, 0.04, 0.08, 0.66)
-	modal_overlay.add_child(dim)
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var modal_center := CenterContainer.new()
-	modal_overlay.add_child(modal_center)
-	modal_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var modal_panel := PanelContainer.new()
-	modal_panel.custom_minimum_size.x = 720
-	modal_center.add_child(modal_panel)
-	modal_scroll = ScrollContainer.new()
-	modal_scroll.custom_minimum_size = Vector2(692, 580)
-	modal_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	modal_panel.add_child(modal_scroll)
-	modal_stack = _vbox(modal_scroll)
-	modal_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	modal_stack.custom_minimum_size.x = 680
-	modal_stack.minimum_size_changed.connect(func() -> void: _fit_modal.call_deferred())
-	modal_overlay.hide()
-	var side_panel := PanelContainer.new()
-	side_panel.custom_minimum_size.x = 300
-	middle.add_child(side_panel)
-	var side_frame := _vbox(side_panel)
-	var controls := HBoxContainer.new()
-	side_frame.add_child(controls)
-	pause_button = _button(controls, L.t("暂停生成"), _toggle_pause)
-	retry_failed_button = _button(controls, L.t("重试"), func() -> void: _post("/retry", {}))
-	var side_scroll := ScrollContainer.new()
-	side_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	side_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	side_frame.add_child(side_scroll)
-	var side := _vbox(side_scroll)
-	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	side.custom_minimum_size.x = 250
-	role_label=_label(side, L.t("旅人"), 14, GOLD)
-	health_label = _label(side,L.t("生命"),12,MUTED)
-	hp_bar = _bar(side, Color("b5856b"))
-	energy_label = _label(side,L.t("魔力"),12,MUTED)
-	mp_bar = _bar(side, Color("98a480"))
-	world_resources=_vbox(side)
-	resource_rows.clear()
-	rule_label = _label(side, "", 13, MINT)
-	_label(side, L.t("沿途"), 17, GOLD)
-	status_summary = _label(side,"",13,MUTED)
-	diagnostics_button = _button(side,L.t("生成详情  +"),_toggle_diagnostics)
-	diagnostics_button.add_theme_font_size_override("font_size",12)
-	diagnostics = _vbox(side)
-	diagnostics.hide()
-	director_label = _label(diagnostics, "", 12, MUTED)
-	frontier_label = _label(side, "", 13, MUTED)
-	error_label = _label(side, "", 13, Color("e7a69d"))
-	failure_list = VBoxContainer.new()
-	side.add_child(failure_list)
-	_label(side, L.t("刚刚发生"), 17, GOLD)
-	journal_label = _label(side, "", 13, MUTED)
-	var footer := HBoxContainer.new()
-	all.add_child(footer)
-	hint_label = _label(footer, L.t("WASD  移动     E  交互     F  操作     ·  等待     G  旅图     F11  全屏                         自动保存"), 13, MUTED)
-	_button(footer, "♫  M", _toggle_music)
-	atlas_panel = preload("res://client/travel_atlas.gd").new()
-	game.add_child(atlas_panel)
-	atlas_panel.build(self)
-	mission_panel=preload("res://client/mission_panel.gd").new()
-	game.add_child(mission_panel)
-	mission_panel.build(self)
+	game.build(self)
+
+func _toggle_aux(name: String) -> void:
+	local_panel = "" if local_panel == name else name
+	modal_signature = ""
+	_render_modal()
+	get_viewport().gui_release_focus()
 
 func _toggle_diagnostics() -> void:
-	diagnostics.visible = not diagnostics.visible
-	diagnostics_button.text = L.t("收起详情  −") if diagnostics.visible else L.t("生成详情  +")
+	if not game.visible: _show_game()
+	_toggle_aux("diagnostics")
 
 func _bar(parent: Node, fill: Color) -> ProgressBar:
 	var bar := ProgressBar.new()
@@ -851,6 +719,7 @@ func _continue_world() -> void:
 
 func _show_home() -> void:
 	local_panel = ""
+	game.show_aux("")
 	_sync_configuration()
 	home.show()
 	game.hide()
@@ -864,8 +733,7 @@ func _show_game() -> void:
 	_render()
 
 func _toggle_music() -> void:
-	music_muted = not music_muted
-	if is_instance_valid(soundscape):soundscape.muted = music_muted
+	AudioPrefs.set_muted(not AudioPrefs.master_muted)
 
 func _toggle_pause() -> void:
 	var d: Dictionary = state.get("director", {})
@@ -1017,7 +885,8 @@ func _render() -> void:
 	var minute: int = int(state.get("time", 480)) % 60
 	var world_title: String = str(state.get("title",L.t("未写之境")))
 	if world_title=="未写之境 · Everweave":world_title=L.t("未写之境")
-	subtitle_label.text = L.t("%s  ·  第 %d 天 %02d:%02d  ·  已抵达 %d 区域") % [world_title, day, hour, minute, int(state.get("map_count", 0))]
+	subtitle_label.text = L.t("第 %d 天 · %02d:%02d") % [day, hour, minute]
+	title_label.tooltip_text = world_title + " · " + title_label.text
 	stats_label.text = "Lv.%d   %d G\nHP %d / %d   MP %d / %d" % [int(p.get("level", 1)), int(p.get("gold", 0)), int(p.get("hp", 0)), int(p.get("max_hp", 1)), int(p.get("mp", 0)), int(p.get("max_mp", 1))]
 	hp_bar.max_value = float(p.get("max_hp", 1))
 	hp_bar.value = float(p.get("hp", 0))
@@ -1136,6 +1005,12 @@ func _fit_modal() -> void:
 	modal_scroll.custom_minimum_size.y = clampf(modal_stack.get_combined_minimum_size().y + 8,100,minf(610,available_height))
 
 func _render_modal() -> void:
+	game.show_aux(local_panel)
+	if local_panel in ["journey","diagnostics","pause"]:
+		modal_overlay.hide()
+		atlas_panel.hide()
+		mission_panel.hide()
+		return
 	if local_panel=="missions" and state.get("ui",{}).is_empty() and not state.get("battle") is Dictionary:
 		modal_overlay.hide()
 		atlas_panel.hide()
@@ -1226,11 +1101,13 @@ func _render_modal() -> void:
 			_label(modal_stack, L.t("这里暂时没有可用的自定义操作。走近人物或物件后按 E 交互，或继续探索其他位置。"), 16, MUTED)
 		for entry in ui.get("actions", []):
 			var b := _button(modal_stack, str(entry.label), _send_action.bind({"op":"content_action","id":entry.id}))
+			b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			b.disabled = not bool(entry.enabled)
 			b.tooltip_text = str(entry.description)
 			if b.disabled: _label(modal_stack, L.system_text(str(entry.get("blocked_reason", entry.description))), 14, MUTED)
 		for ch in ui.get("choices", []):
-			_button(modal_stack, str(ch.text), _send_action.bind({"op": "choice", "id": ch.id}))
+			var choice_button := _button(modal_stack, str(ch.text), _send_action.bind({"op": "choice", "id": ch.id}))
+			choice_button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		if ui.get("kind") == "shop":
 			for item in ui.get("goods", []):
 				var b := _button(modal_stack, "%s  ·  %d G" % [str(item.name), int(item.price)], _send_action.bind({"op": "buy", "id": item.id}))
@@ -1258,6 +1135,7 @@ func _exit_wait_phase(ui: Dictionary) -> String:
 	return "paused" if bool(director.get("paused", false)) else "queued"
 
 func _process(delta: float) -> void:
+	if is_instance_valid(game) and game.visible and state.get("started",false): game.update(state)
 	poll_clock += delta
 	if poll_clock >= 0.45:
 		poll_clock = 0.0
@@ -1267,6 +1145,7 @@ func _process(delta: float) -> void:
 		return
 	if not bool(state.get("started", false)) or state.get("battle") is Dictionary or not state.get("ui", {}).is_empty() or not local_panel.is_empty():
 		return
+	if Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT): return
 	var dx: int = 0
 	var dy: int = 0
 	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): dy = -1
@@ -1274,6 +1153,7 @@ func _process(delta: float) -> void:
 	elif Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): dx = -1
 	elif Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): dx = 1
 	if dx != 0 or dy != 0:
+		AudioPrefs.learn("move")
 		move_clock = 0.14
 		_send_action({"op": "move", "dx": dx, "dy": dy})
 
@@ -1312,7 +1192,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		elif key in [KEY_E, KEY_ESCAPE, KEY_SPACE]: _send_action({"op": "close"})
 	elif key == KEY_ESCAPE:
 		if local_panel.is_empty():
-			_show_home()
+			_toggle_aux("pause")
 		else:
 			local_panel = ""
 			modal_signature = ""
@@ -1333,6 +1213,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		# Handle the first tap as an event: a down/up pair can arrive within one
 		# frame and disappear before _process polls held keys.
 		if connection_ready and not action_busy and move_clock <= 0:
+			AudioPrefs.learn("move")
 			var dx: int = 1 if key in [KEY_D, KEY_RIGHT] else -1 if key in [KEY_A, KEY_LEFT] else 0
 			var dy: int = 1 if key in [KEY_S, KEY_DOWN] else -1 if key in [KEY_W, KEY_UP] else 0
 			move_clock = 0.14
@@ -1351,8 +1232,8 @@ func _apply_game_spec() -> void:
 	world_resources.visible=custom
 	role_label.text=str(value.identity) if custom else L.t("旅人")
 	panel_buttons.inventory.visible=not custom or bool(value.systems.inventory)
-	panel_buttons.inventory.text=(str(value.inventory_label)+"  I") if custom else L.t("行囊  I")
-	panel_buttons.journal.text=(str(value.journal_label)+"  J") if custom else L.t("手记  J")
+	panel_buttons.inventory.tooltip_text=(str(value.inventory_label)+"  I") if custom else L.t("行囊  I")
+	panel_buttons.journal.tooltip_text=(str(value.journal_label)+"  J") if custom else L.t("手记  J")
 	if not custom:return
 	for row in resource_rows.values():row.box.hide()
 	var summary: Array[String] = []
@@ -1368,7 +1249,7 @@ func _apply_game_spec() -> void:
 		row.bar.value=float(resource.value)
 		row.bar.visible=str(resource.display)=="bar"
 		summary.append("%s %s" % [str(resource.label),_resource_number(resource.value)])
-	stats_label.text=" · ".join(summary.slice(0,2))
+	stats_label.text=" · ".join(summary.slice(0,3))
 	if bool(value.systems.progression):stats_label.text="Lv.%d  " % int(state.player.level)+stats_label.text
 
 func _resource_number(value: Variant) -> String:

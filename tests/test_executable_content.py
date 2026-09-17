@@ -70,6 +70,12 @@ class ExecutableTests(unittest.TestCase):
         self.assertNotIn('17',option['blocked_reason']);self.assertNotIn('presses',option['blocked_reason'])
         a['blocked_hint']='先寻找控制器上的刻度线索。'
         self.assertEqual(Runtime(self.w,self.w.region()).available()[0]['blocked_reason'],a['blocked_hint'])
+    def test_action_availability_receives_its_own_invoke_event_context(self):
+        a=self.w.region()['program']['actions'][0]
+        a['when']=expr('and',expr('eq',get('event.target'),'lever'),expr('eq',get('event.action'),'tune'))
+        vm=Runtime(self.w,self.w.region());options=vm.available(target='r0:lever',scope='explore')
+        self.assertEqual([(option['id'],option['enabled']) for option in options],[('tune',True)])
+        self.assertEqual(vm.event,{})
     def test_custom_combat_replaces_fixed_spell(self):
         self.w.state['player'].update(x=19,y=8)
         self.w.action({'op':'interact','id':'r0:foe'})

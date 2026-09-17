@@ -112,9 +112,13 @@ python launch.py --godot ./tools/Godot.exe --data-dir ./userdata/another-journey
 | Open the travel map | G or click the minimap |
 | Wait | `.` |
 | Choose a combat action | Number keys, as shown by the interface |
-| Close a panel | Esc |
-| Fullscreen | F11 |
-| Toggle music | M |
+| Close a panel / journey menu | Esc |
+| Journey drawer | Tab |
+| Developer diagnostics | Ctrl+D or the menu |
+| Fullscreen | Alt+Enter or display settings |
+| Mute / restore all sound | M or the speaker button |
+
+The HUD keeps location, key resources and a one-line objective. Detailed status is in the journey drawer; model and Jev telemetry is in diagnostics. Music, ambience, effects and menu sounds have independent volume controls. Sound and fullscreen preferences persist locally. See [presentation and audio verification](docs/CLIENT_PRESENTATION.md).
 
 ## Documentation
 

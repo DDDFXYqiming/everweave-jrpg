@@ -213,11 +213,14 @@ func _draw_weather(weather: String) -> void:
 
 func _draw_minimap() -> void:
 	var origin := Vector2(size.x - 126.0, 14.0)
-	draw_rect(Rect2(origin - Vector2(5, 5), Vector2(114, 100)), Color(0.035, 0.075, 0.13, 0.89))
+	var hovered: bool = Rect2(origin - Vector2(5,5),Vector2(114,100)).has_point(get_local_mouse_position())
+	var opacity: float = 1.0 if hovered else .48
+	draw_rect(Rect2(origin - Vector2(5, 5), Vector2(114, 100)), Color(0.035, 0.075, 0.13, 0.89*opacity))
 	var palette: Array[Color] = [Color("375e59"), Color("b29e75"), Color("356c7b"), Color("293844"), Color("bd9866")]
 	if region.has("visuals"):
 		palette.clear()
 		for key in ["ground", "path", "water", "wall", "path"]: palette.append(Color(str(region.visuals.palette[key])))
+	for i in range(palette.size()): palette[i].a = opacity
 	var map_scale: float = minf(104.0 / float(region.width), 72.0 / float(region.height))
 	for y in range(int(region.height)):
 		for x in range(int(region.width)):
@@ -226,9 +229,10 @@ func _draw_minimap() -> void:
 		if e.kind == "exit":
 			draw_rect(Rect2(origin + Vector2(float(e.x), float(e.y)) * map_scale - Vector2.ONE, Vector2(3, 3)), Color("c1a9ef"))
 	draw_rect(Rect2(origin + target_player * map_scale - Vector2.ONE, Vector2(4, 4)), Color("f7e0a4"))
-	draw_string(font,origin+Vector2(3,89),L.t("旅图 · 点击展开"),HORIZONTAL_ALIGNMENT_LEFT,104,11,Color("d7c59d"))
+	draw_string(font,origin+Vector2(3,89),L.t("旅图 · G") if hovered else "G",HORIZONTAL_ALIGNMENT_LEFT,104,14,Color(Color("d7c59d"),opacity))
 
 func _draw_nearby_hint() -> void:
+	if not snapshot.get("ui",{}).is_empty() or snapshot.get("battle") is Dictionary: return
 	var p: Dictionary = snapshot.get("player", {})
 	for e in region.get("entities", []):
 		if bool(e.get("spent", false)): continue

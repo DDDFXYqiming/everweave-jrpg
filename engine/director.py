@@ -285,8 +285,10 @@ class Director:
   self.tokens_in+=usage.get('input_tokens',0); self.tokens_out+=usage.get('output_tokens',0)
   self.tokens_reasoning+=usage.get('reasoning_tokens',0); self.reasoning_responses+=int(usage.get('reasoning_observed',False))
  def _record_jev(self,stage,report,ctx,job_key):
-  usage=report.get('usage') or {};status=report.get('status','error')
-  self.jev_requests+=int(report.get('requests',0));self.jev_tokens_in+=int(usage.get('input_tokens',0));self.jev_tokens_out+=int(usage.get('output_tokens',0))
+  usage=report.get('usage') or {};status=report.get('status','error');requests=int(report.get('requests',0))
+  self.jev_requests+=requests
+  if requests:
+   self.jev_tokens_in+=int(usage.get('input_tokens',0));self.jev_tokens_out+=int(usage.get('output_tokens',0))
   self.jev_failures+=int(status=='error');self.jev_unavailable+=int(status=='unavailable')
   concerns=report.get('concerns') or [];self.jev_concerns+=len(concerns)
   public_concerns=[{key:value[key] for key in ('kind','verdict','confidence','content_id','path') if key in value} for value in concerns[:20]]

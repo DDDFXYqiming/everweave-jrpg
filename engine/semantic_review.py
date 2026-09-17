@@ -24,17 +24,28 @@ def _compact_definitions(region):
 def evidence(parsed,context):
     region=parsed.get('region',{});program=region.get('program',{})
     hooks=program.get('hooks',[]);objectives=program.get('objectives',[]);definitions=_compact_definitions(region)
+    scenes={scene['id']:scene for scene in region.get('scenes',[])}
     units=[]
-    def add(content_id,path,kind,player_text,direct_effects,when=True,blocked_hint=None,events=()):
+    def add(content_id,path,kind,player_text,direct_effects,when=True,blocked_hint=None,events=(),execution_context=None):
         event_names=set(events)|_emitted(direct_effects)
         related=[copy.deepcopy(h) for h in hooks if h.get('on') in event_names|{'tick'}]
+        referenced=[]
+        def scene_refs(node):
+            if isinstance(node,list):
+                for child in node:scene_refs(child)
+            elif isinstance(node,dict):
+                if node.get('op')=='scene' and node.get('id') in scenes:referenced.append(copy.deepcopy(scenes[node['id']]))
+                for child in node.values():scene_refs(child)
+        scene_refs(direct_effects)
         units.append(dict(content_id=content_id,path=path,kind=kind,player_text=player_text,
                           blocked_hint=blocked_hint,when=copy.deepcopy(when),direct_effects=copy.deepcopy(direct_effects),
-                          triggered_hooks=related,objectives=copy.deepcopy(objectives),definitions=definitions))
+                          triggered_hooks=related,objectives=copy.deepcopy(objectives),definitions=definitions,
+                          referenced_scenes=referenced,execution_context=copy.deepcopy(execution_context or {})))
     for index,action in enumerate(program.get('actions',[])):
         add(action['id'],f'region.program.actions[{index}]','action',
             {'label':action['label'],'description':action.get('description',action['label'])},action.get('effects',[]),
-            action.get('when',True),action.get('blocked_hint'),('invoke',))
+            action.get('when',True),action.get('blocked_hint'),('invoke',),
+            {'target':action.get('target'),'scope':action.get('scope'),'target_is_already_bound':True})
     for scene_index,scene in enumerate(region.get('scenes',[])):
         for choice_index,choice in enumerate(scene.get('choices',[])):
             add(scene['id']+':'+choice['id'],f'region.scenes[{scene_index}].choices[{choice_index}]','scene_choice',

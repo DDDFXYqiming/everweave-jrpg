@@ -1,0 +1,5 @@
+[gd_scene load_steps=2 format=3]
+[ext_resource type="PackedScene" path="res://client/ui/journey_drawer.tscn" id="1"]
+[node name="DeveloperOverlay" instance=ExtResource("1")]
+[node name="Panel" parent="." index="1"]
+offset_left = -640.0

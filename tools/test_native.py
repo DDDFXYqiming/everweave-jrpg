@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import os
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
@@ -18,6 +19,7 @@ hybrid_test='--hybrid' in sys.argv
 adventure_test='--adventure' in sys.argv
 threat_test='--threat' in sys.argv
 generated_test='--generated' in sys.argv
+presentation_test='--presentation' in sys.argv
 generated_source=None
 if generated_test:
     try:generated_source=Path(sys.argv[sys.argv.index('--generated')+1]).resolve()
@@ -83,18 +85,19 @@ with tempfile.TemporaryDirectory() as td:
     server.director.start_worker()
     worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
     try:
-        script='native_generated_region' if generated_test else 'native_threat_e2e' if threat_test else 'native_adventure_e2e' if adventure_test else 'native_hybrid_e2e' if hybrid_test else 'native_content_e2e' if content_test else 'native_e2e'
+        script='native_ui_acceptance' if presentation_test else 'native_generated_region' if generated_test else 'native_threat_e2e' if threat_test else 'native_adventure_e2e' if adventure_test else 'native_hybrid_e2e' if hybrid_test else 'native_content_e2e' if content_test else 'native_e2e'
         command=[find_godot(None),'--path',str(ROOT),'--script',f'res://tests/{script}.gd']
         if '--headless' in sys.argv: command+=['--headless']
         command+=['--','--backend-url=http://127.0.0.1:'+str(server.server_port),'--session-token='+server.token]
         try:
-            result=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,encoding='utf-8',timeout=150)
+            result=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,encoding='utf-8',timeout=150,
+                                  env=dict(os.environ,EVERWEAVE_SETTINGS_PATH=str(Path(td)/'player-settings.cfg')))
         except subprocess.TimeoutExpired as exc:
             for output in (exc.stdout,exc.stderr):
                 if output:print(output.decode('utf-8',errors='replace') if isinstance(output,bytes) else output)
             raise RuntimeError('Native test exceeded its deadline; see captured output') from None
         print(result.stdout);print(result.stderr)
-        marker='NATIVE_GENERATED_REGION_OK' if generated_test else 'NATIVE_THREAT_E2E_OK' if threat_test else 'NATIVE_ADVENTURE_E2E_OK' if adventure_test else 'NATIVE_HYBRID_E2E_OK' if hybrid_test else 'NATIVE_CONTENT_E2E_OK' if content_test else 'NATIVE_E2E_OK'
+        marker='NATIVE_UI_ACCEPTANCE_OK' if presentation_test else 'NATIVE_GENERATED_REGION_OK' if generated_test else 'NATIVE_THREAT_E2E_OK' if threat_test else 'NATIVE_ADVENTURE_E2E_OK' if adventure_test else 'NATIVE_HYBRID_E2E_OK' if hybrid_test else 'NATIVE_CONTENT_E2E_OK' if content_test else 'NATIVE_E2E_OK'
         assert result.returncode==0 and marker in result.stdout and 'SCRIPT ERROR' not in result.stderr
         assert server.director.calls==0
     finally:

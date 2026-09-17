@@ -38,3 +38,15 @@ Everweave 只通过 TypeSafe 官方 Python SDK 调用官方 System One API：
 | 成对检查“交一张却扣两张”与“两人交两张并扣两张” | 1 | 1,035 | 92 | 前者为 `contradicted`，正常反例为 `consistent`，路径分别保留 |
 
 这些数字是一次真实样本，不是生产延迟或准确率保证。`confidence` 只表示该次答案分布的集中程度；上线阈值仍需用成对的错误样本与正常反例校准。
+
+## 2026-09-17 游戏内端到端实机
+
+另用 `userdata/jev-live-e2e-20260917` 独立存档启动真实 Godot 4.7.2 客户端、本机服务、ChatGPT 订阅 Luna/high 与 TypeSafe 官方服务。首区最终生成并加载为 36×20 的“对接环与维护气闸”。
+
+- JEV 素材筛选实际使用 10,798 输入 / 1,238 输出 tokens；对 enemy、building、focal、hero、kestrel_ai 等槽位选择原创缺口。最终 10 个 sprite 均为题材一致的原创像素配方，没有强行采用中世纪候选。
+- 同状态地区重试命中 `cached=true`，没有再次调用 JEV。实机发现旧计量会重复累计缓存保存的 usage，现已改为只有 `requests > 0` 才累计 tokens，并有回归测试。
+- 首版内容证据漏掉 `op:scene` 引用的具体场景，也没说明 action 目标由运行时预先绑定，造成两个低置信度误报。补齐证据并升级到 `everweave-effects-v4` 后，真实地区复审共 11 项判断，10 项 `consistent`；只保留 `activate_kestrel` 的 prerequisite 疑点。
+- 该 prerequisite 疑点进一步暴露真实运行时缺陷：动作 availability 读取 `event.target` 时没有候选 action 自己的 invoke 上下文。`Runtime.available()` 现会在判断时注入候选 action/target，并在结束后恢复原事件。
+- 重启同一存档后，角色实际从 `(5,9)` 走到 `(11,10)`，凯斯特尔动作菜单显示 `activate_kestrel enabled=true`。进入场景前电池/氧气为 8/100；选择“接受筛选摘要”后实际变为 7/98，与显示的“消耗1格电池、2点氧气”一致。
+
+这次验收还经历了一次真实的 ChatGPT SSE transient connection failure。地区事务未提交且没有自动重试风暴；一次显式地区重试复用了 JEV 缓存并成功完成。最终全量 Python 回归为 328 tests passed。

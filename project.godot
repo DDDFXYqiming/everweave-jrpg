@@ -7,6 +7,12 @@ run/main_scene="res://client/main.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
 config/description="A live-directed pixel JRPG: one world premise, a continuously growing world."
 
+[autoload]
+AudioPrefs="*res://client/audio_settings.gd"
+
+[audio]
+default_bus_layout="res://default_bus_layout.tres"
+
 [display]
 window/size/viewport_width=1280
 window/size/viewport_height=800

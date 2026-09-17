@@ -160,5 +160,11 @@ class DirectorPipelineTests(unittest.TestCase):
         self.assertEqual((director.jev_requests,director.jev_tokens_in,director.jev_tokens_out,director.jev_concerns),(1,80,12,1))
         self.assertEqual(director.status()['jev_reports'][-1]['stage'],'content_review')
 
+    def test_cached_jev_result_does_not_double_count_tokens(self):
+        director=Director(self.world);ctx={'kind':'region','target':'r0'};job=('epoch','region','r0')
+        director._record_jev('asset_selection',{'status':'ranked','requests':1,'usage':{'input_tokens':80,'output_tokens':12}},ctx,job)
+        director._record_jev('asset_selection',{'status':'ranked','requests':0,'cached':True,'usage':{'input_tokens':80,'output_tokens':12}},ctx,job)
+        self.assertEqual((director.jev_requests,director.jev_tokens_in,director.jev_tokens_out),(1,80,12))
+
 
 if __name__=='__main__':unittest.main()

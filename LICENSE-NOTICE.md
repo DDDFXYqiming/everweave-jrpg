@@ -4,6 +4,8 @@
 
 本地素材库中的第三方图像与音频保留各自许可。当前收录的外部素材为 CC0，作者、来源和版本见 [素材署名](assets/library/CREDITS.md)、`assets/library/sources.json` 及 `assets/library/licenses/`。这些素材的使用条件不因项目代码许可而改变。
 
-Godot、Python 和可选的素材开发工具 Pillow 由各自项目授权，本仓库不分发这些程序的安装文件。字体从操作系统读取，仓库不包含字体文件。
+Godot、Python 和可选的素材开发工具 Pillow 由各自项目授权，本仓库不分发这些程序的安装文件。
+
+界面内置 Fusion Pixel 与 LXGW WenKai Screen 字体，各自采用 SIL Open Font License。完整字体与上游许可随游戏保存在 `assets/fonts/`；来源、固定版本与组件许可见 [字体说明](assets/fonts/README.md)。不以项目 MIT 许可替代第三方字体许可。
 
 示例截图包含引擎生成的游戏画面及已署名素材。新增素材时，应同时记录来源和许可；制作独立发行包时也应保留相应声明。

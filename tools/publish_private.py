@@ -5,6 +5,7 @@ No public fallback, no force push, no changes to global git configuration.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -14,7 +15,8 @@ import sys
 
 ROOT=Path(__file__).resolve().parents[1]
 ALLOWED_ROOTS={'engine','client','assets','docs','tests','tools','.github'}
-ALLOWED_FILES={'project.godot','README.md','README.en.md','LICENSE','LICENSE-NOTICE.md','launch.py','Start.ps1','Start.cmd','Publish-Private.ps1','.gitignore','.gitattributes','.editorconfig'}
+ALLOWED_FILES={'project.godot','default_bus_layout.tres','requirements.txt','README.md','README.en.md','LICENSE','LICENSE-NOTICE.md','launch.py','Start.ps1','Start.cmd','Publish-Private.ps1','.gitignore','.gitattributes','.editorconfig'}
+LARGE_ASSETS={'assets/fonts/LXGWWenKaiScreen.ttf':'cd1a6fa39c4ea42fd8f4e289945789b0e510cf7016435640f8893cdad9b220f3'}
 SKIP_DIRS={'.git','.godot','__pycache__','.pytest_cache','.venv','venv','saves','userdata','build','dist','exports'}
 
 
@@ -37,7 +39,10 @@ def source_files():
             continue
         if file.name.startswith('.env') or 'credentials' in file.name.lower() or 'secrets' in file.name.lower():continue
         if file.is_symlink():raise RuntimeError(f'Refusing symlink: {rel}')
-        if file.stat().st_size>15_000_000:raise RuntimeError(f'Unexpectedly large source file: {rel}')
+        if file.stat().st_size>15_000_000:
+            expected=LARGE_ASSETS.get(rel.as_posix())
+            if expected is None or hashlib.sha256(file.read_bytes()).hexdigest()!=expected:
+                raise RuntimeError(f'Unexpectedly large source file: {rel}')
         if file.suffix.lower() in ('.py','.gd','.json','.md','.yml','.yaml','.ps1','.cmd'):
             body=file.read_text(encoding='utf-8')
             if re.search(r'(?<![A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{25,}|github_pat_[A-Za-z0-9_]{35,})',body):

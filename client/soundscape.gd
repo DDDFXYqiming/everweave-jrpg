@@ -7,9 +7,15 @@ var effect_players: Array[AudioStreamPlayer] = []
 var ambience: AudioStreamPlayer
 var generated: Dictionary = {}
 var scheduled: Array[Dictionary] = []
-var music_gain: float = .65
-var effects_gain: float = .7
-var muted: bool = false
+var music_gain: float:
+	get: return get_node("/root/AudioPrefs").music_volume
+	set(value): get_node("/root/AudioPrefs").set_volume("music", value)
+var effects_gain: float:
+	get: return get_node("/root/AudioPrefs").sfx_volume
+	set(value): get_node("/root/AudioPrefs").set_volume("sfx", value)
+var muted: bool:
+	get: return get_node("/root/AudioPrefs").master_muted
+	set(value): get_node("/root/AudioPrefs").set_muted(value)
 var current_slot: int = 0
 var blend: float = 1
 var gains: Array[float] = [0.0,0.0]
@@ -23,33 +29,54 @@ var effect_slot: int = 0
 var effect_gains: Array[float] = []
 var current_audio: Dictionary = {}
 var ambience_gain: float = 0
+var ambience_target_gain: float = 0
+var pending_ambience: Dictionary = {}
+var ambience_switch_pending: bool = false
 
 func _ready() -> void:
 	for i in range(2):
 		var player := AudioStreamPlayer.new()
+		player.bus = "Music"
 		add_child(player)
 		music_players.append(player)
 	for i in range(8):
 		var player := AudioStreamPlayer.new()
+		player.bus = "SFX"
 		add_child(player)
 		effect_players.append(player)
 		effect_gains.append(0)
 	ambience = AudioStreamPlayer.new()
+	ambience.bus = "Ambience"
 	add_child(ambience)
+	get_node("/root/AudioPrefs").changed.connect(_preferences_changed)
+
+func _preferences_changed() -> void:
+	if not muted: return
+	scheduled.clear()
+	for player in effect_players: player.stop()
 
 func _process(delta: float) -> void:
 	blend = minf(1,blend+delta/.7)
 	for i in range(2):
 		var weight: float = blend if i == current_slot else 1-blend
-		music_players[i].volume_db = linear_to_db(maxf(.00001,gains[i]*music_gain*weight))
-		music_players[i].stream_paused = muted
+		music_players[i].volume_db = linear_to_db(maxf(.00001,gains[i]*weight))
 		if i != current_slot and blend >= 1: music_players[i].stop()
-	ambience.volume_db = linear_to_db(maxf(.00001,ambience_gain*effects_gain))
-	for i in range(effect_players.size()):effect_players[i].volume_db = linear_to_db(maxf(.00001,effect_gains[i]*effects_gain))
+	# Half-second fade out + half-second fade in; generated sustained gain is capped.
+	ambience_gain = move_toward(ambience_gain, ambience_target_gain, delta * .04)
+	if ambience_switch_pending and ambience_gain <= .00001:
+		ambience.stop()
+		ambience_switch_pending = false
+		if not pending_ambience.is_empty():
+			ambience.stream = _stream(pending_ambience, true)
+			ambience.pitch_scale = float(pending_ambience.get("pitch", 1))
+			ambience_target_gain = minf(.25, float(pending_ambience.get("volume", .3))) * .08
+			if ambience.stream: ambience.play()
+	ambience.volume_db = linear_to_db(maxf(.00001,ambience_gain))
+	for i in range(effect_players.size()):effect_players[i].volume_db = linear_to_db(maxf(.00001,effect_gains[i]))
 	var now: int = Time.get_ticks_msec()
 	while not scheduled.is_empty() and int(scheduled[0].due) <= now:
 		var entry: Dictionary = scheduled.pop_front()
-		_play_effect(entry.spec,entry.gain,entry.pitch)
+		_play_effect(entry.spec,entry.gain,entry.pitch,entry.bus)
 
 func _stream(spec: Dictionary, looping: bool = false) -> AudioStream:
 	looping = looping and bool(spec.get("loop",true))
@@ -133,6 +160,9 @@ func update_state(state: Dictionary, active: bool) -> void:
 		scheduled.clear()
 		for player in music_players+effect_players:player.stop()
 		ambience.stop()
+		ambience_gain = 0
+		ambience_target_gain = 0
+		ambience_switch_pending = false
 	var region: Dictionary = state.get("region",{}) if state.get("region") is Dictionary else {}
 	current_audio = region.get("audio",{})
 	for event in state.get("audio_events",[]):
@@ -164,43 +194,42 @@ func update_state(state: Dictionary, active: bool) -> void:
 	var background_signature: String = JSON.stringify(background)
 	if background_signature != ambience_signature:
 		ambience_signature = background_signature
-		ambience.stop()
-		if not background.is_empty():
-			ambience.stream = _stream(background,true)
-			ambience.pitch_scale = float(background.get("pitch",1))
-			ambience_gain = float(background.get("volume",.3))*.08
-			if ambience.stream:ambience.play()
+		pending_ambience = background
+		ambience_target_gain = 0
+		ambience_switch_pending = true
 
-func play_cue(spec: Dictionary, gain: float = 1, pitch: float = 1, delay: float = 0) -> void:
+func play_cue(spec: Dictionary, gain: float = 1, pitch: float = 1, delay: float = 0, bus: String = "SFX") -> void:
+	if muted: return
 	gain *= float(spec.get("volume",.65))
 	pitch *= float(spec.get("pitch",1))
 	delay += float(spec.get("delay_ms",0))
 	if spec.has("layers"):
-		for layer in spec.layers:play_cue(layer,gain,pitch,delay)
+		for layer in spec.layers:play_cue(layer,gain,pitch,delay,bus)
 		return
 	if delay > 0:
 		if scheduled.size()>=16:return
-		scheduled.append({"due":Time.get_ticks_msec()+int(delay),"spec":spec,"gain":gain,"pitch":pitch})
+		scheduled.append({"due":Time.get_ticks_msec()+int(delay),"spec":spec,"gain":gain,"pitch":pitch,"bus":bus})
 		scheduled.sort_custom(func(a: Dictionary,b: Dictionary) -> bool:return a.due < b.due)
-	else:_play_effect(spec,gain,pitch)
+	else:_play_effect(spec,gain,pitch,bus)
 
-func _play_effect(spec: Dictionary, gain: float, pitch: float) -> void:
-	if effects_gain <= 0:return
+func _play_effect(spec: Dictionary, gain: float, pitch: float, bus: String = "SFX") -> void:
+	if muted or (get_node("/root/AudioPrefs").ui_volume if bus == "UI" else effects_gain) <= 0:return
 	var stream: AudioStream = _stream(spec)
 	if stream == null:return
 	effect_slot = (effect_slot+1)%effect_players.size()
 	var player: AudioStreamPlayer = effect_players[effect_slot]
+	player.bus = bus
 	player.stream = stream
 	player.pitch_scale = clampf(pitch,.25,4)
 	var base_gain: float = db_to_linear(float(Library.entry(str(spec.asset)).get("gain_db",-10)))*.25 if spec.has("asset") else .08
 	effect_gains[effect_slot] = gain*minf(.08,base_gain)
-	player.volume_db = linear_to_db(maxf(.00001,effects_gain*effect_gains[effect_slot]))
+	player.volume_db = linear_to_db(maxf(.00001,effect_gains[effect_slot]))
 	player.play()
 	played_effects += 1
 
 func play_ui() -> void:
 	var cue: String = str(current_audio.get("bindings",{}).get("ui",""))
-	if not cue.is_empty():play_cue(current_audio.cues[cue])
+	if not cue.is_empty():play_cue(current_audio.cues[cue],1,1,0,"UI")
 
 func _exit_tree() -> void:
 	for player in music_players+effect_players:player.stop()

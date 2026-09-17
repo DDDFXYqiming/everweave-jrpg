@@ -343,25 +343,30 @@ class Runtime:
         return result
 
     def available(self, target=None, scope=None):
-        result = []; p = self.s['player']
-        for a in self.actions():
-            if scope and a['scope'] != scope: continue
-            if a['once'] and 'action:'+a['id'] in self.rt['used']: continue
-            try:
-                obj = self.entity(a['target']); self.actor = a['target']
-                canonical = obj.get('id', 'player')
-                if target and target not in (canonical, a['target']): continue
-                if a['scope'] == 'explore' and obj is not p:
-                    if min(abs(x-p['x'])+abs(y-p['y']) for x, y in cells_for(obj)) > 1: continue
-                if a['scope'] == 'combat' and not self.s.get('battle'): continue
-                enabled = bool(self.expr(a['when']))
-                reason=''
-                if not enabled:
-                    reason=a.get('blocked_hint') or self._resource_hint(a['when']) or (a['description'] if a['description']!=a['label'] else '当前条件尚未满足。请留意附近人物和物件提供的线索。')
-                result.append(dict(id=a['id'], label=a['label'], description=a['description'], enabled=enabled, blocked_reason=reason, scope=a['scope'], target=canonical))
-            except RuleError:
-                continue
-        self.actor = 'player'
+        result = []; p = self.s['player']; previous_event=self.event
+        try:
+            for a in self.actions():
+                if scope and a['scope'] != scope: continue
+                if a['once'] and 'action:'+a['id'] in self.rt['used']: continue
+                try:
+                    obj = self.entity(a['target']); self.actor = a['target']
+                    canonical = obj.get('id', 'player')
+                    if target and target not in (canonical, a['target']): continue
+                    if a['scope'] == 'explore' and obj is not p:
+                        if min(abs(x-p['x'])+abs(y-p['y']) for x, y in cells_for(obj)) > 1: continue
+                    if a['scope'] == 'combat' and not self.s.get('battle'): continue
+                    # Availability is evaluated before invoke(), but event.* in an
+                    # action condition describes that candidate's own invocation.
+                    self.event=self.event_data('invoke',a['target'],action=a['id'])
+                    enabled = bool(self.expr(a['when']))
+                    reason=''
+                    if not enabled:
+                        reason=a.get('blocked_hint') or self._resource_hint(a['when']) or (a['description'] if a['description']!=a['label'] else '当前条件尚未满足。请留意附近人物和物件提供的线索。')
+                    result.append(dict(id=a['id'], label=a['label'], description=a['description'], enabled=enabled, blocked_reason=reason, scope=a['scope'], target=canonical))
+                except RuleError:
+                    continue
+        finally:
+            self.actor = 'player';self.event=previous_event
         return result
 
     def invoke(self, key, scope):

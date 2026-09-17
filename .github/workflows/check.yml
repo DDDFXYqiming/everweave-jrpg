@@ -66,6 +66,14 @@ jobs:
         env:
           GODOT_BIN: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
         run: python3 tools/test_native.py --content --headless
+      - name: Quiet HUD, portable shortcuts and restartable audio preferences
+        env:
+          GODOT_BIN: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
+          EVERWEAVE_SETTINGS_PATH: res://userdata/preferences-restart.cfg
+        run: |
+          python3 tools/test_native.py --content --presentation --headless
+          "$GODOT_BIN" --headless --path . --script res://tests/preferences_restart.gd -- --write
+          "$GODOT_BIN" --headless --path . --script res://tests/preferences_restart.gd
       - name: Verify hybrid pixels, real audio samples, and module gameplay
         env:
           GODOT_BIN: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
