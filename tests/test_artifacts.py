@@ -1,5 +1,6 @@
 """Static resource consistency checks, not a substitute for Godot's native parser."""
 from pathlib import Path
+import hashlib
 import json
 import struct
 import tempfile
@@ -37,11 +38,32 @@ class ArtifactTests(unittest.TestCase):
             for reference in re.findall(r'res://[^"\s]+',script.read_text(encoding='utf-8')):
                 self.assertTrue((ROOT/reference.removeprefix('res://')).is_file(),f'{script}: {reference}')
 
-    def test_no_font_or_runtime_credentials_shipped(self):
+    def test_only_pinned_fonts_ship_and_no_runtime_credentials(self):
+        """The client preloads two fonts, so a blanket font ban would be a lie.
+        Instead: every shipped .ttf is pinned by content in assets/fonts/manifest.json,
+        unmodified, and carries its own license. Nothing else may be a font, and no
+        credential or per-machine runtime file may ever be committed."""
+        manifest=json.loads((ROOT/'assets/fonts/manifest.json').read_text(encoding='utf-8'))
+        pinned={}
+        for entry in manifest['fonts']:
+            path=(ROOT/entry['file']).resolve()
+            self.assertTrue(path.is_file(),f"{entry['file']}: pinned in the manifest but missing from the repository")
+            self.assertEqual(path.stat().st_size,entry['bytes'],f"{entry['file']}: size differs from the manifest")
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),entry['sha256'],
+                             f"{entry['file']}: bytes differ from the pinned upstream release; fonts are bundled unmodified")
+            self.assertFalse(entry['modified'],f"{entry['file']}: shipped fonts must stay unmodified upstream builds")
+            for license_file in entry['licenses']:
+                self.assertTrue((ROOT/license_file).is_file(),f"{entry['file']}: license text {license_file} is missing")
+            pinned[path]=entry
+        self.assertEqual(len(pinned),len(manifest['fonts']),'the font manifest pins the same file twice')
         for folder in (ROOT/'assets',ROOT/'client'):
             for f in folder.rglob('*'):
-                self.assertNotIn(f.suffix.lower(),('.ttf','.otf','.woff','.woff2','.pem','.key'))
+                if not f.is_file():continue
                 self.assertNotEqual(f.name,'runtime.json')
+                if f.suffix.lower()=='.ttf':
+                    self.assertIn(f.resolve(),pinned,f'{f}: a .ttf may only ship when pinned in assets/fonts/manifest.json')
+                else:
+                    self.assertNotIn(f.suffix.lower(),('.otf','.woff','.woff2','.pem','.key'))
 
     def test_pending_world_reaction_survives_restart(self):
         with tempfile.TemporaryDirectory() as td:
