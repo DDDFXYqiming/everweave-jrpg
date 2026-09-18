@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install the declared Python requirements
+        run: python3 -m pip install --disable-pip-version-check -r requirements.txt
       - name: Restore local content from pinned manifests
         run: python3 -m engine.asset_cache --download
       - name: Authoritative engine / HTTP / persistence tests (no cloud requests)

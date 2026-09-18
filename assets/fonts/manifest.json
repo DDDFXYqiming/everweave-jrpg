@@ -1,0 +1,34 @@
+{
+  "comment": "Single source of truth for binary fonts shipped inside the repository. tests/test_artifacts.py verifies every committed .ttf appears here with matching bytes and a license; tools/publish_private.py reads the same pins. A font that is not pinned here may not be committed.",
+  "fonts": [
+    {
+      "file": "assets/fonts/FusionPixel.ttf",
+      "role": "compact HUD labels and controls",
+      "upstream": "Fusion Pixel 12px Proportional Simplified Chinese",
+      "version": "2026.09.01",
+      "source": "https://github.com/TakWolf/fusion-pixel-font/releases/tag/2026.09.01",
+      "modified": false,
+      "bytes": 7001608,
+      "sha256": "1b423de0be589d159ef71af7d00530a7176e16af768a26adbc2e524e8817aad9",
+      "licenses": [
+        "assets/fonts/FusionPixel-OFL.txt",
+        "assets/fonts/fusion-licenses/ark-pixel/OFL.txt",
+        "assets/fonts/fusion-licenses/cubic-11/OFL.txt",
+        "assets/fonts/fusion-licenses/galmuri/LICENSE.txt"
+      ]
+    },
+    {
+      "file": "assets/fonts/LXGWWenKaiScreen.ttf",
+      "role": "longer narrative text",
+      "upstream": "LXGW WenKai Screen",
+      "version": "1.522",
+      "source": "https://github.com/lxgw/LxgwWenKai-Screen/releases/tag/v1.522",
+      "modified": false,
+      "bytes": 25673994,
+      "sha256": "cd1a6fa39c4ea42fd8f4e289945789b0e510cf7016435640f8893cdad9b220f3",
+      "licenses": [
+        "assets/fonts/WenKai-OFL.txt"
+      ]
+    }
+  ]
+}

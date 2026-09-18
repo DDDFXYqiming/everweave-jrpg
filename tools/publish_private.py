@@ -16,7 +16,9 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 ALLOWED_ROOTS={'engine','client','assets','docs','tests','tools','.github'}
 ALLOWED_FILES={'project.godot','default_bus_layout.tres','requirements.txt','README.md','README.en.md','LICENSE','LICENSE-NOTICE.md','launch.py','Start.ps1','Start.cmd','Publish-Private.ps1','.gitignore','.gitattributes','.editorconfig'}
-LARGE_ASSETS={'assets/fonts/LXGWWenKaiScreen.ttf':'cd1a6fa39c4ea42fd8f4e289945789b0e510cf7016435640f8893cdad9b220f3'}
+# The client preloads these fonts, so they are the only oversized binaries allowed in.
+# Pins live in one place: tests/test_artifacts.py checks the same sha256 values.
+LARGE_ASSETS={entry['file']:entry['sha256'] for entry in json.loads((ROOT/'assets/fonts/manifest.json').read_text(encoding='utf-8'))['fonts']}
 SKIP_DIRS={'.git','.godot','__pycache__','.pytest_cache','.venv','venv','saves','userdata','build','dist','exports'}
 
 
