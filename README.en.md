@@ -80,7 +80,7 @@ The default is **direct ChatGPT subscription · GPT-5.6 Luna / high**. Authorize
 
 An online new world first generates its game specification and campaign plan, then prepares the starting region. The settings control request limits and budget; subscription mode is fixed at high, while compatible APIs expose the reasoning levels they support. The generation director prepares nearby regions, and failed tasks expose their diagnostic details with a retry action.
 
-Subscription mode shares your Codex usage allowance; it is not unlimited. DeepSeek and compatible paid APIs remain explicit manual choices, and the launcher no longer loads a DeepSeek key by default. Initial world creation and new region preparation can take time. Use the offline check to verify installation and basic controls without model calls.
+Subscription mode draws on the same Codex usage allowance that Codex CLI uses. DeepSeek and compatible paid APIs remain explicit manual choices, and the launcher no longer loads a DeepSeek key by default. Initial world creation and new region preparation can take time. Use the offline check to verify installation and basic controls without model calls.
 
 Jev uses a separate TypeSafe official credential. You can store the API key as a Windows-user DPAPI ciphertext in `typesafe.local.key`, then explicitly load it for a process that should call the service:
 
@@ -132,15 +132,6 @@ The HUD keeps location, key resources and a one-line objective. Detailed status 
 - [Development and testing](docs/DEVELOPMENT.md) covers asset preparation and regression tests
 - [Security boundaries](docs/SECURITY.md) describes local service access, credentials, and content limits
 - [Documentation index](docs/README.md) collects usage notes, design documents, and experiment records
-
-## Development checks
-
-```powershell
-python -m unittest discover -s tests -v
-python -m engine.asset_cache --verify
-```
-
-Online integration tests consume model service quota, so use a separate `--data-dir`. Do not commit runtime keys, personal saves, or generation logs.
 
 ## License
 

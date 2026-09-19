@@ -18,7 +18,7 @@
 
 **模型生成可执行内容**
 
-模型生成 `scene`、`program`、`visuals` 和 `audio`。章节中的复杂新地区会把玩法与视听分成两条 Luna / high 请求并行制作，再由本机按同一份导演约定组装和完整校验；简单地区和修复仍可一次生成。[地区双路制作与实测](docs/REGION_PIPELINE.md)。可选的官方 Jev 接入会在视听分支内按槽位筛选素材，并在硬校验后核对玩家文字与实际效果；它只记录可定位疑点，不改剧情、不触发整区重试。[Jev 接入与验证](docs/JEV_SEMANTIC_REVIEW.md)。其中的 `program` 是受限的规则 DSL，可以读取对象状态、章节旗标、资源、物品和近期位置历史，表达机关、资源交换、战斗条件和依赖历史的谜题。模型提交 JSON，Python 运行时校验并执行规则，Godot 显示结果。
+模型生成 `scene`、`program`、`visuals` 和 `audio`。章节中的复杂新地区会把玩法与视听分成两条 Luna / high 请求并行制作，再由本机按同一份导演约定组装和完整校验；简单地区和修复仍可一次生成。[地区双路制作管线](docs/REGION_PIPELINE.md)。可选的官方 Jev 接入会在视听分支内按槽位筛选素材，并在硬校验后核对玩家文字与实际效果；它只记录可定位疑点，不改剧情、不触发整区重试。[Jev 接入与验证](docs/JEV_SEMANTIC_REVIEW.md)。其中的 `program` 是受限的规则 DSL，可以读取对象状态、章节旗标、资源、物品和近期位置历史，表达机关、资源交换、战斗条件和依赖历史的谜题。模型提交 JSON，Python 运行时校验并执行规则，Godot 显示结果。
 
 **世界规格会进入游戏本身**
 
@@ -78,7 +78,7 @@ python launch.py --godot ./tools/Godot.exe
 
 在线新建世界会先生成游戏规格和章节计划，再生成开局地区。请求预算可以在设置中调整；订阅直连固定使用 high，兼容 API 才按服务支持选择思考等级。生成导演会准备附近地区，失败任务会显示具体错误并提供重试入口。
 
-订阅模式共享 ChatGPT/Codex 使用额度，并非无限生成。DeepSeek 与其他兼容 API 仍可手动选择并按其规则计费，启动器默认不加载 DeepSeek 密钥。初次创建世界和准备新地区可能需要等待；只想检查安装和操作时，可以运行不调用模型的离线自检。
+订阅模式与 Codex CLI 共用同一份 ChatGPT 使用额度，用量计入该配额。DeepSeek 与其他兼容 API 仍可手动选择并按其规则计费，启动器默认不加载 DeepSeek 密钥。初次创建世界和准备新地区可能需要等待；只想检查安装和操作时，可以运行不调用模型的离线自检。
 
 Jev 使用独立的 TypeSafe 官方凭据。可把 API Key 以当前 Windows 用户的 DPAPI 密文保存为 `typesafe.local.key`，并在需要本次进程调用官方服务时显式加载：
 
@@ -133,15 +133,6 @@ python launch.py --godot ./tools/Godot.exe --data-dir ./userdata/another-journey
 - [开发与测试](docs/DEVELOPMENT.md) 说明资源准备与回归测试
 - [安全边界](docs/SECURITY.md) 说明本机服务、凭据和生成内容的限制
 - [文档目录](docs/README.md) 汇总使用说明、设计文档和实验记录
-
-## 开发检查
-
-```powershell
-python -m unittest discover -s tests -v
-python -m engine.asset_cache --verify
-```
-
-在线联调会消耗模型服务额度，建议使用独立的 `--data-dir`。运行时密钥、个人存档和生成日志不应提交到仓库。
 
 ## 许可
 
