@@ -22,12 +22,12 @@ def data_dir():
 
 class GameServer(ThreadingHTTPServer):
  daemon_threads=True
- def __init__(self,address,save_path,token):
+ def __init__(self,address,save_path,token,handler_class=None):
   if address[0]!='127.0.0.1': raise ValueError('Only IPv4 loopback binding is supported')
-  self.token=token; self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
+  self.token=token;self.instance_id=secrets.token_hex(16); self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
   self.snapshot_sequence=0
-  self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','hybrid_content','parallel_region','jev_enabled','language')
-  self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-5.6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,hybrid_content=True,parallel_region=True,jev_enabled=True,language='zh')
+  self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','max_transport_retries','task_timeout_seconds','hybrid_content','parallel_region','jev_enabled','language')
+  self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,max_transport_retries=1,task_timeout_seconds=900,hybrid_content=True,parallel_region=True,jev_enabled=True,language='zh')
   self.preference_path=None if str(save_path)==':memory:' else Path(save_path).with_name('settings.json')
   if self.preference_path and self.preference_path.exists():
    try:
@@ -37,7 +37,7 @@ class GameServer(ThreadingHTTPServer):
      allowed=self.preference_keys if saved.get('provider') else ('offline','max_calls','hybrid_content','parallel_region','language')
      self.preferences.update({k:saved[k] for k in allowed if k in saved})
    except (OSError,ValueError): pass
-  super().__init__(address,Handler)
+  super().__init__(address,handler_class or Handler)
   from .subscription_auth import LoginManager
   self.subscription=LoginManager()
   self.audit=NullAudit() if str(save_path)==':memory:' else AuditLog(Path(save_path).parent/'logs')
@@ -58,7 +58,7 @@ class GameServer(ThreadingHTTPServer):
  def snapshot(self):
   s=self.world.snapshot(); s['director']=self.director.status()
   s['subscription']=self.subscription.public()
-  self.snapshot_sequence+=1; s['snapshot_sequence']=self.snapshot_sequence
+  self.snapshot_sequence+=1; s['snapshot_sequence']=self.snapshot_sequence;s['instance_id']=self.instance_id
   s['configuration']={k:(self.director.cfg or self.preferences)[k] for k in self.preference_keys}
   from .jev_judgments import capability as jev_capability
   s['configuration']['jev']=jev_capability()

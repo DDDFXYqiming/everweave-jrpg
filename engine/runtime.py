@@ -62,6 +62,14 @@ class Runtime:
         self.changed = False
         self.end_result = None
         self.effects_executed=0
+        self.payment_scope=False
+
+    def perform(self,definition):
+        from .costs import pay
+        pay(self.s,definition.get('costs',{}))
+        previous=self.payment_scope;self.payment_scope=True
+        try:self.run(definition.get('effects',[]))
+        finally:self.payment_scope=previous
 
     def spend(self, amount=1):
         self.gas -= amount
@@ -174,6 +182,8 @@ class Runtime:
                 value = self.expr(c['delta'])
                 if type(value) not in (int, float): raise RuleError('stat delta must be numeric')
                 delta = max(-2000, min(2000, int(value))); name = c['name']
+                if self.payment_scope and c['target']=='player' and name!='hp' and delta<0 and target.get(name,0)<-delta:
+                    raise RuleError('资源不足，无法支付 '+name)
                 if c['target']=='player':
                     from .adventure import check_gain
                     check_gain(self.world,name,delta)
@@ -228,6 +238,9 @@ class Runtime:
                 from .game_spec import change
                 from .adventure import check_gain
                 delta=self.expr(c['delta']);check_gain(self.world,c['id'],delta)
+                if self.payment_scope and c['id']!='hp' and type(delta) in (int,float) and delta<0:
+                    from .costs import balance
+                    if balance(self.s,c['id'])<-delta:raise RuleError('资源不足，无法支付 '+c['id'])
                 change(self.s,c['id'],delta);self.changed=True
             elif op == 'paint':
                 spec = dict(rect=[self.expr(v) for v in c['rect']], tile=c['tile'])
@@ -359,10 +372,13 @@ class Runtime:
                     # action condition describes that candidate's own invocation.
                     self.event=self.event_data('invoke',a['target'],action=a['id'])
                     enabled = bool(self.expr(a['when']))
+                    from .costs import hint,description,requirements
+                    cost_hint=hint(self.s,a)
+                    enabled=enabled and not cost_hint
                     reason=''
                     if not enabled:
-                        reason=a.get('blocked_hint') or self._resource_hint(a['when']) or (a['description'] if a['description']!=a['label'] else '当前条件尚未满足。请留意附近人物和物件提供的线索。')
-                    result.append(dict(id=a['id'], label=a['label'], description=a['description'], enabled=enabled, blocked_reason=reason, scope=a['scope'], target=canonical))
+                        reason=cost_hint or a.get('blocked_hint') or self._resource_hint(a['when']) or (a['description'] if a['description']!=a['label'] else '当前条件尚未满足。请留意附近人物和物件提供的线索。')
+                    result.append(dict(id=a['id'], label=a['label'], description=description(self.s,a), costs=requirements(a), enabled=enabled, blocked_reason=reason, scope=a['scope'], target=canonical))
                 except RuleError:
                     continue
         finally:
@@ -375,7 +391,7 @@ class Runtime:
         a = next(a for a in self.actions() if a['id'] == key)
         self.actor = a['target']; self.event = self.event_data('invoke', a['target'], action=key)
         if a['once']: self.rt['used'].append('action:'+key)
-        self.run(a['effects'])
+        self.perform(a)
         self.emit('invoke', target=a['target'], advance=scope == 'explore', action=key)
         return a
 

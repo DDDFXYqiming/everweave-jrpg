@@ -40,7 +40,7 @@ Operations (effects is an array, max32; nesting max5):
  {op:"end_battle",result:"victory" or "escape"}; only in a battle, condition earned through actions.
 program = {summary:design intent <=300 chars,vars:{KEY:SCALAR},actions:[],hooks:[],objectives:[]}.
 An action: {id,label,description?,blocked_hint?,target:OBJECT_ID or "player",scope:"explore" or "combat",
- when:EXPR,effects:[EFFECTS],once:bool}. Explore actions on objects require player adjacency;
+ when:EXPR,costs?:{RESOURCE_ID:POSITIVE_INTEGER},effects:[EFFECTS],once:bool}. Explore actions on objects require player adjacency;
  player-target explore actions are available through F; '.' waits one tick. Max32 actions.
 blocked_hint is an optional short player-facing prerequisite clue displayed when disabled; do not expose
 internal variable names or reveal a hidden puzzle answer. Explain required items/resources when appropriate.
@@ -54,6 +54,9 @@ Do not make an objective true on arrival just to grant free rewards. Max12 objec
 For combat create player-target scope=combat actions; use enemy_turn hooks for bespoke opponent logic
 (event.target is the enemy ID). Conditions can inspect battle and custom state, so combat need not be
 HP attrition. Basic retreat remains available. Never require an unsupported operation.
+动作、剧情选项和 item.use 的支付统一使用 costs，例如 costs:{focus:1,gold:10}。
+引擎先检查全部余额再扣费；effects 不要再次重复扣除这些费用。生命伤害继续使用 stat/resource。
+旧动作中的非生命资源负数效果也必须付得起，不会将不足的余额截成零后继续执行。
 For repeated actions give meaningful cost, consequence or changing state. A timer can emit a custom
 signal; its handler can reschedule itself. Never emit an unguarded cycle.
 '''

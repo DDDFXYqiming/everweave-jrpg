@@ -123,6 +123,10 @@ class Normalizer:
         other = 'reaction' if root == 'region' else 'region'
         if other in raw:
             return
+        if root=='region' and self.context.get('chapter_plan') and body.get('destinations')==[]:
+            # 章节路线已有权威定义，显式空列表与省略局部目的地完全等价。
+            body.pop('destinations')
+            self.record('region.destinations','empty_planned_destinations',[],None)
         if raw.get('type')=='json_object':
             raw.pop('type')
             self.record('type','envelope_metadata','json_object',None)

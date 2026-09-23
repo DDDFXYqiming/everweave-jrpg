@@ -219,7 +219,7 @@ def close_json_containers(text):
 def generate(system, user, cfg):
     if cfg.get('model',MODEL)!=MODEL:raise CodexError('Subscription mode is pinned to gpt-5.6-luna.')
     effort=cfg.get('reasoning_effort',EFFORT)
-    if effort not in ('high','xhigh','max'):raise CodexError('Luna subscription generation requires high or above; reasoning was not lowered.')
+    if effort not in ('medium','high','xhigh','max'):raise CodexError('Luna 订阅生成支持 medium/high/xhigh/max。')
     from .codex_telemetry import CodexTelemetry
     telemetry=CodexTelemetry(cfg,system,user);outcome='failed';kind=cfg.get('_request_meta',{}).get('kind')
     with tempfile.TemporaryDirectory(prefix='everweave-codex-') as cwd:

@@ -1,11 +1,13 @@
 # 文档
 
-当前 `main` 的默认在线入口是 Everweave 自己的 ChatGPT 设备 OAuth，使用 GPT-5.6 Luna / high 和 Responses SSE。下列标为阶段记录的文档保留旧版本的实验数字与问题，不应当覆盖当前代码事实。公开发布前已重写 `main` 历史以移除早期本机路径；阶段文档中的旧提交号只用于历史定位，不保证仍是当前分支可直接访问的提交。
+当前 `main` 的默认在线入口是 Everweave 自己的 ChatGPT 设备 OAuth，使用 GPT-6 Luna / high 和 Responses SSE，并可选择 GPT-5.6 Luna 与六档思考等级。下列标为阶段记录的文档保留旧版本的实验数字与问题，不应当覆盖当前代码事实。公开发布前已重写 `main` 历史以移除早期本机路径；阶段文档中的旧提交号只用于历史定位，不保证仍是当前分支可直接访问的提交。
 
 ## 使用与开发
 
 - [使用指南](LOCAL_SETUP.md) 包含安装、模型连接和独立存档
-- [Codex 订阅接入](CODEX_SUBSCRIPTION.md) 说明 Luna / high、登录边界和本轮实测
+- [Web 游戏界面](WEB_CLIENT.md) 说明本机浏览器启动、点击寻路与模型生成进度
+- [Web 实测与 Luna Medium 对照](WEB_LIVE_REVIEW_2026-09-22.md) 记录真实游玩、生成等待、剩余问题与上下文核查
+- [Codex 订阅接入](CODEX_SUBSCRIPTION.md) 说明 Luna 模型和思考等级、登录边界及实测
 - [地区双路制作](REGION_PIPELINE.md) 说明玩法与视听并行、组装边界和真实速度对照
 - [语言设置](LOCALIZATION.md) 说明中英文界面与生成语言
 - [示例世界](SHOWCASE.md) 记录 README 中章节系统加入前的场景与截图

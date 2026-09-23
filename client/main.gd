@@ -46,6 +46,10 @@ var redesign_dialog: ConfirmationDialog
 var pending_redesign: Dictionary = {}
 var backend_url: String = ""
 var session_token: String = ""
+var runtime_file: String = ""
+var service_connection = preload("res://client/service_connection.gd").new()
+var poll_instance_id: String = ""
+var action_instance_id: String = ""
 var state: Dictionary = {}
 var action_http: HTTPRequest
 var poll_http: HTTPRequest
@@ -81,6 +85,8 @@ var jev_select: CheckBox
 var online_settings: VBoxContainer
 var custom_fields: GridContainer
 var provider_summary: Label
+var luna_model_row: HBoxContainer
+var luna_model_select: OptionButton
 var mode_help: Label
 var effort_select: OptionButton
 var effort_help: Label
@@ -243,29 +249,31 @@ func _read_connection() -> void:
 			backend_url = arg.trim_prefix("--backend-url=")
 		elif arg.begins_with("--session-token="):
 			session_token = arg.trim_prefix("--session-token=")
-	if not backend_url.is_empty() and not session_token.is_empty():
-		if not backend_url.begins_with("http://127.0.0.1:"):
-			backend_url = ""
-			session_token = ""
-		return
+		elif arg.begins_with("--runtime-file="):
+			runtime_file = arg.trim_prefix("--runtime-file=")
 	var folder: String = ""
-	if OS.get_name() == "Windows":
+	if runtime_file.is_empty() and OS.get_name() == "Windows":
 		folder = OS.get_environment("LOCALAPPDATA").path_join("EverweaveJRPG")
-	else:
+	elif runtime_file.is_empty():
 		folder = OS.get_environment("XDG_DATA_HOME")
 		if folder.is_empty():
 			folder = OS.get_environment("HOME").path_join(".local/share")
 		folder = folder.path_join("everweave-jrpg")
-	var file: String = folder.path_join("runtime.json")
-	if FileAccess.file_exists(file):
-		var parsed = JSON.parse_string(FileAccess.get_file_as_string(file))
+	if runtime_file.is_empty():runtime_file = folder.path_join("runtime.json")
+	var instance: String = ""
+	if FileAccess.file_exists(runtime_file):
+		var parsed = JSON.parse_string(FileAccess.get_file_as_string(runtime_file))
 		if parsed is Dictionary:
-			backend_url = str(parsed.get("url", ""))
-			session_token = str(parsed.get("token", ""))
+			if backend_url.is_empty():backend_url = str(parsed.get("url", ""))
+			if session_token.is_empty():session_token = str(parsed.get("token", ""))
+			instance = str(parsed.get("instance_id", ""))
+	service_connection.configure(runtime_file,instance)
 	# This client must never send its local session credential to a remote hostname.
 	if not backend_url.begins_with("http://127.0.0.1:"):
 		backend_url = ""
 		session_token = ""
+	if backend_url.is_empty() or session_token.is_empty():
+		service_connection.failed(L.t("等待本机服务重新启动。"))
 
 func _build_home() -> void:
 	home = Control.new()
@@ -369,6 +377,14 @@ func _build_home() -> void:
 	jev_select.tooltip_text = L.t("通过 TypeSafe 官方 API 做只读判断；不可用时保留原流程并标记未审查。")
 	online_settings.add_child(jev_select)
 	provider_summary = _label(online_settings,"DeepSeek Flash",14,GOLD)
+	luna_model_row=HBoxContainer.new()
+	online_settings.add_child(luna_model_row)
+	_label(luna_model_row,L.t("Luna 模型"),14,MUTED)
+	luna_model_select=OptionButton.new()
+	for model_name in ["gpt-6-luna","gpt-5.6-luna"]:
+		luna_model_select.add_item(model_name)
+		luna_model_select.set_item_metadata(luna_model_select.item_count-1,model_name)
+	luna_model_row.add_child(luna_model_select)
 	subscription_button=_button(online_settings,L.t("登录 ChatGPT 订阅"),func() -> void:_post("/subscription/login",{}))
 	subscription_label=_label(online_settings,"",12,MUTED)
 	custom_fields = GridContainer.new()
@@ -438,7 +454,7 @@ func _change_language(index: int, persist: bool = true, notify_backend: bool = t
 	if value==L.language:return
 	var page: int = home_page_index
 	var showing_game: bool = game.visible
-	var fields := {"setting":setting_input.text,"base":base_input.text,"model":model_input.text,"key":key_input.text,"mode":mode_select.selected,"effort":effort_select.get_item_metadata(effort_select.selected),"budget":budget_input.value,"hybrid":hybrid_select.button_pressed,"jev":jev_select.button_pressed}
+	var fields := {"setting":setting_input.text,"base":base_input.text,"model":model_input.text,"luna_model":luna_model_select.get_item_metadata(luna_model_select.selected),"key":key_input.text,"mode":mode_select.selected,"effort":effort_select.get_item_metadata(effort_select.selected),"budget":budget_input.value,"hybrid":hybrid_select.button_pressed,"jev":jev_select.button_pressed}
 	var example: String = L.t("群山间有一座建在巨树上的驿站。我是一名失去地图的信使，随身带着一封没有收件人的信。")
 	var keep_setting: bool = bool(state.get("started",false)) or setting_input.text!=example
 	L.set_language(value,persist)
@@ -460,6 +476,7 @@ func _change_language(index: int, persist: bool = true, notify_backend: bool = t
 	if keep_setting:setting_input.text=fields.setting
 	base_input.text=fields.base
 	model_input.text=fields.model
+	_set_luna_model(str(fields.luna_model))
 	key_input.text=fields.key
 	budget_input.value=fields.budget
 	hybrid_select.button_pressed=fields.hybrid
@@ -621,7 +638,7 @@ func _bar(parent: Node, fill: Color) -> ProgressBar:
 func _configuration() -> Dictionary:
 	var custom: bool = mode_select.selected == 1
 	if mode_select.selected==3:
-		return {"provider":"chatgpt_subscription","language":L.language,"hybrid_content":hybrid_select.button_pressed,"parallel_region":true,"jev_enabled":jev_select.button_pressed,"offline":false,"base_url":"","model":"gpt-5.6-luna","api_key":"","deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
+		return {"provider":"chatgpt_subscription","language":L.language,"hybrid_content":hybrid_select.button_pressed,"parallel_region":true,"jev_enabled":jev_select.button_pressed,"offline":false,"base_url":"","model":str(luna_model_select.get_item_metadata(luna_model_select.selected)),"api_key":"","deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
 	return {"provider":"chat_completions","language":L.language,"hybrid_content":hybrid_select.button_pressed,"jev_enabled":jev_select.button_pressed,"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
 
 func _set_effort(effort: String) -> void:
@@ -631,11 +648,20 @@ func _set_effort(effort: String) -> void:
 			return
 	effort_select.select(0)
 
+func _set_luna_model(model_name: String) -> void:
+	for i in range(luna_model_select.item_count):
+		if str(luna_model_select.get_item_metadata(i))==model_name:
+			luna_model_select.select(i)
+			return
+	luna_model_select.select(0)
+
 func _mode_changed(index: int) -> void:
 	var previous: String = ("high" if index==3 else "low") if effort_select.item_count == 0 else str(effort_select.get_item_metadata(effort_select.selected))
 	effort_select.clear()
 	var efforts: Array = ["low", "high", "max", "none"] if index != 1 else ["low", "medium", "high", "xhigh", "max", "minimal", "none", "default"]
-	if index==3:efforts=["high","xhigh","max"]
+	if index==3:
+		efforts=["none","low","medium","high","xhigh","max"]
+		if not previous in efforts:previous="high"
 	for effort in efforts:
 		var label: String = L.t("关闭思考") if effort == "none" else (L.t("服务默认（不传参数）") if effort == "default" else effort)
 		effort_select.add_item(label)
@@ -645,7 +671,8 @@ func _mode_changed(index: int) -> void:
 	online_settings.visible = index != 2
 	custom_fields.visible = index == 1
 	provider_summary.visible = index in [0,3]
-	provider_summary.text = "GPT-5.6 Luna · Responses SSE" if index==3 else "DeepSeek Flash"
+	provider_summary.text = "Luna · Responses SSE" if index==3 else "DeepSeek Flash"
+	luna_model_row.visible=index==3
 	subscription_button.visible=index==3
 	subscription_label.visible=index==3
 	key_input.visible=index!=3
@@ -682,6 +709,7 @@ func _sync_configuration() -> void:
 	if not bool(cfg.get("offline",false)) and cfg.get("provider","") in ["chatgpt_subscription","codex_subscription"]:index=3
 	mode_select.select(index)
 	_mode_changed(index)
+	if index==3:_set_luna_model(str(cfg.get("model","gpt-6-luna")))
 	_set_effort(str(cfg.get("reasoning_effort", "low")))
 
 func _start_world() -> void:
@@ -760,21 +788,36 @@ func _headers() -> PackedStringArray:
 func _poll() -> void:
 	if poll_busy or backend_url.is_empty() or session_token.is_empty(): return
 	poll_busy = true
+	poll_instance_id = service_connection.expected_instance_id
 	var result: Error = poll_http.request(backend_url + "/state", PackedStringArray(["Authorization: Bearer " + session_token]))
 	if result != OK:
 		poll_busy = false
+		connection_ready = false
+		service_connection.failed(L.t("无法请求本机引擎。请检查启动窗口。"))
 		_connection_error(L.t("无法请求本机引擎。请检查启动窗口。"))
+
+func _recover_connection() -> void:
+	var value: Dictionary = service_connection.runtime()
+	if value.is_empty():
+		service_connection.failed(L.t("等待本机服务重新启动。"))
+		return
+	backend_url=str(value.url);session_token=str(value.token)
+	service_connection.discovered(value)
+	_poll()
 
 func _post(route: String, body: Dictionary) -> void:
 	if action_busy: return
 	if backend_url.is_empty() or not connection_ready:
-		_connection_error(L.t("本机引擎尚未连接。请通过启动脚本运行。"))
+		var message: String = L.t("正在重新连接本机引擎；动作没有发送。") if service_connection.disconnected else L.t("本机引擎尚未连接。请通过启动脚本运行。")
+		service_connection.log_event("client.action.blocked",{"route":route,"reason":message})
+		_connection_error(message)
 		switch_after_action = false
 		return
 	action_busy = true
 	start_button.disabled = true
 	continue_button.disabled = true
 	action_route = route
+	action_instance_id = service_connection.expected_instance_id
 	var result: Error = action_http.request(backend_url + route, _headers(), HTTPClient.METHOD_POST, JSON.stringify(body))
 	if result != OK:
 		action_busy = false
@@ -799,13 +842,21 @@ func _poll_complete(result: int, code: int, _headers_unused: PackedStringArray, 
 	var data := _decode(result, code, body)
 	if data.has("error"):
 		connection_ready = false
+		service_connection.failed(str(data.error))
 		_connection_error(str(data.error))
 	else:
+		var incoming: String = str(data.get("instance_id",""))
+		if not poll_instance_id.is_empty() and incoming != poll_instance_id:
+			connection_ready = false
+			service_connection.failed(L.t("本机服务已更换，正在重新连接。"))
+			return
 		connection_ready = true
+		service_connection.recovered(incoming)
 		_accept_snapshot(data)
 
 func _action_complete(result: int, code: int, _headers_unused: PackedStringArray, body: PackedByteArray) -> void:
 	action_busy = false
+	var transport_failed: bool = result != HTTPRequest.RESULT_SUCCESS
 	var data := _decode(result, code, body)
 	if data.has("error"):
 		last_action_error = str(data.error)
@@ -813,7 +864,14 @@ func _action_complete(result: int, code: int, _headers_unused: PackedStringArray
 		switch_after_action = false
 		start_button.disabled = not connection_ready
 		continue_button.disabled = not connection_ready or not bool(state.get("started", false))
+		if transport_failed:
+			connection_ready=false
+			service_connection.log_event("client.action.not_replayed",{"route":action_route,"reason":str(data.error),"instance_id":action_instance_id})
+			service_connection.failed(str(data.error))
 		return
+	if not action_instance_id.is_empty() and str(data.get("instance_id","")) != action_instance_id:
+		service_connection.log_event("client.action.result_discarded",{"route":action_route,"old_instance_id":action_instance_id,"new_instance_id":str(data.get("instance_id",""))})
+		connection_ready=false;service_connection.failed(L.t("本机服务已更换，正在同步状态。"));return
 	last_action_error = ""
 	connection_ready = true
 	_accept_snapshot(data)
@@ -826,7 +884,14 @@ func _action_complete(result: int, code: int, _headers_unused: PackedStringArray
 		_show_game()
 
 func _accept_snapshot(data: Dictionary) -> void:
-	if data.has("snapshot_sequence") and int(data.snapshot_sequence) < int(state.get("snapshot_sequence", -1)): return
+	var incoming_instance: String = str(data.get("instance_id",""))
+	var current_instance: String = str(state.get("instance_id",""))
+	if not service_connection.expected_instance_id.is_empty() and not incoming_instance.is_empty() and incoming_instance != service_connection.expected_instance_id:return
+	var instance_changed: bool = not current_instance.is_empty() and incoming_instance != current_instance
+	if not instance_changed and data.has("snapshot_sequence") and int(data.snapshot_sequence) < int(state.get("snapshot_sequence", -1)): return
+	if instance_changed:
+		local_panel="";modal_signature="";selected_item="";item_art.clear();journal_pages.clear();journal_generation+=1;journal_error=""
+		service_connection.log_event("client.snapshot.instance_changed",{"old_instance_id":current_instance,"new_instance_id":incoming_instance,"snapshot_sequence":int(data.get("snapshot_sequence",0))})
 	if bool(state.get("started", false)) and not bool(data.get("started", false)): return
 	var incoming_epoch: String = str(data.get("epoch", ""))
 	var previous_epoch: String = str(state.get("epoch", ""))
@@ -917,7 +982,7 @@ func _render() -> void:
 	for task in d.get("active_tasks", []):
 		var purpose: String = L.t("世界变化") if str(task.kind) == "reaction" else (L.t("更新草案") if str(task.get("source", "")) == "refresh" else L.t("自动预生成"))
 		var phase_name: String = str(task.get("phase", ""))
-		var stage: String = L.t(" · 修复中") if phase_name == "repairing" else (L.t(" · Jev 语义审查") if phase_name == "semantic_review" else (L.t(" · 校验中") if phase_name == "validating" else ""))
+		var stage: String = L.t(" · 连接补试中") if phase_name == "retrying" else (L.t(" · 修复中") if phase_name == "repairing" else (L.t(" · Jev 语义审查") if phase_name == "semantic_review" else (L.t(" · 校验中") if phase_name == "validating" else "")))
 		var component: String = str(task.get("component", ""))
 		if component=="parallel":stage+=L.t(" · 玩法与视听并行")
 		elif component=="gameplay":stage+=L.t(" · 玩法制作")
@@ -926,6 +991,7 @@ func _render() -> void:
 		if progress is Dictionary:
 			if progress.get("stage")=="reasoning":stage+=L.t(" · 模型正在推理")
 			elif progress.get("stage")=="output":stage+=L.t(" · 已接收 %d 字符") % int(progress.get("output_chars",0))
+		if int(task.get("transport_retries",0))>0:stage+=L.t(" · 已补试 %d 次") % int(task.transport_retries)
 		active_lines.append(L.t("%s %s · %.0f 秒%s") % [purpose, str(task.name), float(task.get("elapsed_seconds", 0)), stage])
 	var activity: String = "\n".join(active_lines) if not active_lines.is_empty() else str(d.get("busy", ""))
 	director_label.text = mode_text + "\n" + (activity if not activity.is_empty() else (L.t("导演已暂停") if bool(d.get("paused", false)) else L.t("等待重要事件 · 不按帧调用")))
@@ -933,6 +999,7 @@ func _render() -> void:
 	director_label.text += L.t("\n请求 %d / %d · 其中修复 %d") % [int(d.get("calls", 0)), int(d.get("max_calls", 60)), int(d.get("repair_calls", 0))]
 	director_label.text += L.t("\n已应用 %d · 过期 %d · 失败任务 %d") % [int(d.get("accepted", 0)), int(d.get("stale", 0)), failed_tasks.size()]
 	director_label.text += L.t("\n在途 %d · 本地纠正 %d 处\n输入 %d / 输出 %d tokens") % [int(d.get("active_model_requests", d.get("active_requests", 0))), int(d.get("normalization_count", 0)), int(d.get("input_tokens", 0)), int(d.get("output_tokens", 0))]
+	if int(d.get("unknown_usage_calls",0))>0:director_label.text += L.t("\n另有 %d 次失败调用的用量未知") % int(d.unknown_usage_calls)
 	if bool(d.get("jev_enabled",false)):
 		director_label.text += L.t("\nJev 判断 %d · 疑点 %d · 未完成 %d\nJev 输入 %d / 输出 %d tokens") % [int(d.get("jev_requests",0)),int(d.get("jev_concerns",0)),int(d.get("jev_failures",0))+int(d.get("jev_unavailable",0)),int(d.get("jev_input_tokens",0)),int(d.get("jev_output_tokens",0))]
 	director_label.text += L.t("\n提前两层 · 已准备 %d / %d 区域") % [int(d.get("prefetch_ready", 0)), int(d.get("prefetch_total", 0))]
@@ -1137,9 +1204,12 @@ func _exit_wait_phase(ui: Dictionary) -> String:
 func _process(delta: float) -> void:
 	if is_instance_valid(game) and game.visible and state.get("started",false): game.update(state)
 	poll_clock += delta
-	if poll_clock >= 0.45:
+	if connection_ready and poll_clock >= 0.45:
 		poll_clock = 0.0
 		_poll()
+	elif not connection_ready and service_connection.due():
+		poll_clock=0.0
+		_recover_connection()
 	move_clock = maxf(0, move_clock - delta)
 	if not is_instance_valid(game) or not game.visible or not connection_ready or action_busy or move_clock > 0:
 		return

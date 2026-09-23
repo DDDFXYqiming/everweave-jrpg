@@ -1,4 +1,4 @@
-"""One instrumented Luna/high subscription request on a copied save."""
+"""在存档副本上测量指定 Luna 思考等级的一项生成任务。"""
 import argparse
 import json
 from pathlib import Path
@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--live',action='store_true');parser.add_argument('--source',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True);parser.add_argument('--timeout-seconds',type=int,default=660)
     parser.add_argument('--transport',choices=('direct','app-server'),default='direct')
+    parser.add_argument('--effort',choices=('medium','high','xhigh','max'),default='high')
     parser.add_argument('--max-calls',type=int,default=2,help='Actual subscription requests; split regions need two')
     args=parser.parse_args()
     if not args.live or not 60<=args.timeout_seconds<=900 or not 1<=args.max_calls<=5:parser.error('--live, timeout 60..900 and max-calls 1..5 are required')
@@ -30,7 +31,7 @@ def main():
     finally:source.close();dest.close()
     w=World(Store(db));d=Director(w);audit=AuditLog(out/'logs');d.audit=audit
     provider='chatgpt_subscription' if args.transport=='direct' else 'codex_subscription'
-    d.configure(dict(provider=provider,model='gpt-5.6-luna',reasoning_effort='high',offline=False,max_calls=args.max_calls))
+    d.configure(dict(provider=provider,model='gpt-5.6-luna',reasoning_effort=args.effort,offline=False,max_calls=args.max_calls,task_timeout_seconds=args.timeout_seconds))
     d.cfg.update(codex_timeout_seconds=args.timeout_seconds,_codex_partial_dir=str(out/'partial'))
     # Print only counters and stages. The reasoning text never enters these logs.
     def progress(p):print(json.dumps({k:p[k] for k in ('stage','elapsed_seconds','last_event_age','reasoning_chars','output_chars','errors','retries')},ensure_ascii=False),flush=True)
@@ -42,7 +43,7 @@ def main():
             components.append(dict(component=name,raw=raw,usage=usage));write('components.json',components)
     d.cfg['_region_component_output']=capture_component
     def generate(provider,ctx,kind,repair=''):
-        assert provider.cfg['provider'] in ('chatgpt_subscription','codex_subscription') and provider.cfg['reasoning_effort']=='high'
+        assert provider.cfg['provider'] in ('chatgpt_subscription','codex_subscription') and provider.cfg['reasoning_effort']==args.effort
         provider.cfg['_codex_progress']=progress
         record=dict(kind=kind,context=ctx,repair=repair);start=time.monotonic()
         try:
@@ -53,7 +54,7 @@ def main():
             record['seconds']=round(time.monotonic()-start,3);traces.append(record);write('trace.json',traces)
     try:
         with patch.object(ChatProvider,'generate',generate):d.step()
-        result=dict(provider=provider,model='gpt-5.6-luna',effort='high',calls=d.calls,accepted=d.accepted,
+        result=dict(provider=provider,model='gpt-5.6-luna',effort=args.effort,calls=d.calls,accepted=d.accepted,
             failed_tasks=d.status()['failed_tasks'],task_history=d.task_history,ready=bool(w.region()),input_tokens=d.tokens_in,output_tokens=d.tokens_out)
         write('result.json',result);write('snapshot.json',dict(w.snapshot(),director=d.status()))
         print(json.dumps(result,ensure_ascii=False),flush=True)

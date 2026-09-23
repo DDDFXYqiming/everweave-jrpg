@@ -18,7 +18,7 @@ func _run() -> void:
 	assert(main.online_settings.visible)
 	assert(main._configuration().reasoning_effort == "high")
 	assert(main._configuration().provider=="chatgpt_subscription")
-	assert(main._configuration().model=="gpt-5.6-luna" and main._configuration().api_key=="")
+	assert(main._configuration().model=="gpt-6-luna" and main._configuration().api_key=="")
 	assert(main._configuration().jev_enabled and main.jev_select.button_pressed)
 	main.jev_select.button_pressed=false
 	assert(not main._configuration().jev_enabled)
@@ -27,6 +27,11 @@ func _run() -> void:
 	assert(main.subscription_button.visible and not main.subscription_button.disabled)
 	main._set_effort("max")
 	assert(main._configuration().reasoning_effort == "max")
+	for effort in ["none","low","medium","high","xhigh","max"]:
+		main._set_effort(effort)
+		assert(main._configuration().reasoning_effort==effort)
+	main._set_luna_model("gpt-5.6-luna")
+	assert(main._configuration().model=="gpt-5.6-luna")
 	main.mode_select.select(2)
 	main.mode_select.item_selected.emit(2)
 	assert(not main.online_settings.visible)
@@ -41,6 +46,30 @@ func _run() -> void:
 	var snapshot = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/demo_snapshot.json"))
 	assert(snapshot is Dictionary)
 	main._accept_snapshot(snapshot)
+	var old_instance: Dictionary = snapshot.duplicate(true)
+	old_instance.instance_id="old-instance"
+	old_instance.snapshot_sequence=100
+	main.service_connection.expected_instance_id="old-instance"
+	main._accept_snapshot(old_instance)
+	var restarted: Dictionary = old_instance.duplicate(true)
+	restarted.instance_id="new-instance"
+	restarted.snapshot_sequence=1
+	restarted.version+=1
+	main.service_connection.discovered({"url":"http://127.0.0.1:2","token":"test","instance_id":"new-instance"})
+	main._accept_snapshot(restarted)
+	assert(main.state.instance_id=="new-instance" and int(main.state.snapshot_sequence)==1)
+	var late_old: Dictionary = old_instance.duplicate(true)
+	late_old.snapshot_sequence=101
+	late_old.title="迟到旧快照"
+	main._accept_snapshot(late_old)
+	assert(main.state.instance_id=="new-instance" and main.state.title!="迟到旧快照")
+	var version_before_blocked_action: int = int(main.state.version)
+	main.connection_ready=false
+	main.service_connection.disconnected=true
+	main._post("/action",{"op":"move","dx":1,"dy":0})
+	assert(not main.action_busy and int(main.state.version)==version_before_blocked_action)
+	main.connection_ready=true
+	main.service_connection.disconnected=false
 	main.state.director.provider="codex_subscription"
 	main.state.director.mode="live_llm"
 	main.state.director.model="gpt-5.6-luna"

@@ -149,6 +149,9 @@ def item_availability(world,item):
             vm=Runtime(view,copy.deepcopy(r))
             try:
                 if not vm.expr(use['when']):reason=vm._resource_hint(use['when']) or '当前不满足物品使用条件。'
+                if not reason:
+                    from .costs import hint
+                    reason=hint(world.state,use)
             except RuleError:reason='此物品当前不可使用。'
     elif item.get('kind') in ('weapon','charm'):
         if p.get(item['kind'])==item['id']:reason='已经装备。'
@@ -214,14 +217,18 @@ def action(world, a):
                     raise RuleError('此物品的交互绑定原地区；请返回后使用。')
                 if not vm.expr(use['when']): raise RuleError('当前不满足物品使用条件。')
                 s['player']['inventory'][item['id']] -= use['consume']
-                vm.run(use['effects']); vm.emit('use', advance=True, item=item['id'])
+                vm.perform(use); vm.emit('use', advance=True, item=item['id'])
                 event, _ = world.story('use', use['label']+'：'+item['name'])
                 show_messages(world, vm); world.persist(r, event=event); return
         interaction_target = world._action(a)
         current = world.region()
         if not current.get('program'): return
         if previous[0] != s['current']:
-            enter(world, current); world.persist(current); return
+            try:enter(world, current); world.persist(current)
+            except InvalidPatch as exc:
+                from .playability import RegionEntryError
+                raise RegionEntryError(s['current'],exc) from None
+            return
         vm = Runtime(world, current)
         if op == 'move' and s['steps'] != previous[1]:
             vm.emit('move', advance=True, x=s['player']['x'], y=s['player']['y'])

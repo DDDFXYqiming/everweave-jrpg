@@ -96,8 +96,12 @@ def expression(value, depth=0):
     if value['op'] not in OPS:
         raise InvalidPatch('unknown expression operator')
     lo, hi = OPS[value['op']]
-    return {'op': value['op'], 'args': [expression(x, depth + 1)
-            for x in arr(value['args'], 'arguments', hi, lo)]}
+    args=[expression(x, depth + 1) for x in arr(value['args'], 'arguments', hi, lo)]
+    if value['op'] in ('div','mod') and type(args[1]) in (int,float) and args[1]==0:
+        raise InvalidPatch('division by zero',category='gameplay')
+    if value['op'] in ('add','sub','mul','div','mod','min','max','abs','lt','le','gt','ge','inside'):
+        if any(not isinstance(x,dict) and type(x) not in (int,float) for x in args):raise InvalidPatch('numeric operands required: '+value['op'])
+    return {'op':value['op'],'args':args}
 
 
 def event_name(value):
@@ -184,7 +188,7 @@ def program(value):
     result = dict(summary=text(value.get('summary', '交互规则'), 'program summary', 300),
                   vars=state_values(value.get('vars', {})), actions=[], hooks=[], objectives=[])
     for raw in arr(value.get('actions', []), 'actions', 32):
-        obj(raw, 'action', ('id', 'label', 'target', 'scope', 'when', 'effects', 'once', 'description', 'blocked_hint'), ('id', 'label', 'effects'))
+        obj(raw, 'action', ('id', 'label', 'target', 'scope', 'when', 'effects', 'once', 'description', 'blocked_hint','costs'), ('id', 'label', 'effects'))
         scope = raw.get('scope', 'explore')
         if scope not in ('explore', 'combat'): raise InvalidPatch('scope must be explore or combat')
         result['actions'].append(dict(id=ident(raw['id']), label=text(raw['label'], 'action label', 64),
@@ -192,6 +196,9 @@ def program(value):
             target=target(raw.get('target', 'player')), scope=scope, when=expression(raw.get('when', True)),
             effects=effects(raw['effects']), once=boolean(raw.get('once', False))))
         if 'blocked_hint' in raw:result['actions'][-1]['blocked_hint']=text(raw['blocked_hint'],'blocked hint',200)
+        if 'costs' in raw:
+            from .costs import parse
+            result['actions'][-1]['costs']=parse(raw['costs'])
     for raw in arr(value.get('hooks', []), 'hooks', 32):
         obj(raw, 'hook', ('id', 'on', 'target', 'when', 'effects', 'once'), ('id', 'on', 'effects'))
         result['hooks'].append(dict(id=ident(raw['id']), on=event_name(raw['on']), target=target(raw.get('target', 'player')), when=expression(raw.get('when', True)),
@@ -292,6 +299,10 @@ def entity_extensions(raw, out):
 
 
 def item_use(value):
-    obj(value, 'item.use', ('label', 'when', 'effects', 'consume'), ('effects',))
-    return dict(label=text(value.get('label', '使用'), 'use label', 40), when=expression(value.get('when', True)),
+    obj(value, 'item.use', ('label', 'when', 'effects', 'consume','costs'), ('effects',))
+    result=dict(label=text(value.get('label', '使用'), 'use label', 40), when=expression(value.get('when', True)),
                 effects=effects(value['effects']), consume=integer(value.get('consume', 1), 0, 1))
+    if 'costs' in value:
+        from .costs import parse
+        result['costs']=parse(value['costs'])
+    return result

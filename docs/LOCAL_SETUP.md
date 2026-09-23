@@ -16,7 +16,7 @@ Linux 使用同样的 Python 启动器，将 `--godot` 指向对应平台的可�
 
 ## 模型连接
 
-默认连接为 **ChatGPT 订阅直连 · GPT-5.6 Luna / high**。在游戏连接页点击登录，浏览器打开官方设备页后输入显示的代码并确认账号。Everweave 保存自己的授权，不读取 Codex 或其他项目的凭据，也不回退到 API Key。[详细说明](CODEX_SUBSCRIPTION.md)
+默认连接为 **ChatGPT 订阅直连 · GPT-6 Luna / high**，连接页也可选择 GPT-5.6 Luna 与六档思考等级。在游戏连接页点击登录，浏览器打开官方设备页后输入显示的代码并确认账号。Everweave 保存自己的授权，不读取 Codex 或其他项目的凭据，也不回退到 API Key。[详细说明](CODEX_SUBSCRIPTION.md)
 
 若主动选择 DeepSeek 或兼容 Chat Completions API，再使用该服务的密钥。启动器默认不解密 DeepSeek 本地凭据；明确运行 `.\Start.ps1 -LoadDeepSeekKey` 才加载已有 `deepseek.local.key`。环境变量和手动输入仍适用于对应 API 模式。
 

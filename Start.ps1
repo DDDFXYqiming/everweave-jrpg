@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Godot = '', [switch]$Demo, [switch]$ServerOnly, [string]$DataDir = '', [switch]$LoadDeepSeekKey, [switch]$LoadTypeSafeKey)
+param([string]$Godot = '', [switch]$Demo, [switch]$ServerOnly, [switch]$Web, [string]$DataDir = '', [switch]$LoadDeepSeekKey, [switch]$LoadTypeSafeKey)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $env:PYTHONUTF8 = '1'
@@ -22,6 +22,7 @@ $argsForGame = @('launch.py')
 if ($Godot) { $argsForGame += @('--godot', $Godot) }
 if ($Demo) { $argsForGame += '--demo' }
 if ($ServerOnly) { $argsForGame += '--server-only' }
+if ($Web) { $argsForGame += '--web' }
 if ($DataDir) { $argsForGame += @('--data-dir', $DataDir) }
 & $python.Source @prefix @argsForGame
 if ($LASTEXITCODE -ne 0) { throw "Everweave exited with code $LASTEXITCODE. See the messages above." }

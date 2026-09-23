@@ -50,3 +50,7 @@ Everweave 只通过 TypeSafe 官方 Python SDK 调用官方 System One API：
 - 重启同一存档后，角色实际从 `(5,9)` 走到 `(11,10)`，凯斯特尔动作菜单显示 `activate_kestrel enabled=true`。进入场景前电池/氧气为 8/100；选择“接受筛选摘要”后实际变为 7/98，与显示的“消耗1格电池、2点氧气”一致。
 
 这次验收还经历了一次真实的 ChatGPT SSE transient connection failure。地区事务未提交且没有自动重试风暴；一次显式地区重试复用了 JEV 缓存并成功完成。最终全量 Python 回归为 328 tests passed。
+
+## 2026-09-22 支付证据更新
+
+内容证据版本更新为 `everweave-effects-v5`。动作和剧情选项的证据包含显式 `costs` 及运行时支付约定，避免只查看 effects 时遗漏实际扣费。已有缓存随问题版本变化失效。

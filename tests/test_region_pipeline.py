@@ -107,6 +107,14 @@ class RegionPipelineTests(unittest.TestCase):
         binding=contract({'destination':{'name':'回声藏书馆','description':'test'},'region_purpose':'test','hero_visual':{}})
         game,audiovisual=components(binding);audio=audiovisual['audio'];audio['music']['cues']={'click':{'synth':{'wave':'sine','frequency':220,'duration':.1}}};audio['music']['bindings']={'ui':'click'}
         raw=json.loads(assemble(game,audiovisual,binding,{}));self.assertEqual(raw['region']['audio']['bindings']['ui'],'click')
+    def test_component_accepts_the_same_library_sound_shorthand_as_region_parser(self):
+        binding=contract({'destination':{'name':'回声藏书馆','description':'test'},'region_purpose':'test','hero_visual':{}})
+        game,audiovisual=components(binding)
+        audiovisual['audio']['bindings']={'combat':'rpg_v1_knife_slice'}
+        assembled=json.loads(assemble(game,audiovisual,binding,{}))
+        cue=assembled['region']['audio']['bindings']['combat']
+        self.assertEqual(assembled['region']['audio']['cues'][cue]['asset'],'rpg_v1_knife_slice')
+        parse_patch(assembled,'region')
 
     def test_material_is_validated_in_component_but_expanded_only_once(self):
         binding=contract({'destination':{'name':'回声藏书馆','description':'test'},'region_purpose':'test','hero_visual':{}})
@@ -134,6 +142,7 @@ class DirectorPipelineTests(unittest.TestCase):
     def test_two_actual_requests_are_counted_as_one_accepted_region(self):
         director=Director(self.world);director.configure({'provider':'chatgpt_subscription','offline':False,'max_calls':2});director.cfg['cooldown']=0
         def pipeline(context,system,user,cfg):
+            cfg['_region_subrequest']('gameplay')
             cfg['_region_subrequest']('audiovisual')
             return json.dumps(authored_adventure_region(self.world,context['target'])),{'input_tokens':30,'output_tokens':20,'pipeline_requests':2}
         with patch('engine.region_pipeline.generate',side_effect=pipeline):self.assertTrue(director.step())
@@ -150,6 +159,7 @@ class DirectorPipelineTests(unittest.TestCase):
     def test_semantic_review_is_separately_metered_and_does_not_block_delivery(self):
         director=Director(self.world);director.configure({'provider':'chatgpt_subscription','offline':False,'max_calls':2,'jev_enabled':True});director.cfg['cooldown']=0
         def pipeline(context,system,user,cfg):
+            cfg['_region_subrequest']('gameplay')
             cfg['_region_subrequest']('audiovisual')
             return json.dumps(authored_adventure_region(self.world,context['target'])),{'input_tokens':30,'output_tokens':20,'pipeline_requests':2}
         report={'status':'reviewed','requests':1,'model':'jev-1.13.0','usage':{'input_tokens':80,'output_tokens':12},
@@ -165,6 +175,25 @@ class DirectorPipelineTests(unittest.TestCase):
         director._record_jev('asset_selection',{'status':'ranked','requests':1,'usage':{'input_tokens':80,'output_tokens':12}},ctx,job)
         director._record_jev('asset_selection',{'status':'ranked','requests':0,'cached':True,'usage':{'input_tokens':80,'output_tokens':12}},ctx,job)
         self.assertEqual((director.jev_requests,director.jev_tokens_in,director.jev_tokens_out),(1,80,12))
+
+    def test_transport_retry_reserves_a_real_call_and_records_unknown_usage(self):
+        director=Director(self.world);director.configure({'provider':'chatgpt_subscription','offline':False,'parallel_region':False,'max_calls':2});director.cfg['cooldown']=0
+        raw=json.dumps(authored_adventure_region(self.world,'r0'))
+        def provider(system,user,cfg):
+            call=cfg['_reserve_transport_retry']({'category':'transient','error':'eof','usage_unknown':True,'component':None,'previous_call':1,'partial_output_chars':0,'retry_kind':'transient'})
+            self.assertEqual(call,2)
+            return raw,{'input_tokens':30,'output_tokens':20,'transport_retries':1,'unknown_usage_attempts':1,'model_requests':2}
+        with patch('engine.chatgpt_provider.generate',side_effect=provider):self.assertTrue(director.step())
+        self.assertEqual((director.calls,director.unknown_usage_calls,director.accepted),(2,1,1))
+        self.assertEqual((director.task_history[-1]['transport_retries'],director.task_history[-1]['unknown_usage_calls']),(1,1))
+
+    def test_exhausted_transport_retry_pauses_prefetch(self):
+        from engine.chatgpt_provider import DirectError
+        director=Director(self.world);director.configure({'provider':'chatgpt_subscription','offline':False,'parallel_region':False,'max_calls':2});director.cfg['cooldown']=0
+        failure=DirectError('stream ended',category='transient',diagnostics={'usage_unknown':True,'retries_exhausted':True,'last_call':2})
+        with patch('engine.chatgpt_provider.generate',side_effect=failure):self.assertTrue(director.step())
+        self.assertTrue(director.paused);self.assertEqual(director.unknown_usage_calls,1)
+        self.assertEqual(director.task_history[-1]['status'],'failed')
 
 
 if __name__=='__main__':unittest.main()

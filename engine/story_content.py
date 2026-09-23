@@ -53,8 +53,11 @@ def parse_scenes(raw):
             lines.append(dict(speaker=ident(line['speaker']),text=text(line['text'],'scene text',400)))
         choices=[]
         for choice in arr(scene.get('choices',[]),'scene choices',4):
-            obj(choice,'scene choice',('id','label','when','effects'),('id','label','effects'))
+            obj(choice,'scene choice',('id','label','when','effects','costs'),('id','label','effects'))
             choices.append(dict(id=ident(choice['id']),label=text(choice['label'],'choice label',80),when=expression(choice.get('when',True)),effects=effects(choice['effects'])))
+            if 'costs' in choice:
+                from .costs import parse
+                choices[-1]['costs']=parse(choice['costs'])
         if len({c['id'] for c in choices})!=len(choices):raise InvalidPatch('duplicate scene choice')
         result.append(dict(id=ident(scene['id']),title=text(scene['title'],'scene title',100),lines=lines,choices=choices))
     if len({s['id'] for s in result})!=len(result):raise InvalidPatch('duplicate scene ID')
@@ -151,7 +154,8 @@ def show(vm,key):
     if not scene:raise InvalidPatch('unknown story scene')
     cast=vm.s.get('adventure',{}).get('cast',{})
     lines=[(cast[line['speaker']]['name']+'：' if line['speaker']!='narrator' else '')+line['text'] for line in scene['lines']]
-    choices=[dict(id='scene:'+key+':'+c['id'],label=c['label'],description=c['label'],enabled=bool(vm.expr(c['when'])),blocked_reason='当前条件尚未满足。',scope='explore',target='player') for c in scene['choices']]
+    from .costs import hint,description,requirements
+    choices=[dict(id='scene:'+key+':'+c['id'],label=c['label'],description=description(vm.s,c),costs=requirements(c),enabled=bool(vm.expr(c['when'])) and not hint(vm.s,c),blocked_reason=hint(vm.s,c) or '当前条件尚未满足。',scope='explore',target='player') for c in scene['choices']]
     speakers=list(dict.fromkeys(line['speaker'] for line in scene['lines'] if line['speaker']!='narrator'))
     portraits=[dict(name=cast[k]['name'],visual=cast[k]['visual']) for k in speakers if cast[k].get('visual')]
     vm.s['ui']=dict(kind='actions' if choices else 'message',title=scene['title'],lines=lines,actions=choices,portraits=portraits,scene_id=key,scene_token=vm.s['story_revision'])
@@ -162,7 +166,7 @@ def choose(world,key):
     choice=next((c for c in scene['choices'] if key=='scene:'+scene['id']+':'+c['id']),None)
     vm=Runtime(world,world.region())
     if not choice or not vm.expr(choice['when']):raise InvalidPatch('scene choice is unavailable')
-    world.state['ui']={};vm.run(choice['effects']);vm.emit('choice',choice=choice['id'],advance=True)
+    world.state['ui']={};vm.perform(choice);vm.emit('choice',choice=choice['id'],advance=True)
     from .gameplay import show_messages
     show_messages(world,vm)
     event,_=world.story('choice',choice['label'],dict(scene=scene['id']));world.persist(world.region(),event=event)

@@ -44,6 +44,13 @@ class TelemetryTests(unittest.TestCase):
             self.assertEqual(body.count('codex.previous_deadline.reached'),1)
             self.assertEqual(snapshot['last_progress_age'],0);self.assertEqual(snapshot['stage'],'output')
     def test_high_cannot_be_silently_lowered(self):
-        with self.assertRaises(CodexError):generate('','',{'model':'gpt-5.6-luna','reasoning_effort':'medium'})
+        from test_codex_provider import FakeRPC
+        class LoweredRPC(FakeRPC):
+            def call(self,method,params):
+                result=super().call(method,params)
+                if method=='thread/start':result['reasoningEffort']='medium'
+                return result
+        with patch('engine.codex_provider.RPC',LoweredRPC),self.assertRaises(CodexError):
+            generate('','',{'model':'gpt-5.6-luna','reasoning_effort':'high'})
 
 if __name__=='__main__':unittest.main()

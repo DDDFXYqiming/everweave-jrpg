@@ -76,9 +76,9 @@ If Godot is on PATH, `python launch.py` is enough. On the first run, the launche
 
 ## Create a world
 
-The default is **direct ChatGPT subscription · GPT-5.6 Luna / high**. Authorize Everweave once from its connection screen, then the game reads the Responses SSE stream without Codex CLI or an OpenAI API key. Login, model or usage failures stop generation; there is no automatic paid-provider fallback. See [setup and validation](docs/CODEX_SUBSCRIPTION.md).
+The default is **direct ChatGPT subscription · GPT-6 Luna / high**, with GPT-5.6 Luna and Off, Low, Medium, High, XHigh, and Max available in the game settings. Authorize Everweave once from its connection screen, then the game reads the Responses SSE stream without Codex CLI or an OpenAI API key. Login, model or usage failures stop generation; there is no automatic paid-provider fallback. See [setup and validation](docs/CODEX_SUBSCRIPTION.md).
 
-An online new world first generates its game specification and campaign plan, then prepares the starting region. The settings control request limits and budget; subscription mode is fixed at high, while compatible APIs expose the reasoning levels they support. The generation director prepares nearby regions, and failed tasks expose their diagnostic details with a retry action.
+An online new world first generates its game specification and campaign plan, then prepares the starting region. The settings control request limits and budget; subscription mode supports medium/high/xhigh/max (high by default), while compatible APIs expose the reasoning levels they support. The generation director prepares nearby regions, and failed tasks expose their diagnostic details with a retry action.
 
 Subscription mode draws on the same Codex usage allowance that Codex CLI uses. DeepSeek and compatible paid APIs remain explicit manual choices, and the launcher no longer loads a DeepSeek key by default. Initial world creation and new region preparation can take time. Use the offline check to verify installation and basic controls without model calls.
 

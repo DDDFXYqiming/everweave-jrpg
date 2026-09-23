@@ -64,6 +64,15 @@ def snapshot(state):
     return spec
 
 def check_plan(state,plan):
+    def check_costs(node):
+        if isinstance(node,list):
+            for child in node:check_costs(child)
+        elif isinstance(node,dict):
+            for key in node.get('costs',{}):
+                if not (resource(state,key) if 'game_spec' in state else key in BUILTINS):
+                    raise InvalidPatch('cost uses undefined or disabled resource '+key,path='costs.'+key,category='reference')
+            for child in node.values():check_costs(child)
+    check_costs(plan)
     if 'game_spec' not in state:return
     from .library import candidates,catalog
     profile=candidates(dict(setting=state['setting'],game_spec=state['game_spec']))['profile']

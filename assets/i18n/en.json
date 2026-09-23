@@ -1,4 +1,5 @@
 {
+  "Luna 模型": "Luna model",
   "素材库缺少：": "Missing library asset: ",
   "素材版本或类型不匹配：": "Asset version or type mismatch: ",
   "素材索引路径无效。": "Invalid asset index path.",
@@ -332,5 +333,12 @@
   "远方正在编织…": "Weaving distant lands…",
   "新地区已经准备好": "A new region is ready",
   "WASD · 出发探索": "WASD · Explore",
-  "F · 当前可用操作": "F · Available actions"
+  "F · 当前可用操作": "F · Available actions",
+  " · 连接补试中": " · reconnecting",
+  " · 已补试 %d 次": " · retried %d time(s)",
+  "\n另有 %d 次失败调用的用量未知": "\nUsage is unknown for %d failed request(s)",
+  "本机服务已更换，正在重新连接。": "The local service changed; reconnecting.",
+  "本机服务已更换，正在同步状态。": "The local service changed; syncing state.",
+  "等待本机服务重新启动。": "Waiting for the local service to restart.",
+  "正在重新连接本机引擎；动作没有发送。": "Reconnecting to the local engine; the action was not sent."
 }

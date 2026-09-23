@@ -281,6 +281,11 @@ class World:
     if positions[0]==positions[1]:raise InvalidPatch('director gates require distinct reserved cells')
     for pos in positions:
      if tuple(pos) not in reachable(preview['tiles'],preview['spawn']) or any(tuple(pos) in cells_for(e) for e in preview['entities']+preview['props']):raise InvalidPatch('director gate must reserve a free reachable cell')
+  if p['kind']=='region' and 'scene' in p['region']:
+   from .playability import check_entry,check_progress
+   progress=check_progress(self,p['region'],context)
+   check_entry(self,p,context)
+   p['_playability']=dict(entry='verified',progress=progress)
   if p['kind']=='reaction':
    # Validate registration, executable references and causal geometry together
    # on an isolated copy so semantic failures enter the same bounded repair.
@@ -322,6 +327,9 @@ class World:
     if node['parent']: exits.append(dict(target=node['parent'],direction='back',label='返回 '+s['topology'][node['parent']]['name']))
     if planned:exits=campaign.routes(s,rid)
     r=build_region(p['region'],rid,C.stable_seed(s['setting'],rid),node['depth'],exits); r.update(plan=p['region'],source=source,pending_lore=p['lore'],pending_threads=p['threads'],normalizations=p['_corrections'][-128:],generated_story_revision=context['story_revision']); node.update(ready=True,name=r['name'],needs_refresh=False,refresh_reason=None)
+    r['_generation_raw']=copy.deepcopy(raw) if raw is not None else dict(kind='region',region=copy.deepcopy(p['region']),lore=p['lore'],threads=p['threads'])
+    node.pop('content_failure',None)
+    if p.get('_playability'):r['playability']=copy.deepcopy(p['_playability'])
     if planned:r['chapter_id']=node['chapter_id'];campaign.sync_gates(self,r)
     if r.get('visuals'):
      if rid=='r0' and not s.get('hero_visual'):s['hero_visual']=freeze_sprite(r['visuals']['sprites'][resolve_sprite('hero',r['visuals'])],r['visuals']['palette'])
@@ -431,10 +439,20 @@ class World:
    ui['title']='下一地区已准备好' if ui['ready'] else '地区正在后台准备'
    ui['lines']=['可以进入 '+ui['name']+'。'] if ui['ready'] else ['这条道路尚未准备好。你可以继续探索，后台会提前生成。']
   return copy.deepcopy(dict(adventure=adventure.public_view(self),game_over=bool(s.get('game_over')),game_spec=game_spec.snapshot(s),campaign=campaign.overview(s),audio_seq=s.get('audio_seq',0),audio_events=s.get('audio_events',[]),available_actions=generated_actions,content_version=2,started=True,version=s['version'],epoch=s['epoch'],title=s['title'],setting=s['setting'],story_revision=s['story_revision'],time=s['time'],
-   region={k:v for k,v in r.items() if k not in ('plan','pending_lore','pending_threads')} if r else None,player=p,inventory=inv,quests=known_quests[-20:],threads=list(s['threads'].values())[-10:],journal=s['journal'][-10:],battle=s['battle'],ui=ui,map_count=sum(n['visited'] for n in s['topology'].values()),
+    region={k:v for k,v in r.items() if k not in ('plan','pending_lore','pending_threads','_generation_raw')} if r else None,player=p,inventory=inv,quests=known_quests[-20:],threads=list(s['threads'].values())[-10:],journal=s['journal'][-10:],battle=s['battle'],ui=ui,map_count=sum(n['visited'] for n in s['topology'].values()),
    frontier=[dict(id=rid,name=s['topology'][rid]['name'],ready=s['topology'][rid]['ready']) for rid in (campaign.neighbors(s,s['current'],True) if campaign.book(s) else s['topology'][s['current']]['children'])]))
  def action(self,a):
-  return gameplay.action(self,a)
+  from .playability import RegionEntryError
+  try:return gameplay.action(self,a)
+  except RegionEntryError as exc:
+   node=self.state['topology'][exc.target]
+   if not node['visited']:
+    region=self.region(exc.target)
+    node.update(ready=False,needs_refresh=False,generation_revision=node.get('generation_revision',0)+1,
+     content_failure=dict(message=str(exc),issues=exc.issues,raw=self.store.region_source(exc.target) or dict(kind='region',region=region['plan'],lore=[],threads=[]),retry_requested=False))
+    self.store.clear_components(self.state['epoch'],exc.target)
+    self.persist()
+   raise
  def _action(self,a):
   if not self.state or not self.region(): raise GameError('世界正在生成。')
   if not isinstance(a,dict): raise GameError('动作必须是对象。')
@@ -511,7 +529,12 @@ class World:
   if kind=='exit':
    target=e['target']; node=s['topology'][target]
    if not node['ready']: s['ui']=dict(kind='pending_exit',target=target,entity=e['id'],title='地区正在后台准备',lines=[]); self.persist(); return
-   old=s['current']; new=self.region(target); self._enter_content(new); s['current']=target
+   old=s['current']; new=self.region(target)
+   try:self._enter_content(new)
+   except InvalidPatch as exc:
+    from .playability import RegionEntryError
+    raise RegionEntryError(target,exc) from None
+   s['current']=target
    back=next((g for g in new['entities'] if g['kind']=='exit' and g['target']==old and (not e.get('link_id') or g.get('link_id')==e['link_id'])),None)
    p['x'],p['y']=(back['x'],back['y']) if back and 'scene' in new else ((back['x'],back['y']-1) if back else new['spawn']); s['ui']={}; s['time']+=10; self.note('抵达：'+new['name']); self.note(new['description'])
    self.persist(new,event=dict(type='arrival',text=new['name'],region=target,revision=s['story_revision'])); return

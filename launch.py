@@ -52,14 +52,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('--godot', help='Path to the Godot 4 Standard executable')
     p.add_argument('--data-dir', type=Path, default=data_dir(), help='Save folder (outside the repository)')
     p.add_argument('--server-only', action='store_true', help='Run the local helper for editor F6; no Godot process')
+    p.add_argument('--web', action='store_true', help='运行本机 Web 游戏界面，无需 Godot')
+    p.add_argument('--port',type=int,default=0,help='指定本机端口；默认自动分配')
     p.add_argument('--headless-smoke', action='store_true', help='Run the real Godot client headlessly for 120 frames')
     p.add_argument('--demo', action='store_true', help='Create an offline demo if no save exists; no network calls')
     args = p.parse_args(argv)
+    if not 0<=args.port<=65535:p.error('--port 必须在 0～65535 之间')
     if sys.version_info < (3, 11):
         print('Python 3.11 or newer is required.', file=sys.stderr)
         return 2
     executable = find_godot(args.godot)
-    if not executable and not args.server_only:
+    if not executable and not args.server_only and not args.web:
         print('Godot 4 Standard was not found. Download it from the official Godot site.', file=sys.stderr)
         print('Then: python launch.py --godot "./tools/Godot.exe"', file=sys.stderr)
         print('Or set GODOT_BIN / place the official executable in this project folder.', file=sys.stderr)
@@ -88,9 +91,12 @@ def main(argv: list[str] | None = None) -> int:
         result = prepare(download=True, progress=lambda message: print(message, flush=True))
         print(f'Local asset cache ready: {result["assets"]} entries.', flush=True)
         token = secrets.token_urlsafe(32)
-        server = GameServer(('127.0.0.1', 0), args.data_dir / 'world.sqlite3', token)
+        if args.web:
+            from engine.web_server import WebGameServer
+            server = WebGameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token)
+        else:server = GameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token)
         url = f'http://127.0.0.1:{server.server_port}'
-        runtime_file.write_text(json.dumps({'url': url, 'token': token}), encoding='utf-8')
+        runtime_file.write_text(json.dumps({'url': url, 'token': token, 'instance_id': server.instance_id}), encoding='utf-8')
         if os.name != 'nt':
             runtime_file.chmod(0o600)
         if args.demo:
@@ -103,8 +109,8 @@ def main(argv: list[str] | None = None) -> int:
         worker.start()
         print(f'Everweave local helper ready. Saves: {args.data_dir}', flush=True)
         print('No cloud requests until live mode is explicitly configured in the game.', flush=True)
-        if args.server_only:
-            print('Open project.godot and press F6. Ctrl+C stops the helper.', flush=True)
+        if args.server_only or args.web:
+            print(('Web UI: '+url) if args.web else 'Open project.godot and press F6. Ctrl+C stops the helper.', flush=True)
             while True:
                 time.sleep(1)
         else:
@@ -116,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             command = [executable, '--path', str(ROOT)]
             if args.headless_smoke:
                 command += ['--headless', '--quit-after', '120']
-            command += ['--', '--backend-url=' + url, '--session-token=' + token]
+            command += ['--', '--backend-url=' + url, '--session-token=' + token, '--runtime-file=' + str(runtime_file)]
             child = subprocess.Popen(command, cwd=ROOT)
             code = child.wait()
     except KeyboardInterrupt:

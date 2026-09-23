@@ -31,9 +31,9 @@ class FakeRPC:
     def call(self,method,params):
         self.calls.append((method,params))
         if method=='account/read':return {'account':self.account}
-        if method=='model/list':return {'data':[{'model':self.model,'supportedReasoningEfforts':[{'reasoningEffort':'high'}]}]}
+        if method=='model/list':return {'data':[{'model':self.model,'supportedReasoningEfforts':[{'reasoningEffort':value} for value in ('medium','high')]}]}
         if method=='account/rateLimits/read':return self.limits
-        if method=='thread/start':return {'thread':{'id':'test-thread'},'model':self.model,'reasoningEffort':'high','modelProvider':'openai'}
+        if method=='thread/start':return {'thread':{'id':'test-thread'},'model':self.model,'reasoningEffort':params['config']['model_reasoning_effort'],'modelProvider':'openai'}
         if method=='turn/start':return {'turn':{'id':'test-turn'}}
         raise AssertionError(method)
     def receive(self):raise AssertionError('Unexpected additional receive')
@@ -56,7 +56,7 @@ class CodexProviderTests(unittest.TestCase):
         with self.assertRaises(CodexError):preflight(FakeRPC())
         FakeRPC.model=MODEL
         with self.assertRaises(CodexError):preflight(FakeRPC(),effort='ultra')
-        with self.assertRaises(CodexError):generate('','',{'model':MODEL,'reasoning_effort':'medium'})
+        with self.assertRaises(CodexError):generate('','',{'model':MODEL,'reasoning_effort':'invalid'})
     def test_exhausted_subscription_stops_before_generation(self):
         FakeRPC.limits={'rateLimits':{'primary':{'usedPercent':100},'credits':{'hasCredits':True}}}
         with self.assertRaises(CodexError):preflight(FakeRPC())
@@ -70,6 +70,10 @@ class CodexProviderTests(unittest.TestCase):
         self.assertEqual(start['sandbox'],'read-only');self.assertEqual(turn['effort'],'high')
         self.assertEqual(start['modelProvider'],'openai');self.assertEqual(turn['serviceTierForTurn'],'default')
         self.assertEqual(turn['outputSchema'],output_schema('campaign'));self.assertIsNone(output_schema('region'))
+    def test_medium_is_forwarded_through_app_server(self):
+        with patch('engine.codex_provider.RPC',FakeRPC):_,usage=generate('protocol','context',{'model':MODEL,'reasoning_effort':'medium'})
+        turn=next(p for m,p in FakeRPC.instances[-1].calls if m=='turn/start')
+        self.assertEqual(turn['effort'],'medium');self.assertEqual(usage['effort'],'medium')
     def test_failed_turn_preserves_usage_and_closes(self):
         FakeRPC.final_status='failed'
         with patch('engine.codex_provider.RPC',FakeRPC),self.assertRaises(CodexError) as caught:generate('protocol','data',{'model':MODEL,'reasoning_effort':'high'})
@@ -100,7 +104,7 @@ class CodexProviderTests(unittest.TestCase):
             server=GameServer(('127.0.0.1',0),path,'test')
             try:
                 self.assertEqual(server.preferences['provider'],'chatgpt_subscription')
-                self.assertEqual(server.preferences['model'],MODEL);self.assertEqual(server.preferences['reasoning_effort'],'high');self.assertEqual(server.preferences['max_calls'],7)
+                self.assertEqual(server.preferences['model'],'gpt-6-luna');self.assertEqual(server.preferences['reasoning_effort'],'high');self.assertEqual(server.preferences['max_calls'],7)
             finally:server.server_close();server.world.store.close()
 
 if __name__=='__main__':unittest.main()

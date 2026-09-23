@@ -25,6 +25,15 @@ class ModelProtocolTests(unittest.TestCase):
 
     def tearDown(self):self.w.store.close()
 
+    def test_empty_destinations_only_normalize_for_planned_regions(self):
+        raw=authored_patch();raw['region']['destinations']=[];changes=[]
+        result=parse_patch(raw,'region',{'chapter_plan':{'id':'c1'}},changes)
+        self.assertNotIn('destinations',result['region'])
+        self.assertTrue(any(c['operation']=='empty_planned_destinations' for c in changes))
+        with self.assertRaises(InvalidPatch):parse_patch(raw,'region')
+        raw=authored_patch();normalized,_,_=normalize_patch(raw,'region',{'chapter_plan':{'id':'c1'}})
+        self.assertEqual(normalized['region']['destinations'],raw['region']['destinations'])
+
     def test_qualified_new_definitions_update_all_typed_references(self):
         raw=authored_patch();r=raw['region'];program=r['program']
         r['entities'][0]['id']='r1:lever';r['entities'][0]['sprite']='r1:object'

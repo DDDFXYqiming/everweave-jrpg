@@ -62,7 +62,7 @@ class ProviderError(RuntimeError):
   super().__init__(message)
   self.usage=usage or {}
   self.finish_reason=finish_reason
-  self.diagnostics=diagnostics
+  self.diagnostics=diagnostics or {}
 REASONING_EFFORTS=('default','none','minimal','low','medium','high','xhigh','max','ultra')
 
 def reasoning_effort(cfg):
@@ -119,6 +119,12 @@ class ChatProvider:
   if cfg.get('language','zh')=='en':
    system=payload['messages'][0]['content'].replace('Use Chinese display names','Use English display names').replace('Use Chinese display text.','Use English display text.')
    payload['messages'][0]['content']=system+'\nWrite all NEW player-facing names, objectives, dialogue, descriptions and action labels in English. Preserve existing names, prior story text and all technical IDs exactly; do not translate the saved world. The language of the user setting does not override this output language.'
+  audit=cfg.get('_audit');meta=cfg.get('_request_meta',{})
+  if audit:
+   try:source_chars=len(json.dumps(context,ensure_ascii=False,separators=(',',':')))
+   except (TypeError,ValueError):source_chars=None
+   projected_chars=len(payload['messages'][1]['content']);saved=max(0,source_chars-projected_chars) if source_chars is not None else None
+   audit.emit('model.context.prepared',**meta,source_chars=source_chars,projected_chars=projected_chars,system_chars=len(payload['messages'][0]['content']),projection_saved_chars=saved,projection_ratio=round(projected_chars/max(1,source_chars),4) if source_chars is not None else None,repair_chars=len(repair or ''),has_rejected_response=bool(context.get('rejected_response')))
   if cfg.get('provider')=='codex_subscription':
    from .codex_provider import generate,CodexError
    try:return generate(payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
@@ -130,10 +136,10 @@ class ChatProvider:
      from .region_pipeline import generate as generate_region
      return generate_region(context,payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
     return generate(payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
-   except DirectError as exc:raise ProviderError(str(exc),exc.usage,diagnostics={'transport':'direct_sse','category':exc.category}) from None
+   except DirectError as exc:raise ProviderError(str(exc),exc.usage,diagnostics={'transport':'direct_sse','category':exc.category,**exc.diagnostics}) from None
    except Exception as exc:
     from .region_pipeline import PipelineError
-    if isinstance(exc,PipelineError):raise ProviderError(str(exc),getattr(exc,'usage',None),diagnostics={'transport':'direct_sse','category':'assembly'}) from None
+    if isinstance(exc,PipelineError):raise ProviderError(str(exc),getattr(exc,'usage',None),diagnostics={'transport':'direct_sse','category':'assembly','usage_recorded':exc.usage.get('usage_recorded',False)}) from None
     raise
   effort=reasoning_effort(cfg)
   if cfg.get('deepseek_options',True): payload['thinking']={'type':'disabled' if effort=='none' else 'enabled'}
@@ -189,6 +195,7 @@ class Director:
   self.failures={}; self.failed_payloads={}; self.repair_calls=0
   self.normalized_responses=0; self.normalization_count=0; self.recent_corrections=[]
   self.task_metrics={}; self.task_history=[];self.task_sequence=0
+  self.unknown_usage_calls=0
   self.jev_requests=0;self.jev_tokens_in=0;self.jev_tokens_out=0;self.jev_failures=0;self.jev_unavailable=0;self.jev_concerns=0;self.jev_reports=[]
   self.audit=NullAudit()
   self.codex_partial_dir=None
@@ -196,22 +203,27 @@ class Director:
   provider=cfg.get('provider','chat_completions')
   if provider not in ('chat_completions','codex_subscription','chatgpt_subscription'):raise ProviderError('Unsupported generation provider.')
   subscription=provider in ('codex_subscription','chatgpt_subscription')
-  offline=bool(cfg.get('offline',True)); base='' if subscription else validate_url(cfg.get('base_url','https://api.deepseek.com')); model=str(cfg.get('model','gpt-5.6-luna' if subscription else 'deepseek-flash')).strip()
+  offline=bool(cfg.get('offline',True)); base='' if subscription else validate_url(cfg.get('base_url','https://api.deepseek.com')); model=str(cfg.get('model',('gpt-5.6-luna' if provider=='codex_subscription' else 'gpt-6-luna') if subscription else 'deepseek-flash')).strip()
   if not model or len(model)>150: raise ProviderError('请输入有效模型名。')
-  if subscription and model!='gpt-5.6-luna':raise ProviderError('Subscription mode requires gpt-5.6-luna; no model fallback is configured.')
+  if provider=='codex_subscription' and model!='gpt-5.6-luna':raise ProviderError('Codex compatibility mode requires gpt-5.6-luna.')
+  if provider=='chatgpt_subscription' and model not in ('gpt-5.6-luna','gpt-6-luna'):raise ProviderError('订阅直连仅支持明确选择的 GPT-5.6 / GPT-6 Luna，不自动切换模型。')
   key='' if subscription else str(cfg.get('api_key','')).strip()
   if not key and self.cfg and base==self.cfg['base_url']: key=self.cfg['api_key']
   if not key and official_deepseek(base): key=os.environ.get('DEEPSEEK_API_KEY','')
   if not subscription and not offline and not key and urllib.parse.urlsplit(base).hostname not in ('localhost','127.0.0.1','::1'): raise ProviderError('在线模式需要 API Key；密钥仅保留在本机进程内存。')
   limit=int(cfg.get('max_calls',60))
   if not 1<=limit<=1000: raise ProviderError('调用上限应为 1～1000。')
+  retries=int(cfg.get('max_transport_retries',1));task_timeout=float(cfg.get('task_timeout_seconds',900))
+  if not 0<=retries<=2:raise ProviderError('传输自动补试次数应为 0～2。')
+  if not 60<=task_timeout<=900:raise ProviderError('生成任务总时限应为 60～900 秒。')
   language=cfg.get('language','zh')
   if language not in ('zh','en'):raise ProviderError('Unsupported language')
   effort=reasoning_effort(dict(cfg,deepseek_options=False,reasoning_effort=cfg.get('reasoning_effort','high'))) if subscription else reasoning_effort(cfg)
-  if subscription and effort not in ('high','xhigh','max'):raise ProviderError('Luna subscription generation requires high or above.')
-  self.cfg=dict(provider=provider,language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),parallel_region=bool(cfg.get('parallel_region',True)),jev_enabled=bool(cfg.get('jev_enabled',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=False if subscription else bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,cooldown=1.0 if not offline else .1)
+  if provider=='chatgpt_subscription' and effort not in ('none','low','medium','high','xhigh','max'):raise ProviderError('Luna 订阅生成支持 none/low/medium/high/xhigh/max。')
+  if provider=='codex_subscription' and effort not in ('medium','high','xhigh','max'):raise ProviderError('Codex 兼容入口支持 medium/high/xhigh/max。')
+  self.cfg=dict(provider=provider,language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),parallel_region=bool(cfg.get('parallel_region',True)),jev_enabled=bool(cfg.get('jev_enabled',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=False if subscription else bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,max_transport_retries=retries,task_timeout_seconds=task_timeout,cooldown=1.0 if not offline else .1)
   self.audit.add_secret(key)
-  self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit,parallel_region=self.cfg['parallel_region'],jev_enabled=self.cfg['jev_enabled'])
+  self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit,max_transport_retries=retries,task_timeout_seconds=task_timeout,parallel_region=self.cfg['parallel_region'],jev_enabled=self.cfg['jev_enabled'])
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
   self.generation+=1; self.failed.clear(); self.failures.clear(); self.failed_payloads.clear(); self.error=''; self.deferred=None; self.paused=False; self.wake.set()
  def start_worker(self):
@@ -223,6 +235,7 @@ class Director:
   self.stop_event.set(); self.wake.set()
   for worker in self.threads:worker.join(timeout=1)
  def retry(self,target=None,kind=None,mode='repair'):
+  self._sync_content_failures()
   if mode not in ('repair','redesign'):raise ProviderError('无效重试方式。')
   if mode=='redesign' and (not target or kind!='region'):raise ProviderError('重新创作需指定一个失败地区。')
   if (target is None)!=(kind is None) or (target is not None and (not isinstance(target,str) or kind not in ('region','reaction','campaign','direction'))):
@@ -230,32 +243,52 @@ class Director:
   selected={key for key in self.failed if target is None or key==(kind,target)}
   if target is not None and not selected:raise ProviderError('这个生成任务已经不再处于失败状态。')
   for key in selected:
-   if mode=='redesign':self.failed_payloads.pop(key,None)
+   if mode=='redesign':
+    self.failed_payloads.pop(key,None)
+    self.world.store.clear_components(self.world.state['epoch'],key[1])
    self.failed.discard(key); self.failures.pop(key,None)
+   node=(self.world.state or {}).get('topology',{}).get(key[1],{})
+   if node.get('content_failure'):
+    if mode=='redesign':node.pop('content_failure')
+    else:node['content_failure']['retry_requested']=True
+    self.world.persist()
   self.audit.emit('generation.retry',mode=mode,tasks=[{'kind':k,'target':t} for k,t in sorted(selected)])
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
   self.error=next((entry['message'] for entry in reversed(list(self.failures.values()))),'')
   self.paused=False; self.wake.set()
  def _title(self,target):
   return ((self.world.state or {}).get('topology',{}).get(target) or {}).get('name',target)
+ def _sync_content_failures(self):
+  for target,node in (self.world.state or {}).get('topology',{}).items():
+   failure=node.get('content_failure')
+   if not failure or node.get('visited'):continue
+   key=('region',target);error=InvalidPatch(issues=failure['issues'])
+   if key not in self.failed_payloads:
+    self.failed_payloads[key]=dict(raw=failure['raw'],context=copy.deepcopy(self.world.context(target)),error=error,generation=self.generation)
+   if not failure.get('retry_requested'):
+    self.failed.add(key)
+    self.failures[key]=dict(kind='region',target=target,name=node['name'],category='gameplay',message=failure['message'],issues=failure['issues'],attempts=0)
  def _audit_task(self,event,**data):
   sink=getattr(self,'audit',None)
   if sink is not None:sink.emit(event,**data)
- def _begin_task(self,key,ctx):
+ def _begin_task(self,key,ctx,cfg):
   self.task_sequence+=1
   source='reaction' if ctx['kind']=='reaction' else 'refresh' if ctx.get('refresh') else 'initial' if ctx['target']==self.world.state['current'] else 'prefetch'
   data=dict(task_id=self.task_sequence,kind=ctx['kind'],target=ctx['target'],name=self._title(ctx['target']),source=source,
             started_at=time.time(),started_steps=self.world.state['steps'],started_story_revision=ctx['story_revision'],
-            target_revision=ctx.get('target_revision',0),phase='generating',attempts=0,request_seconds=0.0,validation_seconds=0.0,
+            target_revision=ctx.get('target_revision',0),phase='generating',attempts=0,transport_retries=0,unknown_usage_calls=0,task_timeout_seconds=float(cfg.get('task_timeout_seconds',900)),request_seconds=0.0,validation_seconds=0.0,
             _start=time.monotonic())
+  data['_deadline']=data['_start']+float(cfg.get('task_timeout_seconds',900))
   self.task_metrics[key]=data
   self._audit_task('generation.started',**{k:v for k,v in data.items() if not k.startswith('_')})
  def _finish_task(self,key,outcome):
   data=self.task_metrics.pop(key,None)
   if data is None:return
-  elapsed=time.monotonic()-data.pop('_start')
+  elapsed=time.monotonic()-data.pop('_start');data.pop('_deadline',None)
   data.update(status=outcome,elapsed_seconds=round(elapsed,3),finished_steps=(self.world.state or {}).get('steps'))
-  data['request_seconds']=round(data['request_seconds'],3);data['validation_seconds']=round(data['validation_seconds'],3)
+  request_seconds=data['request_seconds'];validation_seconds=data['validation_seconds']
+  data['request_seconds']=max(.001,round(request_seconds,3)) if request_seconds>0 else 0.0
+  data['validation_seconds']=max(.001,round(validation_seconds,3)) if validation_seconds>0 else 0.0
   self.task_history.append(data);self.task_history=self.task_history[-24:]
   self._audit_task('generation.finished',**data)
  def _current(self,ctx,generation):
@@ -301,6 +334,7 @@ class Director:
   self.audit.emit('jev.finished',stage=stage,status=status,target=ctx.get('target'),kind=ctx.get('kind'),
                   requests=report.get('requests',0),usage=usage,concerns=concerns[:20],gaps=report.get('gaps',[])[:24],reason=report.get('reason'))
  def status(self):
+  self._sync_content_failures()
   for kind,target in list(self.failed):
    node=((self.world.state or {}).get('topology') or {}).get(target)
    if node is None or (kind=='region' and (node.get('visited') or (node.get('ready') and not node.get('needs_refresh')))):
@@ -315,12 +349,13 @@ class Director:
    epoch,kind,target=key;metrics=self.task_metrics.get(key,{})
    active_tasks.append(dict(kind=kind,target=target,name=self._title(target),phase=metrics.get('phase','generating'),component=metrics.get('component'),components=metrics.get('components',{}),pipeline=bool(metrics.get('pipeline')),
      source=metrics.get('source','prefetch'),started_at=metrics.get('started_at'),started_steps=metrics.get('started_steps'),
-     elapsed_seconds=round(time.monotonic()-metrics.get('_start',time.monotonic()),1),attempts=metrics.get('attempts',0),progress=metrics.get('progress')))
+     elapsed_seconds=round(time.monotonic()-metrics.get('_start',time.monotonic()),1),deadline_remaining=round(max(0,metrics.get('_deadline',time.monotonic())-time.monotonic()),1),attempts=metrics.get('attempts',0),transport_retries=metrics.get('transport_retries',0),unknown_usage_calls=metrics.get('unknown_usage_calls',0),progress=metrics.get('progress')))
   active_model_requests=sum(sum(state=='running' for state in metrics.get('components',{}).values()) if metrics.get('pipeline') else 1 for metrics in self.task_metrics.values())
   return copy.deepcopy(dict(failed_tasks=failed_tasks,active_tasks=active_tasks,task_history=self.task_history,repair_calls=self.repair_calls,normalized_responses=self.normalized_responses,normalization_count=self.normalization_count,recent_corrections=self.recent_corrections,
     jev_enabled=(self.cfg or {}).get('jev_enabled',True),jev_requests=self.jev_requests,jev_input_tokens=self.jev_tokens_in,jev_output_tokens=self.jev_tokens_out,jev_failures=self.jev_failures,jev_unavailable=self.jev_unavailable,jev_concerns=self.jev_concerns,jev_reports=self.jev_reports,
-   prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),active_model_requests=active_model_requests,mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),provider=(self.cfg or {}).get('provider',''),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
+    prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),active_model_requests=active_model_requests,mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),provider=(self.cfg or {}).get('provider',''),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),max_transport_retries=(self.cfg or {}).get('max_transport_retries',1),unknown_usage_calls=self.unknown_usage_calls,input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
  def _next_job(self):
+  self._sync_content_failures()
   w=self.world; s=w.state
   if s and s.get('game_over'):return None
   if not s or not self.cfg or self.paused or len(self.in_flight)>=2: return None
@@ -386,10 +421,10 @@ class Director:
    split_region=(kind=='region' and cfg.get('provider')=='chatgpt_subscription' and cfg.get('parallel_region',True)
                  and not cfg['offline'] and bool(ctx.get('chapter_plan') or ctx.get('content_contract') or ctx.get('require_overworld_threats'))
                  and not ctx.get('refresh')
-                 and not self.in_flight and self.calls+2<=cfg['max_calls'])
+                 and not self.in_flight and (self.calls+2<=cfg['max_calls'] or self.world.store.has_components(ctx['epoch'],target)))
    cfg['_parallel_region']=split_region
    self.in_flight[job_key]=('统筹冒险 ' if kind=='direction' else '规划章节 ' if kind=='campaign' else '落实委托 ' if ctx.get('commission_ids') else '续写 ' if kind=='reaction' else '生成 ')+self._title(target)
-   self._begin_task(job_key,ctx)
+   self._begin_task(job_key,ctx,cfg)
    self.task_metrics[job_key]['pipeline']=split_region
    if split_region:self.task_metrics[job_key].update(component='parallel',components={'gameplay':'running','audiovisual':'pending'})
    self.busy=' / '.join(self.in_flight.values()); self.last_request=time.monotonic()
@@ -406,21 +441,38 @@ class Director:
     if cfg['offline']: raw=make_patch(ctx,kind)
     else:
      with self.world.lock:
+      if time.monotonic()>=self.task_metrics[job_key]['_deadline']:raise ProviderError('生成任务已达到共享总时限。',diagnostics={'category':'deadline','deadline_seconds':cfg.get('task_timeout_seconds',900)})
       if self.calls>=cfg['max_calls']:
        if error is not None:break  # Keep the actionable rejected-patch diagnosis.
        raise ProviderError('达到本次进程调用上限。')
-      self.calls+=1
-      request_number=self.calls
+      if not cfg.get('_parallel_region') or error is not None:
+       self.calls+=1
+       request_number=self.calls
       self.repair_calls+=int(error is not None and raw is not None)
      attempts+=1
      with self.world.lock:self.task_metrics[job_key].update(attempts=attempts,phase='repairing' if error and raw is not None else 'generating')
      request_ctx=dict(ctx,rejected_response=raw,validation_errors=as_issues(error)) if error and raw is not None else ctx
      repair=validation_report(error) if isinstance(error,InvalidPatch) else str(error) if error else ''
      request_started=time.monotonic()
-     self.audit.emit('model.request',kind=kind,target=target,call=request_number,component='gameplay' if cfg.get('_parallel_region') and not repair else None,repair=bool(repair),model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
-     model_started=time.monotonic()
+     if request_number is not None:self.audit.emit('model.request',kind=kind,target=target,call=request_number,repair=bool(repair),model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
+     model_started=time.perf_counter()
      cfg['_cancel_event']=self.stop_event
      cfg['_audit']=self.audit;cfg['_request_meta']=dict(kind=kind,target=target,call=request_number)
+     cfg['_task_deadline']=self.task_metrics[job_key]['_deadline']
+     def reserve_transport_retry(details):
+      with self.world.lock:
+       metrics=self.task_metrics.get(job_key)
+       if metrics is None or self.stop_event.is_set() or self.paused or not self._current(ctx,generation):return None
+       if time.monotonic()>=metrics['_deadline'] or self.calls>=cfg['max_calls']:return None
+       self.calls+=1;call=self.calls;metrics['transport_retries']+=1
+       if details.get('usage_unknown'):
+        self.unknown_usage_calls+=1;metrics['unknown_usage_calls']+=1
+       metrics.update(phase='retrying',component=details.get('component') or metrics.get('component'))
+       component=details.get('component')
+       if component and component in metrics.get('components',{}):metrics['components'][component]='running'
+      self.audit.emit('model.request',kind=kind,target=target,call=call,component=details.get('component'),repair=False,retry=True,retry_kind=details.get('retry_kind'),previous_call=details.get('previous_call'),model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
+      return call
+     cfg['_reserve_transport_retry']=reserve_transport_retry
      def record_jev(stage,report):
       with self.world.lock:self._record_jev(stage,report,ctx,job_key)
      cfg['_jev_event']=record_jev
@@ -432,9 +484,26 @@ class Director:
         if progress.get('component'):self.task_metrics[job_key]['component']=progress['component']
      cfg.setdefault('_codex_progress',update_progress)
      if cfg.get('_parallel_region'):
+      cfg['_region_reserve_all']=True
       cfg['_region_validation_context']=self.world.validation_context(ctx)
+      def checkpoint_load(key):
+       with self.world.lock:return self.world.store.components(key)
+      def checkpoint_save(key,component,result):
+       with self.world.lock:
+        if self._current(ctx,generation):self.world.store.save_component(key,component,ctx['epoch'],target,result)
+      def component_usage(component,call,usage,failure):
+       with self.world.lock:
+        self._record_usage(usage)
+        unknown=bool(getattr(failure,'diagnostics',{}).get('usage_unknown'))
+        if unknown:
+         self.unknown_usage_calls+=1
+         self.task_metrics[job_key]['unknown_usage_calls']+=1
+        self.world.store.record_generation_request(dict(epoch=ctx['epoch'],target=target,component=component,call=call,
+         usage=usage,usage_unknown=unknown,status='failed' if failure else 'completed',time=time.time()))
+      cfg['_region_checkpoint_load']=checkpoint_load;cfg['_region_checkpoint_save']=checkpoint_save;cfg['_region_usage']=component_usage
       def reserve_component(component):
        with self.world.lock:
+        if self.stop_event.is_set() or self.paused or not self._current(ctx,generation) or time.monotonic()>=self.task_metrics[job_key]['_deadline']:raise ProviderError('区域组件请求已超过任务边界。',diagnostics={'category':'deadline','component':component})
         if self.calls>=cfg['max_calls']:raise ProviderError('区域并行制作所需的调用额度已经用完。')
         self.calls+=1;call=self.calls
         if job_key in self.task_metrics:
@@ -447,14 +516,14 @@ class Director:
         if job_key in self.task_metrics:self.task_metrics[job_key]['components'][component]='done'
        self.audit.emit('model.component.finished',kind=kind,target=target,component=component)
       def can_repair_component():
-       with self.world.lock:return self.calls<cfg['max_calls']
+       with self.world.lock:return not self.stop_event.is_set() and not self.paused and self._current(ctx,generation) and time.monotonic()<self.task_metrics[job_key]['_deadline'] and self.calls<cfg['max_calls']
       cfg['_region_subrequest']=reserve_component;cfg['_region_component_done']=component_done;cfg['_region_can_repair']=can_repair_component
      try:raw,usage=ChatProvider(cfg).generate(request_ctx,kind,repair)
      finally:
-      with self.world.lock:self.task_metrics[job_key]['request_seconds']+=time.monotonic()-model_started
+      with self.world.lock:self.task_metrics[job_key]['request_seconds']+=time.perf_counter()-model_started
      self.audit.emit('model.response',kind=kind,target=target,call=request_number,seconds=round(time.monotonic()-request_started,3),usage=usage,response_chars=len(raw))
      with self.world.lock:
-      self._record_usage(usage)
+      if not usage.get('usage_recorded'):self._record_usage(usage)
       if job_key in self.task_metrics and usage.get('pipeline_requests'):self.task_metrics[job_key]['pipeline_requests']=usage['pipeline_requests']
     changes=[]
     with self.world.lock:
@@ -497,10 +566,17 @@ class Director:
     with self.world.lock: self.rejected+=1
     if cfg['offline']: break
    except ProviderError as exc:
-    self.audit.emit('model.failed',level=logging.WARNING,kind=kind,target=target,call=request_number,seconds=round(time.monotonic()-request_started,3) if request_started else None,error=str(exc),usage=exc.usage,finish_reason=exc.finish_reason,diagnostics=exc.diagnostics)
+    final_call=exc.diagnostics.get('last_call',request_number)
+    self.audit.emit('model.failed',level=logging.WARNING,kind=kind,target=target,call=final_call,seconds=round(time.monotonic()-request_started,3) if request_started else None,error=str(exc),usage=exc.usage,finish_reason=exc.finish_reason,diagnostics=exc.diagnostics)
     error=exc
     with self.world.lock:
-     self._record_usage(exc.usage)
+     if not exc.usage.get('usage_recorded'):self._record_usage(exc.usage)
+     if exc.diagnostics.get('usage_unknown') and not exc.usage.get('usage_recorded'):
+      self.unknown_usage_calls+=1
+      if job_key in self.task_metrics:self.task_metrics[job_key]['unknown_usage_calls']+=1
+     if exc.diagnostics.get('retries_exhausted'):
+      self.paused=True
+      self.audit.emit('director.paused',level=logging.WARNING,reason='transport_retries_exhausted',kind=kind,target=target,call=final_call)
      if exc.usage: self.rejected+=1
     break
    except Exception as exc:
@@ -530,6 +606,7 @@ class Director:
  def _deliver(self,raw,ctx,source):
   try:
    if self.world.apply_patch(raw,ctx,source):
+    if ctx['kind']=='region':self.world.store.clear_components(ctx['epoch'],ctx['target'])
     self.audit.emit('generation.applied',kind=ctx['kind'],target=ctx['target'],source=source,story_revision=ctx['story_revision'])
     self.accepted+=1;self.failed.discard((ctx['kind'],ctx['target']));self.failures.pop((ctx['kind'],ctx['target']),None)
     self.error=next((entry['message'] for entry in reversed(list(self.failures.values()))),'')[:260]

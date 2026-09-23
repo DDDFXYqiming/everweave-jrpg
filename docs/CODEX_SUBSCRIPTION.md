@@ -1,6 +1,6 @@
-# Codex 订阅接入 · GPT-5.6 Luna / high
+# ChatGPT 订阅接入 · Luna
 
-当前默认生成服务为 `chatgpt_subscription`，模型固定 `gpt-5.6-luna`，思考等级固定 `high`。Everweave 使用独立设备 OAuth，直接读取 ChatGPT Codex Responses SSE，不向 OpenAI Platform API 提交 API Key。官方区分 [ChatGPT 订阅登录与 API Key 按量登录](https://learn.chatgpt.com/docs/auth)。直连实现参考同机 Loreweaver 已验证的订阅适配；该 ChatGPT 后端不是官方文档面向普通第三方应用承诺的公共 API，若上游协议改变，需要同步维护。
+当前默认生成服务为 `chatgpt_subscription`，新世界默认 `gpt-6-luna / high`；可选 `gpt-5.6-luna`，并完整支持 `none/low/medium/high/xhigh/max`。界面中的 Off 对应 `none`。旧存档保存的 GPT-5.6 模型选择不会被自动换成 GPT-6。Everweave 使用独立设备 OAuth，直接读取 ChatGPT Codex Responses SSE，不向 OpenAI Platform API 提交 API Key。官方区分 [ChatGPT 订阅登录与 API Key 按量登录](https://learn.chatgpt.com/docs/auth)。直连实现参考同机 Loreweaver 已验证的订阅适配；该 ChatGPT 后端不是官方文档面向普通第三方应用承诺的公共 API，若上游协议改变，需要同步维护。
 
 ## 使用
 
@@ -10,13 +10,19 @@
 .\Start.ps1
 ```
 
-连接页默认选择“ChatGPT 订阅直连 · GPT-5.6 Luna”，不显示密钥输入框。点击登录后显示设备代码并打开官方授权页；完成后后台自动保存。继续旅程时使用新配置，世界和存档格式不因服务切换而重建。旧 `codex_subscription` 设置自动迁移到直连；主动选择并保存的 API 模式仍会保留。
+连接页默认选择 ChatGPT 订阅直连及 GPT-6 Luna，不显示密钥输入框。点击登录后显示设备代码并打开官方授权页；完成后后台自动保存。继续旅程时使用新配置，世界和存档格式不因服务切换而重建。旧 `codex_subscription` 设置自动迁移到直连；主动选择并保存的 API 模式仍会保留。
 
-订阅模式共享 ChatGPT/Codex 使用额度，并非无限请求，也不能据此保证固定生成速度。请求固定发送 Luna / high，响应若报告其他模型便拒绝；认证、额度或响应失败会停止，绝不自动切换其他模型或收费 API，也不自动购买或申请额外额度。
+订阅模式共享 ChatGPT/Codex 使用额度，并非无限请求，也不能据此保证固定生成速度。请求发送所选的 Luna 思考等级，响应若报告其他模型或不同的思考等级便拒绝；最终失败会停止，绝不自动切换其他模型或收费 API，也不自动购买或申请额外额度。暂时性传输错误可在同一任务预算内有限补试，规则见下文。
 
 DeepSeek/兼容 API 是手动选项。PowerShell 启动器默认不解密 `deepseek.local.key`；只有显式 `-LoadDeepSeekKey` 才加载它。订阅模式即使收到 API Key 字段也不会使用。
 
 旧 App Server 对照仍可通过测试工具的 `--provider codex_subscription` 调用，并可用 `EVERWEAVE_CODEX_BIN` 指定可执行文件。它只用于历史性能对照，正常游戏不需要 Codex CLI。
+
+## Medium 与上下文核查
+
+Web 和原生连接设置均可选 `none/low/medium/high/xhigh/max`，默认保留 High。2026-09-22 至 23 日的 **GPT-5.6 Luna** 实测使用相同设定各开一局，Medium 首个可玩地区等待 12 分 43 秒，High 为 20 分 49 秒；两局后续均遇到阻塞，不能据此认定 Medium 的整章质量或平均完成时间最优。完整口径、游玩内容和剩余问题见 [Web 实测报告](WEB_LIVE_REVIEW_2026-09-22.md)。
+
+本机 Codex 目录中 Luna 默认窗口为 272000、最大 872000；项目的旧 Codex 兼容入口已显式配置 `model_context_window=872000`。当前订阅直连不读取这个目录默认值，也没有本地 272K 截断。本轮真实请求最大输入约 1.6 万 tokens，没有接近窗口限制；未做 800K 服务端压力验证。公开 API 的 [官方 Luna 规格](https://developers.openai.com/api/docs/models/gpt-5.6-luna) 标注 1,050,000 上下文，不等于已经验证 ChatGPT 订阅后端的极限。
 
 ## 接入边界
 
@@ -26,7 +32,9 @@ DeepSeek/兼容 API 是手动选项。PowerShell 启动器默认不解密 `deeps
 
 只收集最终回答，排除中间状态说明；用量读取 `response.completed` 的 usage。对“完整值已经结束，只漏掉末尾少量容器括号”的情况，可补齐最多四个闭合括号，并记录 `closed_json_containers`；字符串被截断、缺少值或括号错配仍失败。之后继续通过原有完整游戏契约校验，绝不自动填写场景、物品或规则。
 
-直连请求使用 15 分钟硬上限和 3 分钟 SSE 无数据上限；只要仍有事件就不会因总时长达到 300 秒而被误杀。连接错误和超时不自动重放；若未收到最终用量，零统计值不表示请求没有消耗订阅额度。
+直连请求使用任务级 15 分钟总上限和 3 分钟 SSE 无数据上限。默认首发后最多自动补试一次，配置只允许 0～2 次；退避、补试和后续内容修复共享同一总时限，每次真实发送都计入调用上限。暂时性连接错误、无完成事件断流和可重试限流才会补试，临时限流采用服务返回的 `Retry-After`。401 最多刷新一次授权；额度、普通权限、模型/参数、证书、取消及总时限错误不会进入传输补试。
+
+补试重新发送当前组件并使用全新接收缓冲区。复杂地区中若玩法已完成、视听断流，只补试视听并保留玩法结果；不会重跑整张地区，也不会把两段回答拼接。若未收到最终 usage，诊断将该次标记为用量未知，零统计值不表示请求没有消耗订阅额度。详细事件和字段见 [日志](LOGGING.md)。
 
 Responses SSE 持续提供回答增量。游戏不会把未完成的机械 JSON 展示或应用给玩家，因为对象引用、地图碰撞和奖励需要整包事务校验；生成详情显示正在推理或已接收字符数。请求使用 JSON Object 模式，最终仍通过完整游戏契约。
 

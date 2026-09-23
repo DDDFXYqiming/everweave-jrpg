@@ -17,7 +17,7 @@ from collections import OrderedDict
 TYPESAFE_MODEL='jev-latest'
 TYPESAFE_BASE_URL='https://api.typesafe.ai'
 ASSET_QUESTION_VERSION='everweave-assets-v3'
-REVIEW_QUESTION_VERSION='everweave-effects-v4'
+REVIEW_QUESTION_VERSION='everweave-effects-v5'
 _CACHE=OrderedDict()
 _CACHE_LOCK=threading.Lock()
 _CACHE_LIMIT=128
