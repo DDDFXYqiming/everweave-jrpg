@@ -36,6 +36,11 @@ class ArtifactTests(unittest.TestCase):
         import re
         for script in list((ROOT/'client').glob('*.gd'))+[ROOT/'client/main.tscn']:
             for reference in re.findall(r'res://[^"\s]+',script.read_text(encoding='utf-8')):
+                if reference=='res://build/web-blobs/':
+                    self.assertEqual(script.name,'asset_library.gd')
+                    self.assertIn('build/web-blobs/*.bin',(ROOT/'export_presets.cfg').read_text(encoding='utf-8'))
+                    self.assertIn('stage_web_assets()', (ROOT/'launch.py').read_text(encoding='utf-8'))
+                    continue
                 self.assertTrue((ROOT/reference.removeprefix('res://')).is_file(),f'{script}: {reference}')
 
     def test_only_pinned_fonts_ship_and_no_runtime_credentials(self):

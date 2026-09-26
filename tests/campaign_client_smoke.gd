@@ -33,7 +33,9 @@ func _run() -> void:
 	main._accept_snapshot(state)
 	assert(main.resource_rows.ammo.label.text.contains("弹药"))
 	assert(not main.resource_rows.ammo.bar.visible)
-	assert(main.stats_label.text.contains("弹药") and not main.stats_label.text.contains("MP"))
+	assert(main.hud_ration_text.text.contains("弹药") and not main.hud_ration_text.text.contains("MP"))
+	assert(main.hud_ration_slots.get_child_count()==8)
+	assert(main.hud_hp_text.text.contains("机体完整度"))
 	main.queue_free();main=null;await create_timer(.25).timeout
 	print("CAMPAIGN_CLIENT_OK flexible_resources=true goals=true loops=true locked_routes=true")
 	quit(0)

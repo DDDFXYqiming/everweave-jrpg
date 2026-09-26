@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 from .world import World,GameError
 from .storage import Store,dumps
-from .director import Director,ProviderError,official_deepseek
+from .director import Director,ProviderError,official_deepseek,official_opencode_go,validate_url
 from .audit import AuditLog,NullAudit
 
 def data_dir():
@@ -22,13 +22,21 @@ def data_dir():
 
 class GameServer(ThreadingHTTPServer):
  daemon_threads=True
- def __init__(self,address,save_path,token,handler_class=None):
+ def __init__(self,address,save_path,token,handler_class=None,credential_path=None):
   if address[0]!='127.0.0.1': raise ValueError('Only IPv4 loopback binding is supported')
   self.token=token;self.instance_id=secrets.token_hex(16); self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
   self.snapshot_sequence=0
   self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','max_transport_retries','task_timeout_seconds','hybrid_content','parallel_region','jev_enabled','language')
   self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,max_transport_retries=1,task_timeout_seconds=900,hybrid_content=True,parallel_region=True,jev_enabled=True,language='zh')
   self.preference_path=None if str(save_path)==':memory:' else Path(save_path).with_name('settings.json')
+  self.credential_path=Path(credential_path) if credential_path else None
+  self.saved_keys={}
+  if self.credential_path and self.credential_path.is_file():
+   try:
+    saved_keys=json.loads(self.credential_path.read_text(encoding='utf-8'))
+    if saved_keys.get('version')==1 and isinstance(saved_keys.get('chat_completions'),dict):
+     self.saved_keys={url:key for url,key in saved_keys['chat_completions'].items() if isinstance(url,str) and isinstance(key,str) and key}
+   except (OSError,ValueError,AttributeError):pass
   if self.preference_path and self.preference_path.exists():
    try:
     saved=json.loads(self.preference_path.read_text(encoding='utf-8'))
@@ -48,9 +56,29 @@ class GameServer(ThreadingHTTPServer):
   super().server_close()
   if hasattr(self,'audit'):
    self.audit.emit('server.stopped');self.audit.close()
- def remember_configuration(self):
+ def remember_configuration(self,credential=None):
+  if credential:
+   base,key=credential
+   self.saved_keys[base]=key
+   self.save_keys()
   self.preferences={k:self.director.cfg[k] for k in self.preference_keys}
   self.save_preferences()
+ def configure_generation(self,data):
+  configuration=dict(data)
+  supplied=configuration.get('api_key')
+  base=None
+  if configuration.get('provider','chat_completions')=='chat_completions' and not configuration.get('offline',False):
+   base=validate_url(configuration.get('base_url','https://api.deepseek.com'))
+   if not supplied and base in self.saved_keys:configuration['api_key']=self.saved_keys[base]
+  self.director.configure(configuration)
+  return (base,supplied.strip()) if base and isinstance(supplied,str) and supplied.strip() else None
+ def save_keys(self):
+  if self.credential_path is None:return
+  self.credential_path.parent.mkdir(parents=True,exist_ok=True)
+  temporary=self.credential_path.with_suffix('.tmp')
+  temporary.write_text(dumps({'version':1,'chat_completions':self.saved_keys}),encoding='utf-8')
+  if os.name!='nt':temporary.chmod(0o600)
+  temporary.replace(self.credential_path)
  def save_preferences(self):
   if self.preference_path:
    temporary=self.preference_path.with_suffix('.tmp')
@@ -70,7 +98,7 @@ class GameServer(ThreadingHTTPServer):
    try:executable();s['configuration']['codex_available']=True
    except CodexError:s['configuration']['codex_available']=False
    s['configuration']['credential_available']=False  # Login is checked by app-server, never guessed from a file.
-  else:s['configuration']['credential_available']=bool((self.director.cfg or {}).get('api_key') or (official_deepseek(base) and os.environ.get('DEEPSEEK_API_KEY')))
+  else:s['configuration']['credential_available']=bool((self.director.cfg or {}).get('api_key') or self.saved_keys.get(base) or (official_deepseek(base) and os.environ.get('DEEPSEEK_API_KEY')) or (official_opencode_go(base) and os.environ.get('OPENCODE_GO_API_KEY')))
   return s
 
 class Handler(BaseHTTPRequestHandler):
@@ -139,10 +167,10 @@ class Handler(BaseHTTPRequestHandler):
      setting=data.get('setting','')
      if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
      if data.get('provider')=='chatgpt_subscription' and not server.subscription.public()['ready']:raise GameError('请先完成 Everweave 的 ChatGPT 订阅授权。')
-     d.configure(data); w.start(setting,authored=not d.cfg['offline'],language=d.cfg['language'],planned=not d.cfg['offline']); server.seen.clear(); server.remember_configuration()
+     credential=server.configure_generation(data); w.start(setting,authored=not d.cfg['offline'],language=d.cfg['language'],planned=not d.cfg['offline']); server.seen.clear();server.remember_configuration(credential)
     elif self.path=='/configure':
      if data.get('provider')=='chatgpt_subscription' and not server.subscription.public()['ready']:raise GameError('请先完成 Everweave 的 ChatGPT 订阅授权。')
-     d.configure(data); server.remember_configuration()
+     credential=server.configure_generation(data);server.remember_configuration(credential)
     elif self.path=='/subscription/login':server.subscription.start()
     elif self.path=='/language':
      language=data.get('language')

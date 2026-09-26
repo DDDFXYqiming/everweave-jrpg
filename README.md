@@ -58,6 +58,8 @@ Everweave 仍是一个研究型原型。章节规划、地区生成、规则校�
 
 浏览器模式可运行 `python launch.py --web --data-dir ./userdata/web-journey`，或双击 `Start-Web.cmd`。启动器会将同一份 Godot 客户端导出到浏览器，沿用桌面版的 HUD、地图和交互；打开终端打印的本机地址即可游玩。[Web 界面说明](docs/WEB_CLIENT.md)。
 
+连接页提交的第三方 API Key 保存在项目内被 Git 忽略的 `userdata/provider-keys.local.json`，重启后按服务 URL 复用。
+
 需要 Python 3.11 或更高版本，以及 Godot 4 Standard。项目当前使用 Godot 4.7.2 测试。
 
 在线使用官方 Jev 前安装固定版本 SDK：

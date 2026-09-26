@@ -179,6 +179,7 @@
   "舍弃「": "Discard the failed draft for “",
   "」上次失败的候选内容，按同一目的地重新创作。已有地图不会被删除，新请求仍计入额度。": "” and redesign the same destination. Existing maps will remain available. The new request counts toward the budget.",
   "HP %d / %d   ·   回合 %d": "HP %d / %d   ·   Turn %d",
+  "敌方 HP %d / %d   ·   第 %d 回合": "Enemy HP %d / %d   ·   Turn %d",
   "撤離 · Esc": "Retreat · Esc",
   "1 攻击": "1 Attack",
   "2 星火术 · 5MP": "2 Spark · 5 MP",

@@ -8,6 +8,8 @@ python launch.py --web --data-dir ./userdata/web-journey
 
 也可双击 `Start-Web.cmd`，或用 PowerShell 7 执行 `./Start.ps1 -Web -DataDir ./userdata/web-journey`。启动器会准备素材、导入 Godot 工程、在该存档目录的 `web-export/` 生成 Web 导出，然后打印 `http://127.0.0.1:端口`。每次启动都会重新导出当前工程；不同存档各有自己的导出文件，不会相互覆盖。需要固定端口时加 `--port 61012`。
 
+在连接页填入第三方服务的 API Key 并成功应用后，服务会按完整 URL 把它保存在项目内的 `userdata/provider-keys.local.json`。重启后，同一 URL 的 Key 可以留空复用；改用其他 URL 时不会自动带上旧 Key。该文件被 Git 忽略，`userdata/.gdignore` 也使它不进入 Godot 导出包；游戏状态接口不返回 Key。
+
 Web 导出需要与工程匹配的 Godot Standard 可执行文件。首次缺少导出模板时，启动器从 Godot 官方发布包按需安装当前版本的单线程 Web 模板；此后直接复用。可以用 `--godot` 指向已安装的 Godot。导出产物和模板都不提交到项目 Git。
 
 只想检查界面和动作、不调用模型时，可使用独立测试存档：

@@ -26,6 +26,7 @@ runtime.json
 instance.lock
 saves/
 userdata/
+/userdata/provider-keys.local.json
 # External content is reconstructed from the committed manifests at startup.
 /assets/library/blobs/
 local-settings.json

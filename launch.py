@@ -135,8 +135,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.web:
             from engine.web_server import WebGameServer
             export_root = build_web_client(executable, args.data_dir / 'web-export')
-            server = WebGameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token, export_root)
-        else:server = GameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token)
+            server = WebGameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token, export_root, ROOT / 'userdata/provider-keys.local.json')
+        else:server = GameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token, credential_path=ROOT / 'userdata/provider-keys.local.json')
         url = f'http://127.0.0.1:{server.server_port}'
         runtime_file.write_text(json.dumps({'url': url, 'token': token, 'instance_id': server.instance_id}), encoding='utf-8')
         if os.name != 'nt':

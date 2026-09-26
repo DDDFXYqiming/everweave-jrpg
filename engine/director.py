@@ -88,6 +88,10 @@ def official_deepseek(url):
  u=urllib.parse.urlsplit(url)
  return u.scheme=='https' and u.hostname=='api.deepseek.com' and u.port in (None,443)
 
+def official_opencode_go(url):
+ u=urllib.parse.urlsplit(url)
+ return u.scheme=='https' and u.hostname=='opencode.ai' and u.port in (None,443) and u.path=='/zen/go/v1'
+
 # OpenCode Go 订阅端点要求每次请求带稳定的 x-opencode-session 头，缺少时直接拒绝。
 OPENCODE_HOST='opencode.ai'
 OPENCODE_SESSION='everweave-'+secrets.token_hex(8)
@@ -98,6 +102,38 @@ def provider_headers(cfg):
   headers['x-opencode-session']=OPENCODE_SESSION
   headers['User-Agent']='Everweave/0.1'
  return headers
+
+def read_chat_stream(response,limit=1024000,deadline=None,progress=None,wire_limit=32*1024*1024):
+ content=[];size=0;content_chars=0;wire_bytes=0;reported={};finish=None;reasoning=False;complete=False;last_progress=time.monotonic()
+ while line:=response.readline():
+  if deadline and time.monotonic()>=deadline:
+   raise ProviderError('生成任务已达到共享总时限。',diagnostics={'usage_unknown':True,'category':'deadline','transport':'chat_sse'})
+  wire_bytes+=len(line)
+  if wire_bytes>wire_limit:
+   raise ProviderError('Provider stream exceeds size limit.',diagnostics={'usage_unknown':True,'transport':'chat_sse'})
+  if not line.startswith(b'data:'):continue
+  data=line[5:].strip()
+  if data==b'[DONE]':complete=True;break
+  try:event=json.loads(data)
+  except (UnicodeError,ValueError):raise ProviderError('Provider stream returned invalid JSON.') from None
+  if isinstance(event.get('usage'),dict):reported=event['usage']
+  for choice in event.get('choices',[]):
+   delta=choice.get('delta') or {}
+   text=delta.get('content') or ''
+   if not isinstance(text,str):raise ProviderError('Provider stream returned invalid content.')
+   size+=len(text.encode('utf-8'))
+   content_chars+=len(text)
+   if size>limit:
+    raise ProviderError('Model response exceeds size limit.',diagnostics={'usage_unknown':True,'transport':'chat_sse'})
+   content.append(text)
+   reasoning=reasoning or bool(delta.get('reasoning_content'))
+   finish=choice.get('finish_reason') or finish
+  if callable(progress) and time.monotonic()-last_progress>=5:
+   progress({'content_chars':content_chars,'wire_bytes':wire_bytes,'reasoning_observed':reasoning})
+   last_progress=time.monotonic()
+ if not complete or not finish:
+  raise ProviderError('Provider stream ended before completion.',diagnostics={'usage_unknown':True,'transport':'chat_sse'})
+ return {'usage':reported,'choices':[{'message':{'content':''.join(content),'reasoning_content':reasoning},'finish_reason':finish}]}
 
 class ChatProvider:
  def __init__(self,cfg): self.cfg=cfg
@@ -172,24 +208,59 @@ class ChatProvider:
    # JSON truncated real responses. This is a ceiling, not a requested length.
    payload['max_tokens']=max(payload['max_tokens'],32768 if thinking else 8192)
   base=validate_url(cfg['base_url']); url=base if base.endswith('/chat/completions') else base+'/chat/completions'
+  streaming=official_opencode_go(base)
+  if streaming:
+   payload['stream']=True
+   payload['stream_options']={'include_usage':True}
   req=urllib.request.Request(url,data=json.dumps(payload,ensure_ascii=False).encode(),headers=provider_headers(cfg),method='POST')
   opener=urllib.request.build_opener(NoRedirect)
-  try:
-   # 非流式请求要等整段生成返回；v2 区域允许 64K 预算，90 秒读超时会掐断正常生成。
-   with opener.open(req,timeout=300 if thinking else 60) as response:
-    limit=1024000 if thinking else 192000
-    body=response.read(limit+1)
-    if len(body)>limit: raise ProviderError('Model response exceeds size limit.')
-   data=json.loads(body)
-  except urllib.error.HTTPError as exc:
-   raise ProviderError(f'Provider HTTP {exc.code}. Check model, API key, balance or JSON-mode compatibility.') from None
-  except (urllib.error.URLError,TimeoutError,OSError) as exc:
-   raise ProviderError('Model request failed or timed out; retry manually. '+type(exc).__name__) from None
-  except (UnicodeError,json.JSONDecodeError): raise ProviderError('Provider did not return JSON.') from None
+  transport_retries=0
+  previous_call=(cfg.get('_request_meta') or {}).get('call')
+  def retry_transport(reason):
+   nonlocal transport_retries,previous_call
+   reserve=cfg.get('_reserve_transport_retry')
+   if not callable(reserve) or transport_retries>=int(cfg.get('max_transport_retries',0)):return False
+   call=reserve({'retry_kind':reason,'previous_call':previous_call,'usage_unknown':True})
+   if call is None:return False
+   previous_call=call;transport_retries+=1
+   time.sleep(min(1.0,0.35*transport_retries))
+   return True
+  while True:
+   try:
+    # 非流式请求要等整段生成返回；v2 区域允许 64K 预算，90 秒读超时会掐断正常生成。
+    with opener.open(req,timeout=300 if thinking else 60) as response:
+     limit=1024000 if thinking else 192000
+     if streaming:data=read_chat_stream(response,limit,cfg.get('_task_deadline'),cfg.get('_stream_progress'))
+     else:
+      body=response.read(limit+1)
+      if len(body)>limit: raise ProviderError('Model response exceeds size limit.')
+      data=json.loads(body)
+    break
+   except urllib.error.HTTPError as exc:
+    if exc.code in (429,502,503,504) and retry_transport('http_'+str(exc.code)):continue
+    if exc.code==403 and official_opencode_go(base):
+     try:
+      upstream=json.loads(exc.read(4096))
+      detail=upstream.get('error',{})
+      message=detail.get('message','') if isinstance(detail,dict) else ''
+     except (ValueError,UnicodeError,OSError,AttributeError):message=''
+     if 'active OpenCode Go subscription is required' in message:
+      raise ProviderError('当前 OpenCode Go Key 未获订阅工作区访问权限；请核对项目所用 Key 与控制台的有效 Key。') from None
+    diagnostics={'usage_unknown':True,'last_call':previous_call} if exc.code in (429,502,503,504) else None
+    raise ProviderError(f'Provider HTTP {exc.code}. Check model, API key, balance or JSON-mode compatibility.',diagnostics=diagnostics) from None
+   except (urllib.error.URLError,TimeoutError,OSError) as exc:
+    reason=exc.reason if isinstance(exc,urllib.error.URLError) else exc
+    transient=isinstance(reason,(TimeoutError,ConnectionError))
+    if transient and retry_transport(type(reason).__name__):continue
+    raise ProviderError('Model request failed or timed out; retry manually. '+type(exc).__name__,
+                        diagnostics={'usage_unknown':True,'last_call':previous_call} if transient else None) from None
+   except (UnicodeError,json.JSONDecodeError):raise ProviderError('Provider did not return JSON.') from None
   usage={}
   try:
    reported=data.get('usage') or {}
    usage=dict(input_tokens=max(0,int(reported.get('prompt_tokens',0))),output_tokens=max(0,int(reported.get('completion_tokens',0))),reasoning_tokens=max(0,int((reported.get('completion_tokens_details') or {}).get('reasoning_tokens',0))),reasoning_observed=False)
+   usage['transport_retries']=transport_retries
+   usage['model_requests']=transport_retries+1
    choice=data['choices'][0]
    usage['reasoning_observed']=bool(choice['message'].get('reasoning_content'))
    if choice.get('finish_reason')=='length':
@@ -223,6 +294,7 @@ class Director:
   key='' if subscription else str(cfg.get('api_key','')).strip()
   if not key and self.cfg and base==self.cfg['base_url']: key=self.cfg['api_key']
   if not key and official_deepseek(base): key=os.environ.get('DEEPSEEK_API_KEY','')
+  if not key and official_opencode_go(base): key=os.environ.get('OPENCODE_GO_API_KEY','')
   if not subscription and not offline and not key and urllib.parse.urlsplit(base).hostname not in ('localhost','127.0.0.1','::1'): raise ProviderError('在线模式需要 API Key；密钥仅保留在本机进程内存。')
   limit=int(cfg.get('max_calls',60))
   if not 1<=limit<=1000: raise ProviderError('调用上限应为 1～1000。')
@@ -441,7 +513,7 @@ class Director:
    self.task_metrics[job_key]['pipeline']=split_region
    if split_region:self.task_metrics[job_key].update(component='parallel',components={'gameplay':'running','audiovisual':'pending'})
    self.busy=' / '.join(self.in_flight.values()); self.last_request=time.monotonic()
-  raw=None; error=None;attempts=0
+  raw=None; error=None;attempts=0;stale_invalid_response=False
   cached=self.failed_payloads.get((kind,target))
   cache_fields=('epoch','target','kind','refresh','target_revision','content_dependencies')+(('story_revision','commission_ids') if kind=='reaction' else ())
   if cached and cached['generation']==generation and all(cached['context'].get(k)==ctx.get(k) for k in cache_fields):
@@ -577,6 +649,10 @@ class Director:
     self.audit.emit('generation.rejected',level=logging.WARNING,kind=kind,target=target,call=request_number,attempt=attempt+1,issues=exc.issues)
     error=exc
     with self.world.lock: self.rejected+=1
+    # 旧叙事的无效回复不值得再花一次修复请求；新事件会重新排队生成反应。
+    with self.world.lock:
+     stale_invalid_response=(kind=='reaction' and ctx['story_revision']!=self.world.state['story_revision'])
+    if stale_invalid_response:break
     if cfg['offline']: break
    except ProviderError as exc:
     final_call=exc.diagnostics.get('last_call',request_number)
@@ -599,7 +675,7 @@ class Director:
    if self.stop_event.is_set():self._finish_task(job_key,'stopped');return True
    state=self.world.state
    node=(state or {}).get('topology',{}).get(target)
-   stale=not self._current(ctx,generation)
+   stale=stale_invalid_response or not self._current(ctx,generation)
    if stale:
     self.audit.emit('generation.stale',kind=kind,target=target,epoch=ctx['epoch'],story_revision=ctx['story_revision'])
     if raw is not None or attempts:self.stale+=1

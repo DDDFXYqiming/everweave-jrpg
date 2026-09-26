@@ -1,5 +1,6 @@
 """Native integration test with an isolated standard-library server, no cloud calls."""
 from pathlib import Path
+import json
 import secrets
 import sqlite3
 import subprocess
@@ -85,10 +86,14 @@ with tempfile.TemporaryDirectory() as td:
     server.director.start_worker()
     worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
     try:
+        # 测试客户端只读取本次临时服务的实例信息，避免误用机器上旧启动器的 runtime.json。
+        runtime_file=Path(td)/'runtime.json'
+        runtime_file.write_text(json.dumps({'url':'http://127.0.0.1:'+str(server.server_port),
+                                            'token':server.token,'instance_id':server.instance_id}),encoding='utf-8')
         script='native_ui_acceptance' if presentation_test else 'native_generated_region' if generated_test else 'native_threat_e2e' if threat_test else 'native_adventure_e2e' if adventure_test else 'native_hybrid_e2e' if hybrid_test else 'native_content_e2e' if content_test else 'native_e2e'
         command=[find_godot(None),'--path',str(ROOT),'--script',f'res://tests/{script}.gd']
         if '--headless' in sys.argv: command+=['--headless']
-        command+=['--','--backend-url=http://127.0.0.1:'+str(server.server_port),'--session-token='+server.token]
+        command+=['--','--backend-url=http://127.0.0.1:'+str(server.server_port),'--session-token='+server.token,'--runtime-file='+str(runtime_file)]
         try:
             result=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,encoding='utf-8',timeout=150,
                                   env=dict(os.environ,EVERWEAVE_SETTINGS_PATH=str(Path(td)/'player-settings.cfg')))

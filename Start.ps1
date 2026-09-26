@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Godot = '', [switch]$Demo, [switch]$ServerOnly, [switch]$Web, [string]$DataDir = '', [switch]$LoadDeepSeekKey, [switch]$LoadTypeSafeKey)
+param([string]$Godot = '', [switch]$Demo, [switch]$ServerOnly, [switch]$Web, [string]$DataDir = '', [switch]$LoadDeepSeekKey, [switch]$LoadTypeSafeKey, [switch]$LoadOpenCodeGoKey)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $env:PYTHONUTF8 = '1'
@@ -13,6 +13,12 @@ if ($LoadTypeSafeKey -and -not $env:TYPESAFE_API_KEY) {
     if (-not (Test-Path -LiteralPath $typeSafeKeyFile)) { throw 'typesafe.local.key was not found. Create the DPAPI-encrypted file first.' }
     $secureTypeSafeKey = (Get-Content -LiteralPath $typeSafeKeyFile -Raw).Trim() | ConvertTo-SecureString
     $env:TYPESAFE_API_KEY = [System.Net.NetworkCredential]::new('', $secureTypeSafeKey).Password
+}
+$openCodeGoKeyFile = Join-Path $PSScriptRoot 'opencode-go.local.key'
+if ($LoadOpenCodeGoKey -and -not $env:OPENCODE_GO_API_KEY) {
+    if (-not (Test-Path -LiteralPath $openCodeGoKeyFile)) { throw 'opencode-go.local.key was not found. Create the DPAPI-encrypted file first.' }
+    $secureOpenCodeGoKey = (Get-Content -LiteralPath $openCodeGoKeyFile -Raw).Trim() | ConvertTo-SecureString
+    $env:OPENCODE_GO_API_KEY = [System.Net.NetworkCredential]::new('', $secureOpenCodeGoKey).Password
 }
 $python = Get-Command py -ErrorAction SilentlyContinue
 $prefix = @('-3')

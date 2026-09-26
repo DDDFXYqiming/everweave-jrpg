@@ -40,7 +40,7 @@ def _content_policy(html: str) -> str:
 
 
 class WebGameServer(GameServer):
-    def __init__(self, address, save_path, token, export_root):
+    def __init__(self, address, save_path, token, export_root, credential_path=None):
         self.export_root = Path(export_root).resolve()
         index = self.export_root / 'index.html'
         if not index.is_file():
@@ -49,7 +49,7 @@ class WebGameServer(GameServer):
                           if file.is_file() and (file.name == 'index.html' or file.name.startswith('index.'))
                           and file.suffix.lower() in MIME}
         self.web_csp = _content_policy(index.read_text(encoding='utf-8'))
-        super().__init__(address, save_path, token, WebHandler)
+        super().__init__(address, save_path, token, WebHandler, credential_path)
         self.cookie_name = 'everweave_' + self.instance_id[:12]
 
 
