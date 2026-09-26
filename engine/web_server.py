@@ -1,79 +1,111 @@
-"""可选的同源本机 Web 客户端；复用原来的权威动作接口。"""
-import copy
+"""用同一个 Godot 客户端的 Web 导出文件提供本机浏览器游戏。"""
+import base64
+import hashlib
 import hmac
 from http.cookies import SimpleCookie
 from pathlib import Path
-from urllib.parse import urlsplit,unquote
-from .server import GameServer,Handler
+import re
+from urllib.parse import urlsplit, unquote
 
-ROOT=Path(__file__).resolve().parents[1]
+from .server import GameServer, Handler
+
+
+MIME = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+        '.wasm': 'application/wasm', '.pck': 'application/octet-stream',
+        '.png': 'image/png', '.ico': 'image/x-icon'}
+
+
+def _content_policy(html: str) -> str:
+    # Godot 的官方导出页有内联启动脚本和样式；只批准当前导出文件的确切哈希。
+    hashes = {'script': [], 'style': []}
+    for kind in hashes:
+        for match in re.finditer(rf'<{kind}\b([^>]*)>(.*?)</{kind}>', html, re.I | re.S):
+            if kind == 'script' and re.search(r'\bsrc\s*=', match.group(1), re.I):
+                continue
+            digest = base64.b64encode(hashlib.sha256(match.group(2).encode('utf-8')).digest()).decode('ascii')
+            hashes[kind].append("'sha256-" + digest + "'")
+    return '; '.join((
+        "default-src 'none'",
+        "script-src 'self' 'wasm-unsafe-eval' " + ' '.join(hashes['script']),
+        "style-src 'self' " + ' '.join(hashes['style']),
+        "connect-src 'self'",
+        "img-src 'self' data: blob:",
+        "media-src 'self' blob:",
+        "font-src 'self' data:",
+        "worker-src 'self' blob:",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "base-uri 'none'",
+    ))
 
 
 class WebGameServer(GameServer):
-    def __init__(self,address,save_path,token):
-        super().__init__(address,save_path,token,WebHandler)
-        self.cookie_name='everweave_'+self.instance_id[:12]
-
-    def snapshot(self):
-        value=super().snapshot()
-        item_fields=('id','name','description','kind','quantity','equipped','price','icon_visual','usable')
-        value['inventory']=[{k:v for k,v in item.items() if k in item_fields} for item in value.get('inventory',[])]
-        if value.get('ui',{}).get('goods'):
-            value['ui']['goods']=[{k:v for k,v in item.items() if k in item_fields} for item in value['ui']['goods']]
-        if value.get('ui',{}).get('choices'):
-            value['ui']['choices']=[{k:v for k,v in choice.items() if k in ('id','text')} for choice in value['ui']['choices']]
-        region=value.get('region')
-        if region:
-            # 只传玩家画面和操作需要的字段；规则和未展示剧情留在服务端。
-            allowed=('id','name','description','biome','weather','width','height','tiles','surfaces','props','entities','visuals','audio','seed','revision')
-            value['region']={key:region[key] for key in allowed if key in region}
-            fields=('id','local_id','name','description','kind','x','y','sprite','solid','footprint','spent','target','direction','locked','blocked_reason','alerted','intent','actor_id')
-            value['region']['entities']=[{k:v for k,v in entity.items() if k in fields} for entity in region['entities']]
-            value['region']['music_override']=region.get('runtime',{}).get('audio_music','')
-        return value
+    def __init__(self, address, save_path, token, export_root):
+        self.export_root = Path(export_root).resolve()
+        index = self.export_root / 'index.html'
+        if not index.is_file():
+            raise ValueError('缺少 Godot Web 导出；请用 launch.py --web 构建。')
+        self.web_files = {file.name: file for file in self.export_root.iterdir()
+                          if file.is_file() and (file.name == 'index.html' or file.name.startswith('index.'))
+                          and file.suffix.lower() in MIME}
+        self.web_csp = _content_policy(index.read_text(encoding='utf-8'))
+        super().__init__(address, save_path, token, WebHandler)
+        self.cookie_name = 'everweave_' + self.instance_id[:12]
 
 
 class WebHandler(Handler):
-    def origin(self):return 'http://127.0.0.1:'+str(self.server.server_port)
-    def same_host(self):return self.headers.get('Host','')=='127.0.0.1:'+str(self.server.server_port)
+    def origin(self): return 'http://127.0.0.1:' + str(self.server.server_port)
+    def same_host(self): return self.headers.get('Host', '') == '127.0.0.1:' + str(self.server.server_port)
+
     def cookie_valid(self):
         try:
-            cookie=SimpleCookie(self.headers.get('Cookie',''));entry=cookie.get(self.server.cookie_name)
-            return bool(entry and hmac.compare_digest(entry.value,self.server.token))
-        except Exception:return False
+            cookie = SimpleCookie(self.headers.get('Cookie', ''))
+            entry = cookie.get(self.server.cookie_name)
+            return bool(entry and hmac.compare_digest(entry.value, self.server.token))
+        except Exception:
+            return False
+
     def web_origin(self):
-        origin=self.headers.get('Origin')
-        return self.same_host() and (origin==self.origin() if origin else self.headers.get('Sec-Fetch-Site')=='same-origin')
+        origin = self.headers.get('Origin')
+        return self.same_host() and (origin == self.origin() if origin else self.headers.get('Sec-Fetch-Site') == 'same-origin')
+
     def authorized(self):
-        # 原生客户端继续使用 Bearer；Web 写入必须来自本页并携带非简单请求头。
-        return super().authorized() or (self.web_origin() and self.cookie_valid() and self.headers.get('X-Everweave-Web')=='1')
-    def send_file(self,path,mime,cookie=False):
-        data=path.read_bytes()
-        self.send_response(200);self.send_header('Content-Type',mime);self.send_header('Content-Length',str(len(data)))
-        self.send_header('X-Content-Type-Options','nosniff');self.send_header('Cache-Control','no-store')
-        self.send_header('Referrer-Policy','no-referrer')
-        self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
-        if cookie:self.send_header('Set-Cookie',f'{self.server.cookie_name}={self.server.token}; HttpOnly; SameSite=Strict; Path=/')
+        # 原生客户端继续使用 Bearer；浏览器内的同一 Godot 客户端只发送同源 cookie。
+        return super().authorized() or (self.web_origin() and self.cookie_valid()
+                                        and self.headers.get('X-Everweave-Web') == '1')
+
+    def send_file(self, path, mime, cookie=False):
+        self.send_response(200)
+        self.send_header('Content-Type', mime)
+        self.send_header('Content-Length', str(path.stat().st_size))
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Cross-Origin-Opener-Policy', 'same-origin')
+        self.send_header('Cross-Origin-Embedder-Policy', 'require-corp')
+        self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
+        self.send_header('Content-Security-Policy', self.server.web_csp)
+        if cookie:
+            self.send_header('Set-Cookie', f'{self.server.cookie_name}={self.server.token}; HttpOnly; SameSite=Strict; Path=/')
         self.end_headers()
-        try:self.wfile.write(data)
-        except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):pass
+        try:
+            with path.open('rb') as stream:
+                while chunk := stream.read(128 * 1024):
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+
     def do_GET(self):
-        path=urlsplit(self.path).path
-        if path in ('/','/app.js','/style.css'):
-            if not self.same_host() or self.headers.get('Sec-Fetch-Site','none') not in ('none','same-origin'):
-                self.reply(403,{'error':'请直接打开本机游戏地址。'});return
-            name,mime={'/':('index.html','text/html; charset=utf-8'),'/app.js':('app.js','text/javascript; charset=utf-8'),'/style.css':('style.css','text/css; charset=utf-8')}[path]
-            self.send_file(ROOT/'web'/name,mime,cookie=path=='/');return
-        if path.startswith('/media/'):
-            if not ((self.web_origin() and self.cookie_valid()) or super().authorized()):
-                self.reply(401,{'error':'Local session required'});return
-            from .library import resolve
-            try:
-                entry=resolve(unquote(path[len('/media/'):]))
-                file=ROOT/entry['file'];mime={'.png':'image/png','.ogg':'audio/ogg','.wav':'audio/wav'}.get(file.suffix.lower())
-                if not mime:raise ValueError('不支持的媒体')
-                self.send_file(file,mime)
-            except (OSError,ValueError):self.reply(404,{'error':'素材不可用'})
+        path = urlsplit(self.path).path
+        name = 'index.html' if path == '/' else unquote(path.removeprefix('/'))
+        file = self.server.web_files.get(name)
+        if file and path in ('/', '/' + name):
+            if not self.same_host() or self.headers.get('Sec-Fetch-Site', 'none') not in ('none', 'same-origin'):
+                self.reply(403, {'error': '请直接打开本机游戏地址。'})
+                return
+            if name != 'index.html' and not self.cookie_valid():
+                self.reply(401, {'error': 'Local session required'})
+                return
+            self.send_file(file, MIME[file.suffix.lower()], cookie=name == 'index.html')
             return
         super().do_GET()
-

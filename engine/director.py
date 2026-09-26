@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import secrets
 import threading
 import time
 import logging
@@ -87,6 +88,17 @@ def official_deepseek(url):
  u=urllib.parse.urlsplit(url)
  return u.scheme=='https' and u.hostname=='api.deepseek.com' and u.port in (None,443)
 
+# OpenCode Go 订阅端点要求每次请求带稳定的 x-opencode-session 头，缺少时直接拒绝。
+OPENCODE_HOST='opencode.ai'
+OPENCODE_SESSION='everweave-'+secrets.token_hex(8)
+
+def provider_headers(cfg):
+ headers={'Content-Type':'application/json','Authorization':'Bearer '+cfg['api_key']}
+ if urllib.parse.urlsplit(cfg['base_url']).hostname==OPENCODE_HOST:
+  headers['x-opencode-session']=OPENCODE_SESSION
+  headers['User-Agent']='Everweave/0.1'
+ return headers
+
 class ChatProvider:
  def __init__(self,cfg): self.cfg=cfg
  def generate(self,context,kind,repair=''):
@@ -160,10 +172,11 @@ class ChatProvider:
    # JSON truncated real responses. This is a ceiling, not a requested length.
    payload['max_tokens']=max(payload['max_tokens'],32768 if thinking else 8192)
   base=validate_url(cfg['base_url']); url=base if base.endswith('/chat/completions') else base+'/chat/completions'
-  req=urllib.request.Request(url,data=json.dumps(payload,ensure_ascii=False).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+cfg['api_key']},method='POST')
+  req=urllib.request.Request(url,data=json.dumps(payload,ensure_ascii=False).encode(),headers=provider_headers(cfg),method='POST')
   opener=urllib.request.build_opener(NoRedirect)
   try:
-   with opener.open(req,timeout=90 if thinking else 30) as response:
+   # 非流式请求要等整段生成返回；v2 区域允许 64K 预算，90 秒读超时会掐断正常生成。
+   with opener.open(req,timeout=300 if thinking else 60) as response:
     limit=1024000 if thinking else 192000
     body=response.read(limit+1)
     if len(body)>limit: raise ProviderError('Model response exceeds size limit.')

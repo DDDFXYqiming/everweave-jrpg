@@ -5,8 +5,8 @@
 ## 使用与开发
 
 - [使用指南](LOCAL_SETUP.md) 包含安装、模型连接和独立存档
-- [Web 游戏界面](WEB_CLIENT.md) 说明本机浏览器启动、点击寻路与模型生成进度
-- [Web 实测与 Luna Medium 对照](WEB_LIVE_REVIEW_2026-09-22.md) 记录真实游玩、生成等待、剩余问题与上下文核查
+- [Godot Web 游戏界面](WEB_CLIENT.md) 说明桌面与浏览器共用的客户端和本机启动方式
+- [旧 HTML 包装层实测与 Luna Medium 对照](WEB_LIVE_REVIEW_2026-09-22.md) 保留当时的生成等待、游玩发现与上下文核查
 - [Codex 订阅接入](CODEX_SUBSCRIPTION.md) 说明 Luna 模型和思考等级、登录边界及实测
 - [地区双路制作](REGION_PIPELINE.md) 说明玩法与视听并行、组装边界和真实速度对照
 - [语言设置](LOCALIZATION.md) 说明中英文界面与生成语言

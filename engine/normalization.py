@@ -42,6 +42,43 @@ def decode(raw):
     return copy.deepcopy(raw)
 
 
+def compact_visual_polygons(visuals, root='visuals'):
+    """将只有一个多余顶点的绘图多边形压到既有的十点上限。"""
+    changes=[]
+    sprites=visuals.get('sprites') if isinstance(visuals,dict) else None
+    if not isinstance(sprites,dict):return changes
+    def compact(layers,path):
+        if not isinstance(layers,list):return
+        for index,command in enumerate(layers):
+            if not (isinstance(command,list) and len(command)==3 and command[0]=='poly'):
+                continue
+            points=command[1]
+            if not (isinstance(points,list) and len(points)==11 and
+                    all(isinstance(point,list) and len(point)==2 and
+                        all(type(coordinate) is int for coordinate in point) for point in points)):
+                continue
+            before=copy.deepcopy(points)
+            if points[0]==points[-1]:
+                after=points[:-1]
+            else:
+                def turn_area(i):
+                    previous,current,next_point=points[i-1],points[i],points[(i+1)%len(points)]
+                    return abs((current[0]-previous[0])*(next_point[1]-current[1])-
+                               (current[1]-previous[1])*(next_point[0]-current[0]))
+                drop=min(range(len(points)),key=turn_area)
+                after=points[:drop]+points[drop+1:]
+            command[1]=after
+            changes.append((f'{path}[{index}].points',before,after))
+    for name,sprite in sprites.items():
+        if not isinstance(sprite,dict):continue
+        prefix=f'{root}.sprites.{name}'
+        compact(sprite.get('layers'),prefix+'.layers')
+        if isinstance(sprite.get('frames'),list):
+            for index,frame in enumerate(sprite['frames']):
+                compact(frame,f'{prefix}.frames[{index}]')
+    return changes
+
+
 class Normalizer:
     def __init__(self, raw, expected, context):
         self.raw, self.expected, self.context = raw, expected, context or {}
@@ -132,11 +169,15 @@ class Normalizer:
             self.record('type','envelope_metadata','json_object',None)
         for field in ('visuals', 'program','audio') + (('scene','starting_loadout') if root == 'region' else ()):
             self.move_field(raw, body, field, field, root + '.' + field)
+        if root=='region' and isinstance(body.get('program'),dict) and isinstance(body['program'].get('scenes'),list):
+            self.move_field(body['program'],body,'scenes',root+'.program.scenes',root+'.scenes')
         # A library ID in a typed sprite/surface field is already unambiguous.
         # Materialize its local sprite definition rather than spend a model
         # repair asking for an otherwise redundant alias declaration.
         from .library import catalog
         art=body.get('visuals')
+        for path,before,after in compact_visual_polygons(art,root+'.visuals'):
+            self.record(path,'polygon_vertex_limit',before,after)
         if isinstance(art,dict) and isinstance(art.get('sprites'),dict):
             for name,sprite in art['sprites'].items():
                 if isinstance(sprite,dict) and not any(k in sprite for k in ('asset','parts','layers')) and isinstance(sprite.get('frames'),list) and sprite['frames'] and isinstance(sprite['frames'][0],list):

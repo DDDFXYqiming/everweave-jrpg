@@ -47,12 +47,53 @@ def find_godot(explicit: str | None) -> str | None:
     return None
 
 
+def stage_web_assets() -> int:
+    from engine.asset_cache import asset_path, atomic_write, valid_file
+    entries = json.loads((ROOT / 'assets/library/index.json').read_text(encoding='utf-8'))['assets']
+    stage = ROOT / 'build/web-blobs'
+    stage.mkdir(parents=True, exist_ok=True)
+    prepared = {}
+    for asset_id, entry in entries.items():
+        sha = entry['sha256']
+        if len(sha) != 64 or any(char not in '0123456789abcdef' for char in sha):
+            raise ValueError(f'{asset_id}: invalid asset hash')
+        source = asset_path(ROOT, entry)
+        size = entry['bytes']
+        if not valid_file(source, sha, size):
+            raise ValueError(f'{asset_id}: source asset is missing or damaged')
+        prepared[sha] = (source, size)
+    for sha, (source, size) in prepared.items():
+        target = stage / (sha + '.bin')
+        if not valid_file(target, sha, size):
+            atomic_write(target, source.read_bytes())
+    return len(prepared)
+
+
+def build_web_client(executable: str, export_root: Path) -> Path:
+    from tools.install_web_templates import ensure_web_templates
+    ensure_web_templates(executable)
+    count = stage_web_assets()
+    export_root.mkdir(parents=True, exist_ok=True)
+    commands = (
+        [executable, '--headless', '--editor', '--path', str(ROOT), '--import', '--quit'],
+        [executable, '--headless', '--path', str(ROOT), '--export-release', 'Web', str(export_root / 'index.html')],
+    )
+    for command in commands:
+        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
+                                encoding='utf-8', errors='replace', check=False)
+        if result.returncode:
+            detail = '\n'.join((result.stdout + result.stderr).splitlines()[-18:])
+            raise RuntimeError('Godot Web 导出失败：\n' + detail)
+    print(f'Godot Web export ready: same client/main.tscn and GameHUD as desktop; {count} raw assets packed.', flush=True)
+    return export_root
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description='Everweave / 未写之境')
     p.add_argument('--godot', help='Path to the Godot 4 Standard executable')
     p.add_argument('--data-dir', type=Path, default=data_dir(), help='Save folder (outside the repository)')
     p.add_argument('--server-only', action='store_true', help='Run the local helper for editor F6; no Godot process')
-    p.add_argument('--web', action='store_true', help='运行本机 Web 游戏界面，无需 Godot')
+    p.add_argument('--web', action='store_true', help='导出同一 Godot 客户端并在本机浏览器运行')
     p.add_argument('--port',type=int,default=0,help='指定本机端口；默认自动分配')
     p.add_argument('--headless-smoke', action='store_true', help='Run the real Godot client headlessly for 120 frames')
     p.add_argument('--demo', action='store_true', help='Create an offline demo if no save exists; no network calls')
@@ -62,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         print('Python 3.11 or newer is required.', file=sys.stderr)
         return 2
     executable = find_godot(args.godot)
-    if not executable and not args.server_only and not args.web:
+    if not executable and not args.server_only:
         print('Godot 4 Standard was not found. Download it from the official Godot site.', file=sys.stderr)
         print('Then: python launch.py --godot "./tools/Godot.exe"', file=sys.stderr)
         print('Or set GODOT_BIN / place the official executable in this project folder.', file=sys.stderr)
@@ -93,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
         token = secrets.token_urlsafe(32)
         if args.web:
             from engine.web_server import WebGameServer
-            server = WebGameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token)
+            export_root = build_web_client(executable, args.data_dir / 'web-export')
+            server = WebGameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token, export_root)
         else:server = GameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token)
         url = f'http://127.0.0.1:{server.server_port}'
         runtime_file.write_text(json.dumps({'url': url, 'token': token, 'instance_id': server.instance_id}), encoding='utf-8')
@@ -127,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             code = child.wait()
     except KeyboardInterrupt:
         code = 0
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         print(f'Cannot start Everweave: {exc}', file=sys.stderr)
         code = 1
     finally:

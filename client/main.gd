@@ -27,6 +27,7 @@ var diagnostics_button: Button
 var modal_scroll: ScrollContainer
 var loading_overlay: CenterContainer
 var loading_premise: Label
+var loading_status: Label
 var health_label: Label
 var energy_label: Label
 var previous_window_mode: int = Window.MODE_WINDOWED
@@ -54,6 +55,8 @@ var state: Dictionary = {}
 var action_http: HTTPRequest
 var poll_http: HTTPRequest
 var action_busy: bool = false
+var pending_move: bool = false
+var blocked_move_until: int = 0
 var poll_busy: bool = false
 var action_route: String = ""
 var poll_clock: float = 0.0
@@ -64,6 +67,7 @@ var first_snapshot: bool = true
 var retired_epochs: Dictionary = {}
 var local_panel: String = ""
 var modal_signature: String = ""
+var _auto_dismiss_signature: String = ""
 var hp_tint: StyleBoxFlat
 var music: AudioStreamPlayer
 var soundscape
@@ -100,7 +104,12 @@ var continue_button: Button
 var return_button: Button
 var title_label: Label
 var subtitle_label: Label
-var stats_label: Label
+var stats_box: HBoxContainer
+var hud_hp_bar: ProgressBar
+var hud_hp_text: Label
+var hud_ration_slots: HBoxContainer
+var hud_ration_text: Label
+var hud_meta: Label
 var role_label: Label
 var world_resources: VBoxContainer
 var resource_rows: Dictionary = {}
@@ -244,6 +253,16 @@ func _vbox(parent: Node) -> VBoxContainer:
 	return box
 
 func _read_connection() -> void:
+	if OS.has_feature("web"):
+		# Web 导出与本机服务同源；浏览器保存 HttpOnly 会话 cookie，游戏不读取令牌。
+		var browser_location: Variant = JavaScriptBridge.get_interface("location")
+		var origin: String = str(browser_location.origin) if browser_location else ""
+		if origin.begins_with("http://127.0.0.1:"):
+			backend_url=origin
+			session_token="web-cookie-session"
+		service_connection.configure("")
+		if backend_url.is_empty():service_connection.failed(L.t("请从本机游戏地址打开 Web 版。"))
+		return
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--backend-url="):
 			backend_url = arg.trim_prefix("--backend-url=")
@@ -362,7 +381,7 @@ func _build_home() -> void:
 	mode_select.add_item("DeepSeek",0)
 	mode_select.add_item(L.t("其他兼容服务"),1)
 	mode_select.add_item(L.t("离线演示"),2)
-	mode_select.add_item(L.t("ChatGPT 订阅直连 · GPT-5.6 Luna"),3)
+	mode_select.add_item(L.t("ChatGPT 订阅直连 · Luna"),3)
 	connection.add_child(mode_select)
 	mode_help = _label(connection,"",13,MUTED)
 	online_settings = _vbox(connection)
@@ -495,7 +514,8 @@ func _send_language() -> void:
 	if language_busy or not connection_ready:return
 	language_sent=L.language
 	language_busy=true
-	var headers := PackedStringArray(["Content-Type: application/json","Authorization: Bearer "+session_token])
+	var headers := _read_headers()
+	headers.append("Content-Type: application/json")
 	var error: int = language_http.request(backend_url+"/language",headers,HTTPClient.METHOD_POST,JSON.stringify({"language":language_sent}))
 	if error!=OK:
 		language_busy=false
@@ -574,7 +594,7 @@ func _load_journal(more: bool = false) -> void:
 	journal_request_generation = journal_generation
 	var url: String = backend_url + "/journal?tab=" + journal_tab
 	if more: url += "&before=" + str(page.next_cursor)
-	var error: Error = journal_http.request(url,PackedStringArray(["Authorization: Bearer "+session_token]))
+	var error: Error = journal_http.request(url,_read_headers())
 	if error != OK:
 		journal_busy = false
 		journal_error = L.t("记录读取失败，可重试。")
@@ -783,13 +803,20 @@ func _toggle_panel(name: String) -> void:
 	_render_modal()
 
 func _headers() -> PackedStringArray:
-	return PackedStringArray(["Content-Type: application/json", "Authorization: Bearer " + session_token, "X-Request-ID: " + str(Time.get_ticks_usec()) + "-" + str(randi())])
+	var headers: PackedStringArray=_read_headers()
+	headers.append("Content-Type: application/json")
+	headers.append("X-Request-ID: " + str(Time.get_ticks_usec()) + "-" + str(randi()))
+	return headers
+
+func _read_headers() -> PackedStringArray:
+	if OS.has_feature("web"):return PackedStringArray(["X-Everweave-Web: 1"])
+	return PackedStringArray(["Authorization: Bearer " + session_token])
 
 func _poll() -> void:
 	if poll_busy or backend_url.is_empty() or session_token.is_empty(): return
 	poll_busy = true
 	poll_instance_id = service_connection.expected_instance_id
-	var result: Error = poll_http.request(backend_url + "/state", PackedStringArray(["Authorization: Bearer " + session_token]))
+	var result: Error = poll_http.request(backend_url + "/state", _read_headers())
 	if result != OK:
 		poll_busy = false
 		connection_ready = false
@@ -797,6 +824,10 @@ func _poll() -> void:
 		_connection_error(L.t("无法请求本机引擎。请检查启动窗口。"))
 
 func _recover_connection() -> void:
+	if OS.has_feature("web"):
+		# Web 没有原生 runtime.json；同源地址不变，服务换代后刷新页面取得新 cookie。
+		if not backend_url.is_empty():_poll()
+		return
 	var value: Dictionary = service_connection.runtime()
 	if value.is_empty():
 		service_connection.failed(L.t("等待本机服务重新启动。"))
@@ -814,6 +845,7 @@ func _post(route: String, body: Dictionary) -> void:
 		switch_after_action = false
 		return
 	action_busy = true
+	pending_move = route == "/action" and str(body.get("op", "")) == "move"
 	start_button.disabled = true
 	continue_button.disabled = true
 	action_route = route
@@ -821,6 +853,7 @@ func _post(route: String, body: Dictionary) -> void:
 	var result: Error = action_http.request(backend_url + route, _headers(), HTTPClient.METHOD_POST, JSON.stringify(body))
 	if result != OK:
 		action_busy = false
+		pending_move = false
 		switch_after_action = false
 		_connection_error(L.t("动作未能发送。"))
 
@@ -841,6 +874,10 @@ func _poll_complete(result: int, code: int, _headers_unused: PackedStringArray, 
 	poll_busy = false
 	var data := _decode(result, code, body)
 	if data.has("error"):
+		# 服务重启会让 web 会话失效，401 时自动刷新页面重新握手。
+		if code == 401 and OS.has_feature("web"):
+			JavaScriptBridge.eval("location.reload()")
+			return
 		connection_ready = false
 		service_connection.failed(str(data.error))
 		_connection_error(str(data.error))
@@ -856,6 +893,8 @@ func _poll_complete(result: int, code: int, _headers_unused: PackedStringArray, 
 
 func _action_complete(result: int, code: int, _headers_unused: PackedStringArray, body: PackedByteArray) -> void:
 	action_busy = false
+	var was_move: bool = pending_move
+	pending_move = false
 	var transport_failed: bool = result != HTTPRequest.RESULT_SUCCESS
 	var data := _decode(result, code, body)
 	if data.has("error"):
@@ -874,6 +913,12 @@ func _action_complete(result: int, code: int, _headers_unused: PackedStringArray
 		connection_ready=false;service_connection.failed(L.t("本机服务已更换，正在同步状态。"));return
 	last_action_error = ""
 	connection_ready = true
+	var before_player: Dictionary = state.get("player", {})
+	var after_player: Dictionary = data.get("player", {})
+	var blocked_move: bool = false
+	if was_move and str(data.get("epoch", "")) == str(state.get("epoch", "")) and data.get("region") is Dictionary and state.get("region") is Dictionary and data.get("ui", {}).is_empty() and data.get("battle") == null:
+		blocked_move = str(data.region.id) == str(state.region.id) and before_player.get("x") == after_player.get("x") and before_player.get("y") == after_player.get("y")
+	blocked_move_until = Time.get_ticks_msec() + 2000 if blocked_move else 0
 	_accept_snapshot(data)
 	if action_route in ["/start", "/configure"]:
 		# Do not retain the credential in the visible control after handoff.
@@ -952,7 +997,8 @@ func _render() -> void:
 	if world_title=="未写之境 · Everweave":world_title=L.t("未写之境")
 	subtitle_label.text = L.t("第 %d 天 · %02d:%02d") % [day, hour, minute]
 	title_label.tooltip_text = world_title + " · " + title_label.text
-	stats_label.text = "Lv.%d   %d G\nHP %d / %d   MP %d / %d" % [int(p.get("level", 1)), int(p.get("gold", 0)), int(p.get("hp", 0)), int(p.get("max_hp", 1)), int(p.get("mp", 0)), int(p.get("max_mp", 1))]
+	# 等级与金币用紧凑文字，生命与补给交给右上角的血条和格子条。
+	hud_meta.text = "Lv.%d · %dG" % [int(p.get("level", 1)), int(p.get("gold", 0))]
 	hp_bar.max_value = float(p.get("max_hp", 1))
 	hp_bar.value = float(p.get("hp", 0))
 	mp_bar.max_value = float(p.get("max_mp", 1))
@@ -993,6 +1039,8 @@ func _render() -> void:
 			elif progress.get("stage")=="output":stage+=L.t(" · 已接收 %d 字符") % int(progress.get("output_chars",0))
 		if int(task.get("transport_retries",0))>0:stage+=L.t(" · 已补试 %d 次") % int(task.transport_retries)
 		active_lines.append(L.t("%s %s · %.0f 秒%s") % [purpose, str(task.name), float(task.get("elapsed_seconds", 0)), stage])
+	if loading_overlay.visible:
+		loading_status.text = active_lines[0] if not active_lines.is_empty() else L.t("生成暂时失败 · 按 Ctrl+D 查看详情或重试") if not d.get("failed_tasks", []).is_empty() else L.t("正在同步世界状态…")
 	var activity: String = "\n".join(active_lines) if not active_lines.is_empty() else str(d.get("busy", ""))
 	director_label.text = mode_text + "\n" + (activity if not activity.is_empty() else (L.t("导演已暂停") if bool(d.get("paused", false)) else L.t("等待重要事件 · 不按帧调用")))
 	var failed_tasks: Array = d.get("failed_tasks", [])
@@ -1102,9 +1150,13 @@ func _render_modal() -> void:
 		modal_overlay.hide()
 		return
 	modal_overlay.show()
+	# 世界变化提示只做播报，不挡住操作，稍后自动收起。
+	if not ui.is_empty() and str(ui.get("kind", "")) == "message" and signature != _auto_dismiss_signature:
+		_auto_dismiss_signature = signature
+		_auto_dismiss_message(signature)
 	if not battle.is_empty():
 		_label(modal_stack, str(battle.name), 24, GOLD)
-		_label(modal_stack, L.t("HP %d / %d   ·   回合 %d") % [int(battle.hp), int(battle.max_hp), int(battle.turn)], 15, MUTED)
+		_label(modal_stack, L.t("敌方 HP %d / %d   ·   第 %d 回合") % [int(battle.hp), int(battle.max_hp), maxi(1, int(battle.turn))], 15, MUTED)
 		battle_canvas = BattleView.new()
 		battle_canvas.custom_minimum_size = Vector2(510, 215)
 		modal_stack.add_child(battle_canvas)
@@ -1190,6 +1242,15 @@ func _render_modal() -> void:
 		modal_signature = ""
 		_render_modal()
 	)
+
+func _auto_dismiss_message(signature_value: String) -> void:
+	# 世界变化提示只播报一次，留出读完的时间就自行收起，不干扰移动。
+	await get_tree().create_timer(6.0).timeout
+	if signature_value != modal_signature: return
+	var current: Variant = state.get("ui", {})
+	if current is Dictionary and not current.is_empty() and str(current.get("kind", "")) == "message":
+		_send_action({"op": "close"})
+
 
 func _exit_wait_phase(ui: Dictionary) -> String:
 	if ui.get("kind") != "pending_exit": return ""
@@ -1306,7 +1367,7 @@ func _apply_game_spec() -> void:
 	panel_buttons.journal.tooltip_text=(str(value.journal_label)+"  J") if custom else L.t("手记  J")
 	if not custom:return
 	for row in resource_rows.values():row.box.hide()
-	var summary: Array[String] = []
+	for child in hud_ration_slots.get_children(): child.queue_free()
 	for resource in value.resources:
 		var key: String = str(resource.id)
 		if not resource_rows.has(key):
@@ -1318,9 +1379,20 @@ func _apply_game_spec() -> void:
 		row.bar.max_value=float(resource.max)
 		row.bar.value=float(resource.value)
 		row.bar.visible=str(resource.display)=="bar"
-		summary.append("%s %s" % [str(resource.label),_resource_number(resource.value)])
-	stats_label.text=" · ".join(summary.slice(0,3))
-	if bool(value.systems.progression):stats_label.text="Lv.%d  " % int(state.player.level)+stats_label.text
+		# 右上角按 display 分发：条状走血条，数量走格子条，比纯数字更像游戏。
+		var total := maxi(1, int(resource.max))
+		var filled := clampi(int(resource.value), 0, total)
+		if str(resource.display) == "bar":
+			hud_hp_bar.max_value = float(total)
+			hud_hp_bar.value = float(filled)
+			hud_hp_text.text = "%s %d / %d" % [str(resource.label), filled, total]
+		else:
+			for i in range(total):
+				var cell := ColorRect.new()
+				cell.custom_minimum_size = Vector2(10, 10)
+				cell.color = Color("c9a227") if i < filled else Color("2a2a22")
+				hud_ration_slots.add_child(cell)
+			hud_ration_text.text = "%s %d / %d" % [str(resource.label), filled, total]
 
 func _resource_number(value: Variant) -> String:
 	return str(int(value)) if is_equal_approx(float(value),roundf(float(value))) else String.num(float(value),1)

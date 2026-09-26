@@ -81,7 +81,7 @@ func refresh() -> void:
 	busy = true
 	request_epoch = str(main.state.get("epoch",""))
 	message.text = L.t("正在翻开旅图……")
-	var error: Error = request.request(main.backend_url+"/atlas",PackedStringArray(["Authorization: Bearer "+main.session_token]))
+	var error: Error = request.request(main.backend_url+"/atlas",main._read_headers())
 	if error != OK:
 		busy = false
 		message.text = L.t("旅图读取失败，可点击刷新。")

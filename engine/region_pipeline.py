@@ -97,7 +97,9 @@ def av(raw,contract,context):
             audio_value=copy.deepcopy(audio_value)
             for key in misplaced:audio_value[key]=audio_value['music'].pop(key)
     # 与整区解析共享音频简写规则，只做格式归一化，不解析尚未合并的对象身份。
-    from .normalization import Normalizer
+    from .normalization import Normalizer,compact_visual_polygons
+    visual_value=copy.deepcopy(visual_value)
+    compact_visual_polygons(visual_value)
     normalized_audio=Normalizer({'kind':'region','region':{'audio':copy.deepcopy(audio_value)}},'region',None)
     normalized_audio.formats()
     audio_value=normalized_audio.raw['region']['audio']
@@ -120,6 +122,10 @@ def gameplay(game_raw,contract):
     except PipelineError as exc:exc.component='gameplay';raise
     if value.get('kind')!='region' or not isinstance(value.get('region'),dict):raise PipelineError('gameplay envelope is invalid',component='gameplay')
     body=value['region']
+    program=body.get('program')
+    if isinstance(program,dict) and isinstance(program.get('scenes'),list):
+        if 'scenes' not in body or body['scenes']==program['scenes']:
+            body['scenes']=program.pop('scenes')
     if body.get('name')!=contract['name']:raise PipelineError('gameplay worker changed the region name',component='gameplay')
     allowed=set(contract['sprite_slots'])
     for group in ('entities','landmarks','items'):

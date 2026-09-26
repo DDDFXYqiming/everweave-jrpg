@@ -1,23 +1,25 @@
-# 本机 Web 游戏界面
+# Godot Web 游戏界面
 
-Web 界面与 Godot 共用同一套世界、规则解释器、SQLite 事务和生成导演。可以用浏览器完成创建世界、地图探索、人物交互、战斗、使用物品和查看生成状态。
-
-新建世界时可选 GPT-6 Luna（默认）或 GPT-5.6 Luna，以及 Off、Low、Medium、High、XHigh、Max 六档思考等级；Off 在请求中对应 `none`。旅途中展开“生成与运行诊断”，可在当前任务结束后调整后续模型、思考等级与请求上限；应用设置会恢复后续生成。等待出口会区分正在准备、失败、暂停和预算不足。
+浏览器与 Windows 客户端运行同一套 `client/main.tscn`、`client/ui/game_hud.tscn`、地图绘制、菜单、音频和交互代码。Python 本机服务仍负责 LLM 生成、规则执行与 SQLite 存档。Web 入口只负责交付 Godot 的 WebAssembly 导出文件，没有另外实现一套 HTML 游戏界面。
 
 ```powershell
 python launch.py --web --data-dir ./userdata/web-journey
 ```
 
-需要固定地址时添加 `--port 58002`；省略时自动选择空闲端口。不同存档应使用不同数据目录和端口。
+也可双击 `Start-Web.cmd`，或用 PowerShell 7 执行 `./Start.ps1 -Web -DataDir ./userdata/web-journey`。启动器会准备素材、导入 Godot 工程、在该存档目录的 `web-export/` 生成 Web 导出，然后打印 `http://127.0.0.1:端口`。每次启动都会重新导出当前工程；不同存档各有自己的导出文件，不会相互覆盖。需要固定端口时加 `--port 61012`。
 
-也可以双击 `Start-Web.cmd`，或使用 PowerShell 7 执行 `./Start.ps1 -Web -DataDir ./userdata/web-journey`。启动器打印 `http://127.0.0.1:端口`，将此地址在浏览器打开即可。Web 模式不启动 Godot，也不需要 Godot 的导入步骤。模型调用在界面创建/继续配置在线世界后开始，沿用 Everweave 的订阅授权。
+Web 导出需要与工程匹配的 Godot Standard 可执行文件。首次缺少导出模板时，启动器从 Godot 官方发布包按需安装当前版本的单线程 Web 模板；此后直接复用。可以用 `--godot` 指向已安装的 Godot。导出产物和模板都不提交到项目 Git。
 
-使用 WASD/方向键移动，E 交互，F 查看动作，句点等待，Esc 关闭交互。右侧对象按钮会寻找物理路径，并逐步执行普通移动；遇到资源变化、附近敌人、任务变化、对话或战斗时停止。点击地图上的对象有相同效果。寻路不选择对话和技能，也不修改位置、资源或完成旗标。
+只想检查界面和动作、不调用模型时，可使用独立测试存档：
 
-地图使用游戏已经生成的像素配方、库图、地表和对象占地，浏览器支持音效及音乐，点击“开启声音”后播放。此包装层并非 Godot 画面的逐像素移植，材质细节、音频混合和动效表现可能不同。
+```powershell
+python launch.py --web --demo --data-dir ./userdata/web-demo
+```
 
-Web 只绑定本机 IPv4。页面使用短期 HttpOnly、SameSite=Strict 会话 cookie，动作要求同源与自定义请求头；原生客户端的 Bearer 接口保留。页面通过文本节点展示模型文字。完整规则、对象内部状态和未展示剧情留在服务端，Web 的玩家投影不发送这些字段。
+浏览器内依然是原 Godot 操作：WASD 移动，E 交互，F 动作，Esc 暂停；连接页可选择 Luna 模型和 Off、Low、Medium、High、XHigh、Max 六档。`--demo` 使用固定离线内容；正常在线模式在玩家选择并开始旅程后才会调用订阅模型。
 
-同一存档仍受启动器独占锁保护。为独立试玩指定新的数据目录；网页关闭不会停止服务，结束服务可在启动终端按 Ctrl+C。每次行动已经提交的状态持续保存在该目录。
+本机服务只监听 `127.0.0.1`。Web 页面由同一服务提供，浏览器保存本次进程的 HttpOnly、SameSite cookie；Godot Web 客户端通过同源请求调用原动作 API，不读取或传输原生客户端的 Bearer 令牌。原生客户端仍使用其已有的启动器令牌。两端收到相同的世界快照，所以浏览器测试能直接覆盖玩家实际看到的 HUD 与画面。服务重启后刷新浏览器页面可取得新会话 cookie；存档仍由启动器独占锁保护。
 
-重新启动服务后，先载入已有存档，生成保持暂停；点击“恢复后续生成”或应用生成设置后继续请求模型。诊断中的请求计数属于本次服务进程，跨重启比较请使用持久化日志及 `tools/review_web_session.py`。本轮 High / Medium 的实际试玩、计时口径和剩余问题见 [Web 实测报告](WEB_LIVE_REVIEW_2026-09-22.md)。
+Godot Web 运行在浏览器 Canvas 中，因此浏览器自动化需要按实际画面操作，不能依赖旧 HTML 试玩界面的 DOM 按钮。浏览器需支持 WebAssembly 和 WebGL 2.0；音频通常要先有一次用户点击。浏览器标签页的后台暂停和原生窗口行为也会有所差异，但游戏 UI、渲染代码和动作逻辑是同一份。
+
+之前的 [Web 实测报告](WEB_LIVE_REVIEW_2026-09-22.md) 属于已移除 HTML 包装层的阶段记录，其模型耗时和规则日志仍保留作历史对照。

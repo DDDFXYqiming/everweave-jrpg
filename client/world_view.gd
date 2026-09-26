@@ -212,24 +212,26 @@ func _draw_weather(weather: String) -> void:
 			draw_rect(Rect2(0, top, size.x, 45), Color(0.62, 0.72, 0.80, 0.055))
 
 func _draw_minimap() -> void:
-	var origin := Vector2(size.x - 126.0, 14.0)
-	var hovered: bool = Rect2(origin - Vector2(5,5),Vector2(114,100)).has_point(get_local_mouse_position())
-	var opacity: float = 1.0 if hovered else .48
-	draw_rect(Rect2(origin - Vector2(5, 5), Vector2(114, 100)), Color(0.035, 0.075, 0.13, 0.89*opacity))
+	# 小地图放大到一眼能读出地形，底色加描边，避免缩成一团像素。
+	var origin := Vector2(size.x - 216.0, 14.0)
+	var hovered: bool = Rect2(origin - Vector2(6,6),Vector2(204,158)).has_point(get_local_mouse_position())
+	var opacity: float = 1.0 if hovered else .82
+	draw_rect(Rect2(origin - Vector2(6, 6), Vector2(204, 158)), Color(0.035, 0.075, 0.13, 0.89*opacity))
+	draw_rect(Rect2(origin - Vector2(6, 6), Vector2(204, 158)), Color(Color("c1a9ef"), .5 * opacity), false, 1.0)
 	var palette: Array[Color] = [Color("375e59"), Color("b29e75"), Color("356c7b"), Color("293844"), Color("bd9866")]
 	if region.has("visuals"):
 		palette.clear()
 		for key in ["ground", "path", "water", "wall", "path"]: palette.append(Color(str(region.visuals.palette[key])))
 	for i in range(palette.size()): palette[i].a = opacity
-	var map_scale: float = minf(104.0 / float(region.width), 72.0 / float(region.height))
+	var map_scale: float = minf(192.0 / float(region.width), 134.0 / float(region.height))
 	for y in range(int(region.height)):
 		for x in range(int(region.width)):
 			draw_rect(Rect2(origin + Vector2(x, y) * map_scale, Vector2.ONE * maxf(1.0, map_scale)), palette[int(region.tiles[y][x])])
 	for e in region.entities:
 		if e.kind == "exit":
 			draw_rect(Rect2(origin + Vector2(float(e.x), float(e.y)) * map_scale - Vector2.ONE, Vector2(3, 3)), Color("c1a9ef"))
-	draw_rect(Rect2(origin + target_player * map_scale - Vector2.ONE, Vector2(4, 4)), Color("f7e0a4"))
-	draw_string(font,origin+Vector2(3,89),L.t("旅图 · G") if hovered else "G",HORIZONTAL_ALIGNMENT_LEFT,104,14,Color(Color("d7c59d"),opacity))
+	draw_rect(Rect2(origin + target_player * map_scale - Vector2(2, 2), Vector2(5, 5)), Color("f7e0a4"))
+	draw_string(font,origin+Vector2(3,148),L.t("旅图 · G") if hovered else "G",HORIZONTAL_ALIGNMENT_LEFT,104,14,Color(Color("d7c59d"),opacity))
 
 func _draw_nearby_hint() -> void:
 	if not snapshot.get("ui",{}).is_empty() or snapshot.get("battle") is Dictionary: return

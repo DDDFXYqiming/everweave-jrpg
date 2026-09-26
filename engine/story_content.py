@@ -118,7 +118,8 @@ def validate(world,body,ctx):
         for e in foes:
             for key,field in (('enemy_hp','hp'),('enemy_attack','attack')):
                 if key in limits and (field not in e.get('stats',{}) or e['stats'][field]>limits[key]):raise InvalidPatch('enemy stats exceed or omit the director limit '+key)
-        if not set(job['cast'])<=present:raise InvalidPatch('commission needs its cast binding or speaking scene: '+job['id'])
+        # 反应叙事是片段式描写，委托角色未必登场；完整场景生成仍要求角色绑定。
+        if ctx.get('kind')!='reaction' and not set(job['cast'])<=present:raise InvalidPatch('commission needs its cast binding or speaking scene: '+job['id'])
         if not set(job['skills'])<=set(abilities)|{k for k,v in skills.items() if v.get('rule')}:raise InvalidPatch('commission must implement requested skills')
         if job['kind']=='scene' and not body.get('scenes'):raise InvalidPatch('scene commission requires an executable scene')
         if job['kind']=='scene' and not triggered:raise InvalidPatch('scene commission needs a player-facing scene trigger')

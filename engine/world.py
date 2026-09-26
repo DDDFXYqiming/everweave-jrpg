@@ -124,13 +124,18 @@ class World:
   s=self.state
   if not s or context.get('epoch')!=s['epoch']:return False
   if context.get('kind')=='direction':return bool(adventure.state(self) and context.get('chapter_id')==s['campaign']['active'])
-  if context.get('content_dependencies') and context['content_dependencies']!=adventure.dependencies(self,context):return False
+  # 反应叙事先于后续世界推进产生，不因依赖漂移作废。
+  if context.get('kind')!='reaction' and context.get('content_dependencies') and context['content_dependencies']!=adventure.dependencies(self,context):return False
   if context.get('kind')=='campaign':return bool(campaign.book(s) and s['campaign']['pending'] and context.get('campaign_revision')==s['campaign']['revision'])
   node=s['topology'].get(context.get('target'))
   if node is None:return False
   if context.get('kind')=='region':
    return (not node.get('visited') and context.get('target_revision',0)==node.get('generation_revision',0)
            and context.get('target_parent',node.get('parent'))==node.get('parent'))
+  # 反应服务于刚发生的世界推进；玩家继续操作只会让世界前进，不会让反应失效。
+  if context.get('kind')=='reaction':
+   return (context.get('story_revision',0)<=s['story_revision'] and context.get('target')==s['current']
+           and context.get('current_region',{}).get('id')==s['current'])
   return (context.get('story_revision')==s['story_revision'] and context.get('target')==s['current']
           and context.get('current_region',{}).get('id')==s['current'])
  def _update_outline(self,node,outline):

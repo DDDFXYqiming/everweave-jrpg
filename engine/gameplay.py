@@ -240,8 +240,11 @@ def action(world, a):
 
 
 def show_messages(world, vm):
-    if vm.messages and not world.state.get('battle') and not world.state['ui']:
-        world.state['ui'] = dict(kind='message', title='世界发生了变化', system_title=True, lines=vm.messages[-6:])
+    # 叙事消息可能重复，重复内容不再弹窗打断玩家。
+    fresh = [m for m in vm.messages[-6:] if m not in world.state.get('seen_messages', [])]
+    if fresh and not world.state.get('battle') and not world.state['ui']:
+        world.state['ui'] = dict(kind='message', title='世界发生了变化', system_title=True, lines=fresh)
+        world.state['seen_messages'] = (world.state.get('seen_messages', []) + fresh)[-12:]
 
 
 def interact(world, entity):
@@ -282,7 +285,8 @@ def combat(world, move):
     if not acted:
         p['hp'] = max(0, p['hp']-b['attack']); b['log'].append(b['name']+f"造成 {b['attack']} 点伤害。")
     vm.emit('turn_end', target=b['id'], advance=True)
-    b['log'] = (b['log']+vm.messages)[-7:]
+    # 技能文案可能固定不变，重复条目不再写入战斗日志。
+    b['log'] = (b['log']+[m for m in vm.messages if m not in b['log']])[-7:]
     if vm.end_result == 'escape': s['battle'] = None
     elif p['hp'] <= 0: world._defeat()
     elif b['hp'] <= 0 or vm.end_result == 'victory':

@@ -53,7 +53,8 @@ func compile_style(style: Dictionary) -> Dictionary:
 		details.append(ImageTexture.create_from_image(picture))
 	var allowed: Array[int] = []
 	for tile in style.tiles:allowed.append(int(tile))
-	return {"base":bases,"details":details,"density":float(style.get("detail_density",.18)),"tiles":allowed,"legacy":style.get("legacy",false)}
+	# 细节点阵按密度铺陈，密度过高会糊成噪点，这里给一个上限。
+	return {"base":bases,"details":details,"density":minf(float(style.get("detail_density",.18)),.22),"tiles":allowed,"legacy":style.get("legacy",false)}
 
 func texture(key: String, tile: int, seed_value: int, x: int, y: int) -> Texture2D:
 	if not styles.has(key):return null

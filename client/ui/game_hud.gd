@@ -16,10 +16,10 @@ var tutorial_until: int = 0
 var ready_count: int = -1
 var ready_notice_until: int = 0
 
-func icon_button(parent: Node, icon: String, tip: String, callback: Callable) -> Button:
-	var button: Button = main._button(parent, "", callback)
+func icon_button(parent: Node, icon: String, tip: String, callback: Callable, text: String = "") -> Button:
+	var button: Button = main._button(parent, text, callback)
 	button.icon = Icons.get_icon(icon)
-	button.custom_minimum_size = Vector2(42,42)
+	button.custom_minimum_size = Vector2(42,42) if text.is_empty() else Vector2(112,42)
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width",24)
 	button.add_theme_stylebox_override("normal",StyleBoxEmpty.new())
@@ -49,11 +49,25 @@ func build(controller) -> void:
 	main.title_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	main.title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	main.subtitle_label = main._label(titles,"",14,main.MUTED)
-	main.stats_label = main._label(header,"",18,main.GOLD)
-	main.stats_label.size_flags_horizontal = Control.SIZE_SHRINK_END
-	main.stats_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	main.stats_label.custom_minimum_size.x = 300
-	main.stats_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# 右上角用血条和格子条表达资源，避免落成一串数字。
+	main.stats_box = HBoxContainer.new()
+	main.stats_box.size_flags_horizontal = Control.SIZE_SHRINK_END
+	main.stats_box.alignment = BoxContainer.ALIGNMENT_END
+	main.stats_box.add_theme_constant_override("separation", 18)
+	header.add_child(main.stats_box)
+	var life_group: VBoxContainer = main._vbox(main.stats_box)
+	life_group.add_theme_constant_override("separation", 2)
+	main.hud_hp_bar = main._bar(life_group, Color("b5856b"))
+	main.hud_hp_bar.custom_minimum_size = Vector2(150, 12)
+	main.hud_hp_text = main._label(life_group, "", 12, main.MUTED)
+	var food_group: VBoxContainer = main._vbox(main.stats_box)
+	food_group.add_theme_constant_override("separation", 2)
+	main.hud_ration_slots = HBoxContainer.new()
+	main.hud_ration_slots.add_theme_constant_override("separation", 3)
+	food_group.add_child(main.hud_ration_slots)
+	main.hud_ration_text = main._label(food_group, "", 12, main.MUTED)
+	main.hud_meta = main._label(main.stats_box, "", 14, main.GOLD)
+	main.hud_meta.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	var map_stack := Control.new()
 	map_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(map_stack)
@@ -72,13 +86,17 @@ func build(controller) -> void:
 	var task_row := HBoxContainer.new()
 	task_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	task_margin.add_child(task_row)
-	var marker: Label = main._label(task_row,"Q",24,main.MINT)
+	# 任务标记用卷轴图标，比字母更像任务追踪器。
+	var marker := TextureRect.new()
+	marker.texture = Icons.get_icon("quest")
+	marker.custom_minimum_size = Vector2(26, 26)
+	marker.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	marker.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	marker.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	marker.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	marker.custom_minimum_size.x = 28
-	marker.autowrap_mode = TextServer.AUTOWRAP_OFF
-	marker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	marker.add_theme_font_override("font",Pixel)
+	marker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	task_row.add_child(marker)
 	main.quest_label = main._label(task_row,"",18)
 	main.quest_label.max_lines_visible = 1
 	main.quest_label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -96,11 +114,12 @@ func build(controller) -> void:
 	main._label(loading_text,L.t("第一处落脚地"),30,main.GOLD)
 	main.loading_premise = main._label(loading_text,"",18)
 	main._label(loading_text,L.t("正在准备地点、人物与画面。完成后会直接进入旅程。"),16,main.MUTED)
+	main.loading_status = main._label(loading_text,"",16,main.MINT)
 	var footer := HBoxContainer.new()
 	stack.add_child(footer)
 	for entry in [["bag","inventory","行囊  I"],["book","journal","手记  J"]]:
-		main.panel_buttons[entry[1]] = icon_button(footer,entry[0],L.t(entry[2]),main._toggle_panel.bind(entry[1]))
-	icon_button(footer,"compass",L.t("旅途 · Tab"),main._toggle_aux.bind("journey"))
+		main.panel_buttons[entry[1]] = icon_button(footer,entry[0],L.t(entry[2]),main._toggle_panel.bind(entry[1]),L.t(entry[2]))
+	icon_button(footer,"compass",L.t("旅途 · Tab"),main._toggle_aux.bind("journey"),L.t("旅途  Tab"))
 	main.hint_label = main._label(footer,"",16,main.MUTED)
 	main.hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	main.hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -109,7 +128,7 @@ func build(controller) -> void:
 	status_button.add_theme_font_override("font",preload("res://assets/fonts/LXGWWenKaiScreen.ttf"))
 	status_button.add_theme_font_size_override("font_size",16)
 	status_button.add_theme_stylebox_override("normal",StyleBoxEmpty.new())
-	sound_button = icon_button(footer,"sound_on","",main._toggle_music)
+	sound_button = icon_button(footer,"sound_on",L.t("声音 · M"),main._toggle_music)
 	sound_button.toggle_mode = true
 	main.panel_buttons.settings = icon_button(footer,"settings",L.t("菜单 · Esc"),main._toggle_aux.bind("pause"))
 
@@ -221,7 +240,9 @@ func update(snapshot: Dictionary) -> void:
 	status_button.tooltip_text = L.t("旅途 · Tab")
 	main.hint_label.text = ""
 	if main.local_panel.is_empty() and snapshot.get("ui",{}).is_empty() and snapshot.get("battle") == null:
-		if not AudioPrefs.learned.has("move") and now < tutorial_until:
+		if now < main.blocked_move_until:
+			main.hint_label.text = L.t("前方走不通")
+		elif not AudioPrefs.learned.has("move") and now < tutorial_until:
 			main.hint_label.text = L.t("WASD · 出发探索")
 		else:
 			var available: Array = snapshot.get("available_actions",[])
