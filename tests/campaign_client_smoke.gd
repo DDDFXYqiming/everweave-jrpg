@@ -36,6 +36,13 @@ func _run() -> void:
 	assert(main.hud_ration_text.text.contains("弹药") and not main.hud_ration_text.text.contains("MP"))
 	assert(main.hud_ration_slots.get_child_count()==8)
 	assert(main.hud_hp_text.text.contains("机体完整度"))
+	state.game_spec.resources[1].value=3
+	state.game_spec.resources[1].max=99
+	state.version=int(state.version)+1
+	main._accept_snapshot(state)
+	assert(main.hud_ration_slots.get_child_count()==12)
+	assert(main.hud_ration_text.text.contains("3 / 99"))
+	assert(main.subtitle_label.autowrap_mode==TextServer.AUTOWRAP_OFF)
 	main.queue_free();main=null;await create_timer(.25).timeout
 	print("CAMPAIGN_CLIENT_OK flexible_resources=true goals=true loops=true locked_routes=true")
 	quit(0)

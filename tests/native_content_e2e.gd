@@ -54,12 +54,9 @@ func _run() -> void:
 	await process_frame
 	assert(main.failure_list.get_child_count() == 2)
 	await _capture("failed-task-panel")
-	var other_failure: Dictionary = main.state.director.failed_tasks[1]
-	var first_row: Node = main.failure_list.get_child(0)
-	first_row.get_child(first_row.get_child_count() - 1).pressed.emit()
-	await _idle()
-	assert(main.state.director.failed_tasks.size() == 1)
-	assert(main.state.director.failed_tasks[0].target == other_failure.target)
+	for row in main.failure_list.get_children():
+		for child in row.get_children(): assert(not child is Button)
+	assert(main.retry_failed_button.visible and main.retry_failed_button.text == "再试一次")
 	main.retry_failed_button.pressed.emit()
 	await _idle()
 	assert(main.state.director.failed_tasks.is_empty())
@@ -137,5 +134,5 @@ func _run() -> void:
 	assert(not main.atlas_panel.visible)
 	main.queue_free()
 	await create_timer(0.15).timeout
-	print("NATIVE_CONTENT_E2E_OK targeted_retry=true logical_keys=true short_taps=true dynamic_actions=true causal_door=true objective=true custom_combat=true pending_exit_live_update=true ready_exit_key=true minimap_atlas=true route_without_teleport=true cloud_calls=0")
+	print("NATIVE_CONTENT_E2E_OK single_manual_retry=true logical_keys=true short_taps=true dynamic_actions=true causal_door=true objective=true custom_combat=true pending_exit_live_update=true ready_exit_key=true minimap_atlas=true route_without_teleport=true cloud_calls=0")
 	quit(0)

@@ -43,8 +43,6 @@ var journal_request_epoch: String = ""
 var journal_error: String = ""
 var journal_generation: int = 0
 var journal_request_generation: int = 0
-var redesign_dialog: ConfirmationDialog
-var pending_redesign: Dictionary = {}
 var backend_url: String = ""
 var session_token: String = ""
 var runtime_file: String = ""
@@ -129,6 +127,7 @@ var modal_stack: VBoxContainer
 var battle_canvas
 var pause_button: Button
 var retry_failed_button: Button
+var retry_budget_notice: Label
 var failure_list: VBoxContainer
 var failure_signature: String = ""
 var language_select: OptionButton
@@ -448,15 +447,6 @@ func _build_home() -> void:
 	replace_dialog.confirmed.connect(_confirm_new_world)
 	replace_dialog.canceled.connect(func() -> void: pending_world_configuration = {})
 	add_child(replace_dialog)
-	redesign_dialog = ConfirmationDialog.new()
-	redesign_dialog.title = L.t("重新创作这个地区")
-	redesign_dialog.ok_button_text = L.t("重新创作")
-	redesign_dialog.cancel_button_text = L.t("保留原结果")
-	redesign_dialog.confirmed.connect(func() -> void:
-		_post("/retry",pending_redesign)
-		pending_redesign = {}
-	)
-	add_child(redesign_dialog)
 	_home_tab(0)
 
 func _home_tab(index: int) -> void:
@@ -478,7 +468,7 @@ func _change_language(index: int, persist: bool = true, notify_backend: bool = t
 	var keep_setting: bool = bool(state.get("started",false)) or setting_input.text!=example
 	L.set_language(value,persist)
 	get_window().title="Everweave" if value=="en" else "Everweave · 未写之境"
-	for node in [home,game,replace_dialog,redesign_dialog]:
+	for node in [home,game,replace_dialog]:
 		remove_child(node)
 		node.queue_free()
 	home_tabs.clear()
@@ -553,7 +543,7 @@ func _input(event: InputEvent) -> void:
 			_toggle_aux("journey")
 			get_viewport().set_input_as_handled()
 			return
-		if event.keycode == KEY_ESCAPE and not local_panel.is_empty() and not replace_dialog.visible and not redesign_dialog.visible:
+		if event.keycode == KEY_ESCAPE and not local_panel.is_empty() and not replace_dialog.visible:
 			local_panel = ""
 			modal_signature = ""
 			_render_modal()
@@ -997,8 +987,8 @@ func _render() -> void:
 	if world_title=="未写之境 · Everweave":world_title=L.t("未写之境")
 	subtitle_label.text = L.t("第 %d 天 · %02d:%02d") % [day, hour, minute]
 	title_label.tooltip_text = world_title + " · " + title_label.text
-	# 等级与金币用紧凑文字，生命与补给交给右上角的血条和格子条。
-	hud_meta.text = "Lv.%d · %dG" % [int(p.get("level", 1)), int(p.get("gold", 0))]
+	# 等级与金币放在旅途面板，窄屏右上角只保留生命与补给。
+	hud_meta.text = L.t("等级 %d · 金币 %d") % [int(p.get("level", 1)), int(p.get("gold", 0))]
 	hp_bar.max_value = float(p.get("max_hp", 1))
 	hp_bar.value = float(p.get("hp", 0))
 	mp_bar.max_value = float(p.get("max_mp", 1))
@@ -1029,6 +1019,8 @@ func _render() -> void:
 		var purpose: String = L.t("世界变化") if str(task.kind) == "reaction" else (L.t("更新草案") if str(task.get("source", "")) == "refresh" else L.t("自动预生成"))
 		var phase_name: String = str(task.get("phase", ""))
 		var stage: String = L.t(" · 连接补试中") if phase_name == "retrying" else (L.t(" · 修复中") if phase_name == "repairing" else (L.t(" · Jev 语义审查") if phase_name == "semantic_review" else (L.t(" · 校验中") if phase_name == "validating" else "")))
+		if phase_name in ["retrying", "repairing"]:
+			stage += L.t(" · 自动尝试 %d / %d") % [int(task.get("attempts",0)),int(task.get("max_attempts",d.get("max_generation_attempts",4)))]
 		var component: String = str(task.get("component", ""))
 		if component=="parallel":stage+=L.t(" · 玩法与视听并行")
 		elif component=="gameplay":stage+=L.t(" · 玩法制作")
@@ -1040,7 +1032,7 @@ func _render() -> void:
 		if int(task.get("transport_retries",0))>0:stage+=L.t(" · 已补试 %d 次") % int(task.transport_retries)
 		active_lines.append(L.t("%s %s · %.0f 秒%s") % [purpose, str(task.name), float(task.get("elapsed_seconds", 0)), stage])
 	if loading_overlay.visible:
-		loading_status.text = active_lines[0] if not active_lines.is_empty() else L.t("生成暂时失败 · 按 Ctrl+D 查看详情或重试") if not d.get("failed_tasks", []).is_empty() else L.t("正在同步世界状态…")
+		loading_status.text = active_lines[0] if not active_lines.is_empty() else L.t("内容准备暂时受阻 · 打开旅途查看") if not d.get("failed_tasks", []).is_empty() else L.t("正在同步世界状态…")
 	var activity: String = "\n".join(active_lines) if not active_lines.is_empty() else str(d.get("busy", ""))
 	director_label.text = mode_text + "\n" + (activity if not activity.is_empty() else (L.t("导演已暂停") if bool(d.get("paused", false)) else L.t("等待重要事件 · 不按帧调用")))
 	var failed_tasks: Array = d.get("failed_tasks", [])
@@ -1067,7 +1059,10 @@ func _render() -> void:
 	error_label.text = last_action_error if not last_action_error.is_empty() else (str(d.get("error", "")) if failed_tasks.is_empty() else "")
 	var library_error: String = preload("res://client/asset_library.gd").last_error
 	if not library_error.is_empty():error_label.text = library_error
-	retry_failed_button.disabled = failed_tasks.is_empty()
+	var budget_exhausted: bool = int(d.get("calls",0)) >= int(d.get("max_calls",60))
+	retry_failed_button.visible = not failed_tasks.is_empty() and not budget_exhausted
+	retry_failed_button.disabled = failed_tasks.is_empty() or budget_exhausted or action_busy
+	retry_budget_notice.visible = not failed_tasks.is_empty() and budget_exhausted
 	_render_failures(failed_tasks)
 	pause_button.text = L.t("继续生成") if bool(d.get("paused", false)) else L.t("暂停生成")
 	var history: Array = state.get("journal", [])
@@ -1088,8 +1083,13 @@ func _render_failures(tasks: Array) -> void:
 	for task in tasks:
 		var row := VBoxContainer.new()
 		failure_list.add_child(row)
-		var kind: String = L.t("地区生成") if str(task.kind) == "region" else L.t("世界变化")
-		_label(row, L.t("%s · %s失败") % [str(task.name), kind], 14, Color("e7a69d"))
+		var kind: String = L.t("地区内容") if str(task.kind) == "region" else L.t("世界更新")
+		_label(row, L.t("%s · %s未完成") % [str(task.name), kind], 14, Color("e7a69d"))
+		var attempts: int = int(task.get("attempts", 0))
+		if attempts > 1:
+			_label(row, L.t("自动尝试 %d 次后仍未完成。") % attempts, 12, MUTED)
+		else:
+			_label(row, L.t("后台暂时没有完成这项内容。"), 12, MUTED)
 		var details: Array = task.get("issues", [])
 		var reason: String = str(task.get("message", L.t("生成未完成")))
 		if not details.is_empty():
@@ -1099,14 +1099,6 @@ func _render_failures(tasks: Array) -> void:
 		var friendly: Dictionary = {"format":L.t("部分内容需要调整。"), "reference":L.t("物品或人物信息还需核对。"), "gameplay":L.t("道路或交互需要修复。"), "provider":L.t("生成服务暂时没有完成请求。")}
 		var detail_label := _label(row, str(friendly.get(str(task.get("category","format")),L.t("内容准备未完成。"))), 12, MUTED)
 		detail_label.tooltip_text = reason + "\n" + JSON.stringify(details, "  ")
-		if str(task.kind) == "region":
-			_button(row,L.t("放弃候选，重新创作"),_offer_redesign.bind(str(task.target),str(task.name)))
-		_button(row, L.t("重试此任务"), _post.bind("/retry", {"target":str(task.target), "kind":str(task.kind)}))
-
-func _offer_redesign(target: String, name: String) -> void:
-	pending_redesign = {"target":target,"kind":"region","mode":"redesign"}
-	redesign_dialog.dialog_text = L.t("舍弃「") + name + L.t("」上次失败的候选内容，按同一目的地重新创作。已有地图不会被删除，新请求仍计入额度。")
-	redesign_dialog.popup_centered(Vector2i(540,220))
 
 func _clear_modal() -> void:
 	for child in modal_stack.get_children():
@@ -1187,12 +1179,11 @@ func _render_modal() -> void:
 		if ui.get("kind") == "pending_exit":
 			_label(modal_stack, L.t("可以进入下一地区了") if waiting_phase == "ready" else L.t("正在准备 ") + str(ui.get("name", L.t("下一地区"))), 24, GOLD)
 			var explanation: String = L.t("地图由后台自动提前准备，无需反复触发出口。你也可以先回去探索。")
-			if waiting_phase == "failed": explanation = L.t("这个地区的生成未通过校验，可重试此任务；其他地区会继续准备。")
+			if waiting_phase == "failed": explanation = L.t("后台已经自动尝试多次，但仍未完成。你可以继续探索，稍后打开旅途面板再试一次。")
 			elif waiting_phase == "paused": explanation = L.t("后台已暂停追加请求，可在右侧继续导演。")
 			elif waiting_phase == "ready": explanation = L.t("地图已准备好，按 E 或点击下方按钮即可进入。")
 			_label(modal_stack, explanation, 18)
 			if waiting_phase == "ready": _button(modal_stack, L.t("进入 ") + str(ui.get("name", L.t("下一地区"))) + " · E", _send_action.bind({"op":"enter_exit"}))
-			elif waiting_phase == "failed": _button(modal_stack, L.t("重试这个地区"), _post.bind("/retry", {"target":str(ui.target),"kind":"region"}))
 			_button(modal_stack, L.t("继续探索当前地区 · Esc"), _send_action.bind({"op":"close"}))
 			return
 		var modal_title: String = str(ui.get("title",""))
@@ -1367,7 +1358,8 @@ func _apply_game_spec() -> void:
 	panel_buttons.journal.tooltip_text=(str(value.journal_label)+"  J") if custom else L.t("手记  J")
 	if not custom:return
 	for row in resource_rows.values():row.box.hide()
-	for child in hud_ration_slots.get_children(): child.queue_free()
+	var first_bar: Dictionary = {}
+	var first_number: Dictionary = {}
 	for resource in value.resources:
 		var key: String = str(resource.id)
 		if not resource_rows.has(key):
@@ -1379,20 +1371,36 @@ func _apply_game_spec() -> void:
 		row.bar.max_value=float(resource.max)
 		row.bar.value=float(resource.value)
 		row.bar.visible=str(resource.display)=="bar"
-		# 右上角按 display 分发：条状走血条，数量走格子条，比纯数字更像游戏。
-		var total := maxi(1, int(resource.max))
-		var filled := clampi(int(resource.value), 0, total)
-		if str(resource.display) == "bar":
-			hud_hp_bar.max_value = float(total)
-			hud_hp_bar.value = float(filled)
-			hud_hp_text.text = "%s %d / %d" % [str(resource.label), filled, total]
-		else:
-			for i in range(total):
-				var cell := ColorRect.new()
-				cell.custom_minimum_size = Vector2(10, 10)
-				cell.color = Color("c9a227") if i < filled else Color("2a2a22")
-				hud_ration_slots.add_child(cell)
-			hud_ration_text.text = "%s %d / %d" % [str(resource.label), filled, total]
+		if str(resource.display) == "bar" and first_bar.is_empty(): first_bar = resource
+		elif str(resource.display) != "bar" and first_number.is_empty(): first_number = resource
+	if not first_bar.is_empty():
+		var bar_total := maxi(1, int(first_bar.max))
+		var bar_filled := clampi(int(first_bar.value), 0, bar_total)
+		hud_hp_bar.max_value = float(bar_total)
+		hud_hp_bar.value = float(bar_filled)
+		hud_hp_text.text = "%s %d / %d" % [str(first_bar.label), bar_filled, bar_total]
+	if not first_number.is_empty():
+		var number_total := maxi(1, int(first_number.max))
+		var number_filled := clampi(int(first_number.value), 0, number_total)
+		_update_hud_slots(number_total, number_filled)
+		hud_ration_text.text = "%s %d / %d" % [str(first_number.label), number_filled, number_total]
+
+func _update_hud_slots(total: int, filled: int) -> void:
+	# 大上限资源只画十二格，文字仍显示准确数值；复用格子避免每次同步都重建控件。
+	var slots: int = mini(total, 12)
+	var lit: int = clampi(roundi(float(filled) * float(slots) / maxf(1.0, float(total))), 0, slots)
+	if filled > 0 and lit == 0: lit = 1
+	while hud_ration_slots.get_child_count() > slots:
+		var last: Node = hud_ration_slots.get_child(hud_ration_slots.get_child_count() - 1)
+		hud_ration_slots.remove_child(last)
+		last.queue_free()
+	while hud_ration_slots.get_child_count() < slots:
+		var cell := ColorRect.new()
+		cell.custom_minimum_size = Vector2(10, 10)
+		hud_ration_slots.add_child(cell)
+	for i in range(slots):
+		var cell: ColorRect = hud_ration_slots.get_child(i) as ColorRect
+		cell.color = Color("c9a227") if i < lit else Color("2a2a22")
 
 func _resource_number(value: Variant) -> String:
 	return str(int(value)) if is_equal_approx(float(value),roundf(float(value))) else String.num(float(value),1)

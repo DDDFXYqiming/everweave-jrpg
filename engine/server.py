@@ -26,8 +26,8 @@ class GameServer(ThreadingHTTPServer):
   if address[0]!='127.0.0.1': raise ValueError('Only IPv4 loopback binding is supported')
   self.token=token;self.instance_id=secrets.token_hex(16); self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
   self.snapshot_sequence=0
-  self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','max_transport_retries','task_timeout_seconds','hybrid_content','parallel_region','jev_enabled','language')
-  self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,max_transport_retries=1,task_timeout_seconds=900,hybrid_content=True,parallel_region=True,jev_enabled=True,language='zh')
+  self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','max_transport_retries','max_generation_attempts','task_timeout_seconds','hybrid_content','parallel_region','jev_enabled','language')
+  self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,max_transport_retries=1,max_generation_attempts=4,task_timeout_seconds=900,hybrid_content=True,parallel_region=True,jev_enabled=True,language='zh')
   self.preference_path=None if str(save_path)==':memory:' else Path(save_path).with_name('settings.json')
   self.credential_path=Path(credential_path) if credential_path else None
   self.saved_keys={}

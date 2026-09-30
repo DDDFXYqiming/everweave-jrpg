@@ -393,17 +393,43 @@ class DirectorTests(unittest.TestCase):
         self.assertEqual(self.d.calls,1);self.assertEqual(self.d.tokens_in,111);self.assertEqual(self.d.tokens_out,222)
         self.assertEqual(self.w.region()['source'],'llm')
 
-    def test_schema_failure_allows_only_one_repair(self):
-        with patch.object(ChatProvider,'generate',return_value=('{}',{'input_tokens':1,'output_tokens':1})) as mock:
-            self.d.step();self.d.step()
-        self.assertEqual(mock.call_count,2);self.assertEqual(self.d.calls,2)
+    def test_schema_failure_gets_three_automatic_repairs(self):
+        repair_states=[]
+        def rejected(ctx,kind,repair=''):
+            repair_states.append((bool(ctx.get('rejected_response')),bool(repair)))
+            return '{}',{'input_tokens':1,'output_tokens':1}
+        with patch.object(ChatProvider,'generate',side_effect=rejected) as mock:
+            self.d.step()
+        self.assertEqual(mock.call_count,4);self.assertEqual(self.d.calls,4)
+        self.assertEqual(self.d.status()['failed_tasks'][0]['attempts'],4)
+        self.assertEqual(repair_states,[(False,False),(True,True),(True,True),(True,True)])
         self.assertEqual(self.d.accepted,0);self.assertTrue(self.d.error)
+
+    def test_transient_failure_keeps_the_pending_semantic_repair(self):
+        calls=[]
+        def recover(ctx,kind,repair=''):
+            calls.append((ctx,repair))
+            if len(calls)==1:return '{}',{'input_tokens':1,'output_tokens':1}
+            self.assertTrue(ctx.get('rejected_response'))
+            self.assertIn('errors',repair)
+            if len(calls)==2:
+                raise ProviderError('stream ended',diagnostics={'category':'transient','transport':'chat_sse','usage_unknown':True})
+            return self.answer(ctx,kind)
+        with patch.object(ChatProvider,'generate',side_effect=recover) as generate:self.d.step()
+        self.assertEqual(generate.call_count,3)
+        self.assertEqual(self.d.accepted,1)
 
     def test_network_errors_do_not_retry_automatically(self):
         with patch.object(ChatProvider,'generate',side_effect=ProviderError('offline')) as mock:
             for _ in range(4):self.d.step()
         self.assertEqual(mock.call_count,1)
         self.assertIsNone(self.w.region())
+
+    def test_nontransient_stream_limit_does_not_retry(self):
+        failure=ProviderError('Model response exceeds size limit.',diagnostics={'transport':'chat_sse','usage_unknown':True})
+        with patch.object(ChatProvider,'generate',side_effect=failure) as mock:self.d.step()
+        self.assertEqual(mock.call_count,1)
+        self.assertEqual(self.d.status()['failed_tasks'][0]['attempts'],1)
 
     def test_hard_request_budget(self):
         self.d.cfg['max_calls']=1
@@ -416,6 +442,16 @@ class DirectorTests(unittest.TestCase):
         self.d.cfg['max_calls']=1
         with patch.object(ChatProvider,'generate',return_value=('{}',{'input_tokens':1,'output_tokens':1})) as mock:self.d.step()
         self.assertEqual(mock.call_count,1)
+
+    def test_manual_retry_keeps_failures_until_budget_is_raised(self):
+        self.d.cfg['max_calls']=1
+        with patch.object(ChatProvider,'generate',return_value=('{}',{'input_tokens':1,'output_tokens':1})):self.d.step()
+        self.assertEqual(len(self.d.status()['failed_tasks']),1)
+        with self.assertRaisesRegex(ProviderError,'额度已用完'):self.d.retry()
+        self.assertEqual(len(self.d.status()['failed_tasks']),1)
+        self.d.cfg['max_calls']=2
+        self.d.retry()
+        self.assertFalse(self.d.status()['failed_tasks'])
 
     def test_pause_stops_new_requests(self):
         self.d.paused=True

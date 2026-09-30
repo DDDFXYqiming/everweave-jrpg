@@ -99,6 +99,7 @@ func _run() -> void:
 	snapshot.battle = {"name": "烟雾守门人", "hp": 35, "max_hp": 35, "monster": "sentinel", "turn": 0, "log": ["客户端战斗冒烟测试"]}
 	main._accept_snapshot(snapshot)
 	await process_frame
+	assert(main.hud_meta.get_parent() != main.stats_box)
 	assert(main.battle_canvas != null)
 	snapshot = snapshot.duplicate(true)
 	snapshot.version += 1
@@ -110,15 +111,26 @@ func _run() -> void:
 	var failure_state = snapshot.duplicate(true)
 	failure_state.version += 1
 	failure_state.director = {"mode":"live_llm", "calls":3, "max_calls":10, "repair_calls":1, "accepted":1, "normalization_count":2,
-		"failed_tasks":[{"kind":"region","target":"r_test","name":"待修复的港口","category":"reference","message":"物品引用冲突",
+		"active_tasks":[{"kind":"region","target":"r_next","name":"新路口","phase":"repairing","attempts":2,"max_attempts":4,"elapsed_seconds":12}],
+		"failed_tasks":[{"kind":"region","target":"r_test","name":"待修复的港口","category":"reference","message":"物品引用冲突","attempts":4,"max_attempts":4,
 			"issues":[{"path":"region.items[2].id","message":"ambiguous item identity","category":"reference"}]}]}
 	main._accept_snapshot(failure_state)
 	await process_frame
 	assert(main.failure_list.get_child_count() == 1)
-	assert(not main.retry_failed_button.disabled)
+	assert(main.retry_failed_button.visible and not main.retry_failed_button.disabled)
+	assert(main.retry_failed_button.text == "再试一次")
+	assert(main.failure_list.get_child(0).get_child_count() == 3)
+	assert(main.failure_list.get_child(0).get_child(1).text.contains("4"))
+	assert(main.director_label.text.contains("自动尝试 2 / 4"))
 	assert(main.director_label.text.contains("其中修复 1"))
 	assert(main.director_label.text.contains("本地纠正 2"))
 	assert(main.failure_list.get_child(0).get_child(0).text.contains("待修复的港口"))
+	var limit_state: Dictionary = failure_state.duplicate(true)
+	limit_state.version += 1
+	limit_state.director.calls = 10
+	main._accept_snapshot(limit_state)
+	await process_frame
+	assert(not main.retry_failed_button.visible and main.retry_budget_notice.visible)
 	main.queue_free()
 	await create_timer(0.15).timeout
 	print("GODOT_CLIENT_SMOKE_OK")

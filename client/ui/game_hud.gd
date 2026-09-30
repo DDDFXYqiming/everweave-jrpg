@@ -49,6 +49,8 @@ func build(controller) -> void:
 	main.title_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	main.title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	main.subtitle_label = main._label(titles,"",14,main.MUTED)
+	main.subtitle_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	main.subtitle_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	# 右上角用血条和格子条表达资源，避免落成一串数字。
 	main.stats_box = HBoxContainer.new()
 	main.stats_box.size_flags_horizontal = Control.SIZE_SHRINK_END
@@ -66,8 +68,6 @@ func build(controller) -> void:
 	main.hud_ration_slots.add_theme_constant_override("separation", 3)
 	food_group.add_child(main.hud_ration_slots)
 	main.hud_ration_text = main._label(food_group, "", 12, main.MUTED)
-	main.hud_meta = main._label(main.stats_box, "", 14, main.GOLD)
-	main.hud_meta.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	var map_stack := Control.new()
 	map_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(map_stack)
@@ -80,6 +80,17 @@ func build(controller) -> void:
 	main.task_button.position = Vector2(16,16)
 	main.task_button.size = Vector2(420,52)
 	main.task_button.tooltip_text = L.t("行动记录 · Q")
+	# 与小地图保持同一层半透明底色，任务牌仍能在复杂地形上读清。
+	var task_style := StyleBoxFlat.new()
+	task_style.bg_color = Color(0.035,0.075,0.13,0.73)
+	task_style.border_color = Color(Color("c1a9ef"),0.41)
+	task_style.set_border_width_all(1)
+	main.task_button.add_theme_stylebox_override("normal",task_style)
+	var task_hover: StyleBoxFlat = task_style.duplicate() as StyleBoxFlat
+	task_hover.bg_color = Color(0.035,0.075,0.13,0.89)
+	task_hover.border_color = Color(Color("c1a9ef"),0.5)
+	main.task_button.add_theme_stylebox_override("hover",task_hover)
+	main.task_button.add_theme_stylebox_override("pressed",task_hover)
 	var task_margin: MarginContainer = main._margin(main.task_button,8)
 	task_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	task_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -168,6 +179,9 @@ func build(controller) -> void:
 	journey_drawer.closed.connect(func() -> void: main._toggle_aux("journey"))
 	var side: VBoxContainer = journey_drawer.body
 	main.role_label = main._label(side,L.t("旅人"),24,main.GOLD)
+	main.hud_meta = main._label(side,"",14,main.GOLD)
+	main.hud_meta.autowrap_mode = TextServer.AUTOWRAP_OFF
+	main.hud_meta.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	main.health_label = main._label(side,L.t("生命"),16,main.MUTED)
 	main.hp_bar = main._bar(side,Color("b5856b"))
 	main.energy_label = main._label(side,L.t("魔力"),16,main.MUTED)
@@ -177,6 +191,12 @@ func build(controller) -> void:
 	main.rule_label = main._label(side,"",16,main.MINT)
 	main.status_summary = main._label(side,"",18,main.GOLD)
 	main.frontier_label = main._label(side,"",18,main.MUTED)
+	main.failure_list = VBoxContainer.new()
+	side.add_child(main.failure_list)
+	main.retry_budget_notice = main._label(side,L.t("生成额度已用尽，请在旅途菜单的世界连接中提高上限。"),13,Color("e7a69d"))
+	main.retry_budget_notice.visible = false
+	main.retry_failed_button = main._button(side,L.t("再试一次"),func() -> void: main._post("/retry",{}))
+	main.retry_failed_button.visible = false
 	main._label(side,L.t("刚刚发生"),24,main.GOLD)
 	main.journal_label = main._label(side,"",18,main.MUTED)
 	main._button(side,L.t("行动记录 · Q"),main._toggle_panel.bind("missions"))
@@ -192,9 +212,6 @@ func build(controller) -> void:
 	var controls := HBoxContainer.new()
 	main.diagnostics.add_child(controls)
 	main.pause_button = main._button(controls,L.t("暂停生成"),main._toggle_pause)
-	main.retry_failed_button = main._button(controls,L.t("重试"),func() -> void: main._post("/retry",{}))
-	main.failure_list = VBoxContainer.new()
-	main.diagnostics.add_child(main.failure_list)
 	developer_overlay.closed.connect(func() -> void: main._toggle_aux("diagnostics"))
 	developer_overlay.hide()
 

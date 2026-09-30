@@ -187,12 +187,16 @@ class DirectorPipelineTests(unittest.TestCase):
         self.assertEqual((director.calls,director.unknown_usage_calls,director.accepted),(2,1,1))
         self.assertEqual((director.task_history[-1]['transport_retries'],director.task_history[-1]['unknown_usage_calls']),(1,1))
 
-    def test_exhausted_transport_retry_pauses_prefetch(self):
+    def test_exhausted_transport_retry_gets_bounded_task_retries_without_global_pause(self):
         from engine.chatgpt_provider import DirectError
-        director=Director(self.world);director.configure({'provider':'chatgpt_subscription','offline':False,'parallel_region':False,'max_calls':2});director.cfg['cooldown']=0
+        from engine.director import ProviderError
+        director=Director(self.world);director.configure({'provider':'chatgpt_subscription','offline':False,'parallel_region':False,'max_calls':8});director.cfg['cooldown']=0
         failure=DirectError('stream ended',category='transient',diagnostics={'usage_unknown':True,'retries_exhausted':True,'last_call':2})
-        with patch('engine.chatgpt_provider.generate',side_effect=failure):self.assertTrue(director.step())
-        self.assertTrue(director.paused);self.assertEqual(director.unknown_usage_calls,1)
+        wrapped=ProviderError(str(failure),diagnostics={'usage_unknown':True,'retries_exhausted':True,'category':'transient','transport':'direct_sse','last_call':2})
+        with patch('engine.director.ChatProvider.generate',side_effect=wrapped) as generate:self.assertTrue(director.step())
+        self.assertEqual(generate.call_count,4);self.assertEqual(director.calls,4)
+        self.assertFalse(director.paused);self.assertEqual(director.unknown_usage_calls,4)
+        self.assertEqual(director.status()['failed_tasks'][0]['attempts'],4)
         self.assertEqual(director.task_history[-1]['status'],'failed')
 
 
