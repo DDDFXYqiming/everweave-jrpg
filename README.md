@@ -1,144 +1,83 @@
+简体中文 | [English](README.en.md)
+
 # Everweave · 未写之境
 
-> 让模型写出一章可以走进去的冒险。
+**由大模型动态编导、Godot 驱动的原生像素风生成式 JRPG**。
 
-[English README](README.en.md)
+在传统游戏中，地图、任务与世界往往是预先烘焙固化的；而单纯的文本跑团又缺少真实的物理触感与空间走位。`Everweave` 将大语言模型的长程叙事编排能力与 Godot 4 像素游戏引擎结合：模型作为“全局导演与章节作者”动态构筑关卡、解谜机关与剧情支线，本地 Python 运行时通过严格的受限 DSL 解释器与 SQLite 事务持久化保证规则可解性与世界连贯性。
 
-## 它的特别之处
+---
 
-**章节先于地图**
+## 核心设计与创新机制
 
-在线创建世界时，模型先生成游戏规格和眼前 2 至 4 个地区的滚动计划，保留私有的结局方向。中段可以随实际选择追加地点、支线和连接。已有整章模式仍支持 4 至 8 个地区；地图中的路线始终来自真实连接记录。
+* **全局导演与内容作者分层制作（Director-Author Hierarchy）**：
+  * **全局导演（Director）**：把控主线人物弧光、任务前置依赖、全局经济平衡与多阶段结局收敛方向。
+  * **场景作者（Author）**：按需生成具体地块的场景布局、NPC 对白、遭遇战、机关逻辑与视听资产组合。
+* **双路并行制作管线与语义审查**：
+  * **玩法与视听解耦**：将复杂地块的逻辑规则与视听美术分为两条分支并行生成，再由本地引擎执行强契约校验与拼装。
+  * **可选 Jev 语义审查**：集成 TypeSafe 官方 Jev 语义审校，自动校验玩家行为与生成叙事的逻辑自洽性。
+* **确定性规则 DSL 解释器（Sandboxed Rule DSL）**：
+  * 模型仅输出受模式约束的严格 JSON 格式与规则 DSL，绝不执行任意动态脚本。
+  * 解释器接管机关开合、道具置换、战斗判定与历史位置追踪，所有状态变更由 SQLite 原子事务提交，失败自动回滚。
+* **真正留存的世界变化（Persistent Living World）**：
+  * 玩家开启的通道、重塑的机关、NPC 的好感与生死状态持久留存于世界存档中，随时可以重访故地。
+* **双端运行形态**：
+  * 原生桌面端（Godot 4.7+ 独立窗口渲染）；
+  * 纯浏览器 Web 模式（一键导出 Godot 客户端至本地 Web 服务端）。
 
-**全局导演统筹，内容作者制作**
+---
 
-导演定义持续人物、任务依赖、技能简报、资源收益约束与结局条件，具体地区作者落实场景、对白、遭遇和规则。真实事件积累后，导演可追加内容委托、调整尚未到访的地区或补充受限连接。玩家选择影响同一份人物状态，学会的能力可以跨地区使用。
+## 游戏画面实机预览
 
-当前目标显示在地图左上角，点击或按 Q 展开行动记录。未发现任务不会进入任务列表、手记或旅图；敌人可由模型选择驻守、巡逻或追击，在本机行动回合中发现玩家并发起遭遇。生成优先准备等待中的出口和附近地区，空复盘不会废弃在途地图。具体效果与边界见 [节奏与玩法验证](docs/PACING_AND_ENCOUNTERS.md)。
-
-**模型生成可执行内容**
-
-模型生成 `scene`、`program`、`visuals` 和 `audio`。章节中的复杂新地区会把玩法与视听分成两条使用所选 Luna 思考档位的请求并行制作，再由本机按同一份导演约定组装和完整校验；简单地区和修复仍可一次生成。[地区双路制作管线](docs/REGION_PIPELINE.md)。可选的官方 Jev 接入会在视听分支内按槽位筛选素材，并在硬校验后核对玩家文字与实际效果；它只记录可定位疑点，不改剧情、不触发整区重试。[Jev 接入与验证](docs/JEV_SEMANTIC_REVIEW.md)。其中的 `program` 是受限的规则 DSL，可以读取对象状态、章节旗标、资源、物品和近期位置历史，表达机关、资源交换、战斗条件和依赖历史的谜题。模型提交 JSON，Python 运行时校验并执行规则，Godot 显示结果。
-
-**世界规格会进入游戏本身**
-
-一个世界的规格可以决定玩家称谓、物品和手记名称、资源条、战斗、物品、装备与成长开关，以及失败方式。规格随存档保存，界面和规则一起跟着世界变化。
-
-**玩家造成的变化会留下来**
-
-玩家操作、触发器、奖励和地图变化在 SQLite 事务中一起提交。附近地区可以在后台准备，旅图只显示已经发现的路线。门打开、道路改变、对象换形等反应会留在世界里。
-
-**本地素材和原创绘图一起工作**
-
-本地素材索引、材质配方和原创像素绘图共同参与生成。模型选择适合题材的候选资产，缺少相容图像时补充受限绘图，程序负责按固定种子布置细节、检查哈希并保存版本。音效和短乐句也可以来自本地素材或有界配方。
-
-**模型提出内容，运行时守住边界**
-
-模型输出只能进入受校验的 JSON 内容协议。它不能提交 Python、GDScript 或任意文件路径，也不能发起网络操作。规则在有预算限制的解释器中运行，失败的动作和存档更新会回滚。
-
-## 当前状态
-
-Everweave 仍是一个研究型原型。章节规划、地区生成、规则校验、本地执行、素材组合、旅图和双语界面已经接入同一套项目；自动测试与 Godot 原生检查覆盖了这些功能的主要路径。
-
-完整一章的跨地区通关、任意生成谜题的可解性、题材素材覆盖和长期生成质量仍需要在真实存档中继续检查。在线生成可能需要数分钟，并消耗所选服务的额度。首次体验建议使用新的独立存档。
-
-## 游戏画面
-
-下面的截图来自 Godot 客户端实际渲染，展示项目当前可以生成的场景方向。它们用于观察画面和内容组合，不代表每次在线生成都能完成整章。
+场景由 Godot 客户端根据大模型编排与本地像素素材集实时组装渲染：
 
 ![潮雾港的修船村](docs/showcase/harbor.png)
 
 | 地下天文馆 | 轨道气象站 |
-|---|---|
+| :---: | :---: |
 | ![地下天文馆](docs/showcase/ruins.png) | ![轨道气象站](docs/showcase/orbital.png) |
 
-更多场景说明见 [示例世界](docs/SHOWCASE.md)。
+---
 
 ## 快速开始
 
-浏览器模式可运行 `python launch.py --web --data-dir ./userdata/web-journey`，或双击 `Start-Web.cmd`。启动器会将同一份 Godot 客户端导出到浏览器，沿用桌面版的 HUD、地图和交互；打开终端打印的本机地址即可游玩。[Web 界面说明](docs/WEB_CLIENT.md)。
+### 环境依赖
+* **Python**：3.11 或更高版本
+* **游戏引擎**：Godot 4 Standard（推荐 Godot 4.7.2）
 
-连接页提交的第三方 API Key 保存在项目内被 Git 忽略的 `userdata/provider-keys.local.json`，重启后按服务 URL 复用。
+### 运行方式
 
-需要 Python 3.11 或更高版本，以及 Godot 4 Standard。项目当前使用 Godot 4.7.2 测试。
-
-在线使用官方 Jev 前安装固定版本 SDK：
-
-```powershell
-py -3 -m pip install -r requirements.txt
-```
-
-Windows 用户可以把 Godot 可执行文件放在项目根目录或 `tools/`，然后双击 `Start.cmd`。也可以从命令行启动。
+#### 1. 桌面客户端启动
+将 Godot 可执行文件放置于根目录或 `tools/Godot.exe`，然后运行：
 
 ```powershell
 python launch.py --godot ./tools/Godot.exe
 ```
+*(Windows 下可直接双击运行 `Start.cmd`)*
 
-如果 Godot 已加入 PATH，运行 `python launch.py` 即可。首次启动会按固定清单准备素材并核对 SHA-256。缺少 Pillow 时，启动器会把相关工具安装到 `userdata/library-tools`，不修改系统 Python 环境。
-
-## 创建世界
-
-默认使用 **ChatGPT 订阅直连 · GPT-6 Luna / high**，也可选择 GPT-5.6 Luna 与 Off、Low、Medium、High、XHigh、Max 六档思考等级。在连接页为 Everweave 完成一次官方设备授权后，游戏直接读取 Responses SSE，不需要 Codex CLI 或 OpenAI API Key；模型或额度不可用时停止，不自动回退到收费服务。[接入与验证说明](docs/CODEX_SUBSCRIPTION.md)
-
-在线新建世界会先生成游戏规格和章节计划，再生成开局地区。请求预算可以在设置中调整；订阅直连可选择 medium/high/xhigh/max，兼容 API 按服务支持选择思考等级。生成导演会准备附近地区，失败任务会显示具体错误并提供重试入口。
-
-订阅模式与 Codex CLI 共用同一份 ChatGPT 使用额度，用量计入该配额。DeepSeek 与其他兼容 API 仍可手动选择并按其规则计费，启动器默认不加载 DeepSeek 密钥。初次创建世界和准备新地区可能需要等待；只想检查安装和操作时，可以运行不调用模型的离线自检。
-
-Jev 使用独立的 TypeSafe 官方凭据。可把 API Key 以当前 Windows 用户的 DPAPI 密文保存为 `typesafe.local.key`，并在需要本次进程调用官方服务时显式加载：
-
+#### 2. 浏览器 Web 端启动
 ```powershell
-Read-Host -AsSecureString | ConvertFrom-SecureString | Set-Content .\typesafe.local.key
-.\Start.ps1 -LoadTypeSafeKey
+python launch.py --web --data-dir ./userdata/web-journey
 ```
+*(或双击运行 `Start-Web.cmd`，启动后根据终端提示在浏览器中打开对应端口)*
 
-连接页可随时关闭 Jev。SDK、凭据或服务不可用时，素材目录回退到原排序，内容状态明确显示为未审查，不会伪装成通过。
-
+#### 3. 离线演示模式（零 API 依赖）
+若只想测试客户端渲染与基础交互，无需消耗模型额度：
 ```powershell
 python launch.py --demo --data-dir ./userdata/offline-demo
 ```
 
-每个存档目录保存一个世界。想保留当前旅程并另开一局，可以指定新的数据目录。
+---
 
-```powershell
-python launch.py --godot ./tools/Godot.exe --data-dir ./userdata/another-journey
-```
+## 模型提供商与连接
 
-## 操作
+游戏内置连接配置界面，支持多种大语言模型驱动后端：
+* **ChatGPT 订阅直连**：支持 GPT-6 / GPT-5.6 Luna 系列，并提供从 Low 到 Max 的六档深度思考等级，通过官方设备授权直接建立 Responses SSE 会话。
+* **OpenAI 兼容端点 / DeepSeek API**：支持自定义 Base URL 与 API Key，凭据本地安全加密存储。
+* **Jev 语义审校服务**：可选通过 DPAPI 加密凭据挂载 TypeSafe 官方审校服务。
 
-| 操作 | 按键 |
-|---|---|
-| 移动 | WASD 或方向键 |
-| 与相邻人物、物体或出口交互 | E 或空格 |
-| 查看当前可执行操作 | F |
-| 物品与记录面板 | I、J |
-| 展开旅途地图 | G，或点击小地图 |
-| 展开行动记录 | Q，或点击左上角任务卡 |
-| 等待 | `.` |
-| 选择战斗操作 | 数字键，具体动作以界面为准 |
-| 关闭面板 / 旅途菜单 | Esc |
-| 旅途状态抽屉 | Tab |
-| 开发诊断 | Ctrl+D，或菜单入口 |
-| 全屏 | Alt+Enter，或显示设置 |
-| 全部声音静音 / 恢复 | M，或扬声器按钮 |
+---
 
-常驻界面只显示地点、关键资源和一行目标；详细状态在旅途抽屉，模型与 JEV 统计在开发诊断。显示与声音页独立控制音乐、环境声、音效和界面音量，静音、音量与全屏偏好会保存在本机。验证记录见 [客户端表现与音频自测](docs/CLIENT_PRESENTATION.md)。
+## 许可证
 
-## 文档
-
-- [使用指南](docs/LOCAL_SETUP.md) 说明安装、模型连接和存档目录
-- [运行时架构](docs/ARCHITECTURE.md) 说明 Godot 客户端、本机服务和生成调度
-- [章节与游戏规格](docs/CAMPAIGNS.md) 说明章节计划、共享线索、连接图和可选系统
-- [冒险导演](docs/ADVENTURE_DIRECTOR.md) 与 [本轮验证](docs/ADVENTURE_VALIDATION.md) 说明创作分工及实际完成范围
-- [快速自主试玩](docs/FAST_PLAYTEST.md) 用正常游戏动作执行寻路，在事件处停下，由测试者决定下一步
-- [内容协议](docs/EXECUTABLE_CONTENT.md) 说明场景、规则和可执行效果
-- [混合内容库](docs/HYBRID_CONTENT.md) 说明素材引用、材质、音频和扩库方式
-- [示例世界](docs/SHOWCASE.md) 记录实际生成的场景与截图
-- [语言设置](docs/LOCALIZATION.md) 说明简体中文与 English 的界面和生成语言
-- [开发与测试](docs/DEVELOPMENT.md) 说明资源准备与回归测试
-- [日志](docs/LOGGING.md) 说明模型断流补试、本机服务重连、上下文投影与用量诊断
-- [安全边界](docs/SECURITY.md) 说明本机服务、凭据和生成内容的限制
-- [文档目录](docs/README.md) 汇总使用说明、设计文档和实验记录
-
-## 许可
-
-项目自有代码和文档采用 [MIT License](LICENSE)。第三方素材保留各自许可证，来源及作者见 [素材署名](assets/library/CREDITS.md)。完整说明见 [授权说明](LICENSE-NOTICE.md)。
+本项目基于 [MIT License](LICENSE) 开源。美术资产与第三方音视频遵循其各自的独立授权协议。
