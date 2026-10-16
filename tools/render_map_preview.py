@@ -32,7 +32,6 @@ def main():
     for y,x,name in sorted(objects):
         sx,sy,sw,sh=defs[name]['rect'];im=atlas.crop((sx,sy,sx+sw,sy+sh));im=im.resize((int(sw*1.5),int(sh*1.5)),Image.Resampling.NEAREST)
         canvas.alpha_composite(im,(int((x+.5)*tile-im.width/2),int((y+1)*tile-im.height)))
-    # A visible caption explicitly distinguishes this reference render from native-client testing.
     frame=Image.new('RGB',(1248,940),'#0c1421');frame.paste(canvas.convert('RGB'),(0,52))
     draw=ImageDraw.Draw(frame)
     try:font=ImageFont.truetype('DejaVuSans.ttf',18)

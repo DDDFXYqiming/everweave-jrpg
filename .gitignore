@@ -1,4 +1,3 @@
-# Godot cache / exports
 .godot/
 *.tmp
 export.cfg
@@ -6,7 +5,6 @@ export_credentials.cfg
 exports/
 build/
 dist/
-# Local state and credentials never belong in Git
 .env
 .env.*
 !.env.example
@@ -27,10 +25,8 @@ instance.lock
 saves/
 userdata/
 /userdata/provider-keys.local.json
-# External content is reconstructed from the committed manifests at startup.
 /assets/library/blobs/
 local-settings.json
-# Python/test/tool caches
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -38,7 +34,6 @@ __pycache__/
 htmlcov/
 .venv/
 venv/
-# Official engine binaries must be installed separately
 Godot*.exe
 Godot*_linux.x86_64
 tools/Godot*
@@ -47,5 +42,4 @@ tools/Godot*
 .DS_Store
 Thumbs.db
 
-# Generated contract snapshots contain test data, never a shipped fallback world.
 /tests/fixtures/generated_content.json

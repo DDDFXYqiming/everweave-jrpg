@@ -1,6 +1,5 @@
 extends Control
 const L = preload("res://client/i18n.gd")
-## Stable diagram of known roads. Positions and route marks are local UI state.
 signal place_selected(id: String)
 var data: Dictionary = {}
 var nodes: Dictionary = {}

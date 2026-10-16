@@ -1,5 +1,4 @@
 extends SceneTree
-## Render an existing read-only snapshot for visual review. No server or actions.
 var main
 var output: String
 

@@ -70,7 +70,6 @@ class WebHandler(Handler):
         return self.same_host() and (origin == self.origin() if origin else self.headers.get('Sec-Fetch-Site') == 'same-origin')
 
     def authorized(self):
-        # 原生客户端继续使用 Bearer；浏览器内的同一 Godot 客户端只发送同源 cookie。
         return super().authorized() or (self.web_origin() and self.cookie_valid()
                                         and self.headers.get('X-Everweave-Web') == '1')
 

@@ -1,6 +1,5 @@
 extends RefCounted
 const Library = preload("res://client/asset_library.gd")
-## Compile validated model-authored pixel geometry into local GPU textures.
 
 static func color(value: String, palette: Dictionary) -> Color:
 	return Color(str(palette.get(value, value)))
@@ -106,7 +105,6 @@ static func compile(visuals: Dictionary, seed_value: int) -> Dictionary:
 		if not compiled.has(role):
 			compiled[role] = compiled[str(visuals.bindings[role])]
 			if animations.has(str(visuals.bindings[role])):animations[role] = animations[str(visuals.bindings[role])]
-	# Exits are engine UI affordances, drawn in the region's own palette.
 	var gate := {"size":[24,32], "layers":[["rect",3,2,18,28,"shadow"],["rect",5,4,14,24,"accent"],["rect",7,6,10,22,"water"],["rect",1,28,22,3,"path"]]}
 	if not compiled.has("portal"): compiled["portal"] = compile_sprite(gate, visuals.palette)
 	if not compiled.has("portal_pending"): compiled["portal_pending"] = compiled["portal"]

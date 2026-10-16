@@ -1,7 +1,5 @@
 extends RefCounted
 const L = preload("res://client/i18n.gd")
-## Read-only projections of the existing snapshot. Never repairs engine content,
-## evaluates rules, changes IDs, or sends synthesized actions to the backend.
 const KINDS := {"consumable":"补给", "weapon":"武器", "charm":"饰物", "key":"要物", "tool":"工具"}
 
 static func records(value: Variant) -> Array[Dictionary]:

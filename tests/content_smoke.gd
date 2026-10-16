@@ -1,5 +1,4 @@
 extends SceneTree
-## Exercises the real Godot UI with snapshots produced by Python gameplay actions.
 const Compiler = preload("res://client/visual_compiler.gd")
 
 func _initialize() -> void:

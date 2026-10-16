@@ -44,8 +44,6 @@ def executable():
 
 
 def process_config():
-    # Read config structure only to disable inherited MCP servers in this child.
-    # Never read auth.json or copy subscription credentials into the game.
     home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
     config = {}
     path = home / 'config.toml'
@@ -70,7 +68,6 @@ class RPC:
         args = [executable(), 'app-server', '--stdio']
         for key,value in process_config().items():args += ['-c', key+'='+json.dumps(value)]
         env = dict(os.environ)
-        # An exported key must never silently switch billing away from ChatGPT.
         for key in ('OPENAI_API_KEY','CODEX_API_KEY','OPENAI_BASE_URL'):env.pop(key, None)
         env['RUST_LOG'] = 'error'
         self.process = subprocess.Popen(args,cwd=cwd,env=env,stdin=subprocess.PIPE,
@@ -123,7 +120,6 @@ class RPC:
             if message.get('id')==key:
                 if self.telemetry:self.telemetry.emit('codex.rpc.completed',method=method,rpc_seconds=round(time.monotonic()-started,3),ok='error' not in message)
                 if 'error' in message:
-                    # Error text may include caller data: expose only the operation and code.
                     raise CodexError(f'Codex {method} failed (code {message["error"].get("code")}); check CLI login, model access and version.')
                 return message.get('result',{})
             self.saved.append(message)

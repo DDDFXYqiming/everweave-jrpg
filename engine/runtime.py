@@ -31,7 +31,6 @@ def install(region, spec=None):
                                               if k not in old.get('vars', {})})
             for key in ('actions', 'hooks', 'objectives'):
                 entries = {v['id']: v for v in old.get(key, [])}
-                # New definitions may be added, but existing commitments are immutable.
                 for value in spec.get(key, []):
                     if value['id'] in entries and entries[value['id']] != value:
                         raise RuleError('cannot replace an installed definition: ' + value['id'])
@@ -368,8 +367,6 @@ class Runtime:
                     if a['scope'] == 'explore' and obj is not p:
                         if min(abs(x-p['x'])+abs(y-p['y']) for x, y in cells_for(obj)) > 1: continue
                     if a['scope'] == 'combat' and not self.s.get('battle'): continue
-                    # Availability is evaluated before invoke(), but event.* in an
-                    # action condition describes that candidate's own invocation.
                     self.event=self.event_data('invoke',a['target'],action=a['id'])
                     enabled = bool(self.expr(a['when']))
                     from .costs import hint,description,requirements

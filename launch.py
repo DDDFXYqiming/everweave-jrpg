@@ -32,7 +32,6 @@ def find_godot(explicit: str | None) -> str | None:
             found = shutil.which(executable)
             if found:
                 candidates.append(found)
-        # User can simply put the official Windows executable beside this script or in tools/.
         for folder in (ROOT, ROOT / 'tools'):
             candidates.extend(str(p) for p in sorted(folder.glob('Godot*_console.exe'), reverse=True))
             candidates.extend(str(p) for p in sorted(folder.glob('Godot*.exe'), reverse=True) if '_console' not in p.name)
@@ -110,7 +109,6 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     args.data_dir = args.data_dir.expanduser().resolve()
     args.data_dir.mkdir(parents=True, exist_ok=True)
-    # Exclusive slot lock prevents two local helpers from editing the same SQLite world.
     lock_path = args.data_dir / 'instance.lock'
     try:
         lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -126,8 +124,6 @@ def main(argv: list[str] | None = None) -> int:
     runtime_file = args.data_dir / 'runtime.json'
     code = 0
     try:
-        # Resolve the versioned manifests before opening a world. Existing
-        # verified assets take an offline fast path; no repository metadata changes.
         from engine.asset_cache import prepare
         result = prepare(download=True, progress=lambda message: print(message, flush=True))
         print(f'Local asset cache ready: {result["assets"]} entries.', flush=True)
@@ -156,7 +152,6 @@ def main(argv: list[str] | None = None) -> int:
             while True:
                 time.sleep(1)
         else:
-            # Import PNG/WAV resources before opening the game, including first launch from source.
             import_result = subprocess.run([executable, '--headless', '--editor', '--path', str(ROOT), '--import', '--quit'], cwd=ROOT, check=False)
             if import_result.returncode:
                 print('Godot resource import failed. Check the messages above.', file=sys.stderr)
@@ -186,7 +181,6 @@ def main(argv: list[str] | None = None) -> int:
                 server.shutdown()
                 worker.join(timeout=2)
             server.server_close()
-            # A daemon network call may still be unwinding. Process exit safely releases SQLite.
             if not any(worker.is_alive() for worker in server.director.threads):
                 server.world.store.close()
         runtime_file.unlink(missing_ok=True)

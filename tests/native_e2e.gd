@@ -1,5 +1,4 @@
 extends SceneTree
-## Real native scene + real authenticated HTTP bridge; isolated save required by runner.
 var main
 var steps: int = 0
 

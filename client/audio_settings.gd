@@ -1,5 +1,4 @@
 extends Node
-## One persistent player preference source. Saves contain no model credentials.
 signal changed
 var master_muted: bool = false
 var music_volume: float = .65
@@ -43,7 +42,6 @@ func apply() -> void:
 		var index := AudioServer.get_bus_index(BUSES[channel])
 		if index < 0: continue
 		var value: float = get(channel + "_volume")
-		# Also silence channel buses, so effects/taps upstream of Master are quiet.
 		AudioServer.set_bus_mute(index, master_muted or value <= 0)
 		AudioServer.set_bus_volume_db(index, linear_to_db(maxf(.00001, value)))
 	changed.emit()

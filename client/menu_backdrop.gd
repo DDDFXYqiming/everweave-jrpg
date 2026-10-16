@@ -1,5 +1,4 @@
 extends Control
-## Quiet cartographic decoration, independent of generated game art.
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	resized.connect(queue_redraw)

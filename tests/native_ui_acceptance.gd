@@ -1,5 +1,4 @@
 extends SceneTree
-## Real renderer, actual Control hit testing and the local HTTP bridge; no cloud.
 var main
 var prefs
 const OUT = "res://userdata/ui-acceptance"
@@ -91,7 +90,6 @@ func _run() -> void:
 	await capture("audio-on")
 	prefs.set_muted(true)
 	prefs.set_fullscreen(true)
-	# A fresh instance reads persisted settings, exactly as a restarted app does.
 	var restored = load("res://client/audio_settings.gd").new()
 	restored.settings_path = prefs.settings_path
 	restored.load_settings()
@@ -113,7 +111,6 @@ func _run() -> void:
 	assert(main.theme.default_font is FontFile)
 	assert(main.title_label.get_theme_font("font") is FontFile)
 	assert(main.state.director.calls == 0)
-	# Exercise the portable full-screen shortcut itself, not only the stored flag.
 	if DisplayServer.get_name() != "headless":
 		await tap(KEY_ENTER,false,true)
 		assert(root.mode == Window.MODE_FULLSCREEN and prefs.fullscreen)

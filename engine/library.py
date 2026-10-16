@@ -103,8 +103,6 @@ def candidates(context):
         if profile not in tags and 'common' not in tags:continue
         score=10*(profile in tags)+4*len(words.intersection(tags))-recent[key]
         pool.append((score,key,entry))
-    # Cover usable roles before adding decorative variety. All these families
-    # have the same view/pixel scale; raw construction tiles stay out of prompts.
     chosen=[]
     for role,limit in (('ground',3),('hero',2),('npc',3),('building',2),('vegetation',3),('object',6),('item',5),('enemy',2),('decoration',3)):
         if role=='hero' and context.get('hero_visual'):continue

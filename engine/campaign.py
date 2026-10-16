@@ -63,7 +63,6 @@ def validate(raw,first=True,existing=None,corrections=None):
     if seen!=ids or not rolling and (len(pairs)<len(ids) or max(map(len,adj.values()))<3):raise InvalidPatch('chapter graph needs connected branches and at least one loop, not a linear chain')
     if max(map(len,adj.values()))>6:raise InvalidPatch('limit each location to six chapter routes')
     if any(sum(key in (e['a'],e['b']) for e in out['links'])>6 for key in ids):raise InvalidPatch('limit each location to six physical routes, including parallel routes')
-    # The arrival cannot be stranded behind unknown flags.
     if not any((start==e['a'] or start==e['b'] and not e['one_way']) and not e['hidden'] and satisfied(e['requires'],out['flags']) for e in out['links']):raise InvalidPatch('arrival needs an initially usable visible route')
     directed_seen={start};queue=deque([start])
     while queue:

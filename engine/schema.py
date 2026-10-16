@@ -213,7 +213,6 @@ def _parse_patch(raw,expected,context=None):
    from .visuals import validate_visuals
    out['reaction']['visuals']=validate_visuals(r['visuals'])
   if 'paint' in r:
-   # Coordinates are checked against the actual current map at application time.
    from .content import paint_commands
    out['reaction']['paint']=paint_commands(r['paint'],96,72)
   out['reaction']['object_updates']=[]

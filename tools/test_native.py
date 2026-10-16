@@ -71,8 +71,6 @@ with tempfile.TemporaryDirectory() as td:
     fixture_worker=None
     if content_test:
         def ready_waiting_exit():
-            # Simulate a model response arriving while the native wait panel is
-            # open. No test-only HTTP endpoint and no cloud/provider request.
             while not fixture_stop.wait(.02):
                 with server.world.lock:
                     waiting=server.world.state['ui'].get('kind')=='pending_exit'
@@ -86,7 +84,6 @@ with tempfile.TemporaryDirectory() as td:
     server.director.start_worker()
     worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
     try:
-        # 测试客户端只读取本次临时服务的实例信息，避免误用机器上旧启动器的 runtime.json。
         runtime_file=Path(td)/'runtime.json'
         runtime_file.write_text(json.dumps({'url':'http://127.0.0.1:'+str(server.server_port),
                                             'token':server.token,'instance_id':server.instance_id}),encoding='utf-8')

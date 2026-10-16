@@ -1,5 +1,4 @@
 extends Node
-## Music, ambience and bounded cue playback from committed game data.
 const Library = preload("res://client/asset_library.gd")
 const SAMPLE_RATE: int = 16000
 var music_players: Array[AudioStreamPlayer] = []
@@ -61,7 +60,6 @@ func _process(delta: float) -> void:
 		var weight: float = blend if i == current_slot else 1-blend
 		music_players[i].volume_db = linear_to_db(maxf(.00001,gains[i]*weight))
 		if i != current_slot and blend >= 1: music_players[i].stop()
-	# Half-second fade out + half-second fade in; generated sustained gain is capped.
 	ambience_gain = move_toward(ambience_gain, ambience_target_gain, delta * .04)
 	if ambience_switch_pending and ambience_gain <= .00001:
 		ambience.stop()

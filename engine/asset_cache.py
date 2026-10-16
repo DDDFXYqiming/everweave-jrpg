@@ -52,8 +52,6 @@ def valid_file(path, sha, size=None):
 
 def atomic_write(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Unique staging names also allow two different save launchers to prepare
-    # the same immutable cache safely. Never expose partially downloaded files.
     fd, name = tempfile.mkstemp(prefix='.asset-', suffix='.tmp', dir=path.parent)
     temporary = Path(name)
     try:
@@ -109,8 +107,6 @@ def prepare(root=ROOT, *, download=False, cache=None, verify_only=False, progres
         if missing:
             raise ValueError(f'{len(missing)} assets missing or damaged; run python -m engine.asset_cache --download')
         return dict(assets=len(entries),prepared=0)
-    # The client decodes these raw files directly. Importing every cached PNG/
-    # OGG again as Godot resources adds duplicate disk use and startup work.
     for folder in (library/'blobs',root/'userdata'):
         marker=folder/'.gdignore'
         if not marker.exists():atomic_write(marker,b'')
@@ -119,7 +115,7 @@ def prepare(root=ROOT, *, download=False, cache=None, verify_only=False, progres
     for key, entry in missing.items():
         path = asset_path(root, entry)
         if valid_file(path, entry['sha256'], entry['bytes']):
-            continue  # Another entry or launcher already materialized these bytes.
+            continue
         source = sources[entry['source']]
         if source.get('adapter') == 'registered':
             if not download or not entry.get('download'):
@@ -130,7 +126,6 @@ def prepare(root=ROOT, *, download=False, cache=None, verify_only=False, progres
             sha = source['sha256']
             if sha not in packages:
                 package_path = cache / (sha + source['extension'])
-                # Reuse packages downloaded by the older development importer.
                 old_path = cache / (entry['source'] + source['extension'])
                 if valid_file(package_path, sha):
                     packages[sha] = package_path.read_bytes()

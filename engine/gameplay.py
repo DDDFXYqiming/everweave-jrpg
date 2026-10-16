@@ -76,7 +76,6 @@ def register_objectives(world, region):
 
 
 def reaction(world, region, patch):
-    # New drawing recipes may be added without rewriting a known character.
     ids=[e.get('local_id',e.get('id')) for e in region['entities']]
     if len(ids)!=len(set(ids)): raise RuleError('ambiguous local entity ID; invent a fresh ID')
     if 'visuals' in patch:
@@ -143,8 +142,6 @@ def item_availability(world,item):
         if not r:reason='地区尚未就绪。'
         elif item.get('origin',r['id'])!=r['id'] and item_local_dependency(use):reason='此物品的交互绑定原地区；请返回后使用。'
         else:
-            # Evaluate on a private view so inspecting conditions cannot alter
-            # player/object state or spend the live runtime's execution budget.
             view=copy.copy(world);view.state=dict(world.state,player=copy.deepcopy(p))
             vm=Runtime(view,copy.deepcopy(r))
             try:
@@ -212,7 +209,6 @@ def action(world, a):
                 availability=item_availability(world,item)
                 if not availability['enabled']:raise RuleError(availability['blocked_reason'])
                 vm = Runtime(world, r); use = item['use']
-                # Local-object dependencies cannot silently bind to a different region.
                 if item.get('origin', r['id']) != r['id'] and item_local_dependency(use):
                     raise RuleError('此物品的交互绑定原地区；请返回后使用。')
                 if not vm.expr(use['when']): raise RuleError('当前不满足物品使用条件。')
@@ -240,7 +236,6 @@ def action(world, a):
 
 
 def show_messages(world, vm):
-    # 叙事消息可能重复，重复内容不再弹窗打断玩家。
     fresh = [m for m in vm.messages[-6:] if m not in world.state.get('seen_messages', [])]
     if fresh and not world.state.get('battle') and not world.state['ui']:
         world.state['ui'] = dict(kind='message', title='世界发生了变化', system_title=True, lines=fresh)
@@ -285,7 +280,6 @@ def combat(world, move):
     if not acted:
         p['hp'] = max(0, p['hp']-b['attack']); b['log'].append(b['name']+f"造成 {b['attack']} 点伤害。")
     vm.emit('turn_end', target=b['id'], advance=True)
-    # 技能文案可能固定不变，重复条目不再写入战斗日志。
     b['log'] = (b['log']+[m for m in vm.messages if m not in b['log']])[-7:]
     if vm.end_result == 'escape': s['battle'] = None
     elif p['hp'] <= 0: world._defeat()

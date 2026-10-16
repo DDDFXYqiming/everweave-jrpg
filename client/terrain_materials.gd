@@ -1,5 +1,4 @@
 extends RefCounted
-## Presentation-only material sampling. No collision, placement or model requests.
 const Compiler = preload("res://client/visual_compiler.gd")
 const Library = preload("res://client/asset_library.gd")
 var styles: Dictionary = {}
@@ -53,7 +52,6 @@ func compile_style(style: Dictionary) -> Dictionary:
 		details.append(ImageTexture.create_from_image(picture))
 	var allowed: Array[int] = []
 	for tile in style.tiles:allowed.append(int(tile))
-	# 细节点阵按密度铺陈，密度过高会糊成噪点，这里给一个上限。
 	return {"base":bases,"details":details,"density":minf(float(style.get("detail_density",.18)),.22),"tiles":allowed,"legacy":style.get("legacy",false)}
 
 func texture(key: String, tile: int, seed_value: int, x: int, y: int) -> Texture2D:
@@ -82,7 +80,6 @@ func edges(canvas: CanvasItem, grid: Array, x: int, y: int, at: Vector2, extent:
 	var tile: int = int(grid[y][x])
 	if not tile in [1,2,3]:return
 	var ground := Color(str(palette.get("ground","#668855")))
-	# Only soften inside the painted tile. Walls retain their full blocked silhouette.
 	for side in range(4):
 		var offset: Vector2i = [Vector2i.UP,Vector2i.RIGHT,Vector2i.DOWN,Vector2i.LEFT][side]
 		var nx: int = x+offset.x

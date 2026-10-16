@@ -33,7 +33,6 @@ def main():
     provider='chatgpt_subscription' if args.transport=='direct' else 'codex_subscription'
     d.configure(dict(provider=provider,model='gpt-5.6-luna',reasoning_effort=args.effort,offline=False,max_calls=args.max_calls,task_timeout_seconds=args.timeout_seconds))
     d.cfg.update(codex_timeout_seconds=args.timeout_seconds,_codex_partial_dir=str(out/'partial'))
-    # Print only counters and stages. The reasoning text never enters these logs.
     def progress(p):print(json.dumps({k:p[k] for k in ('stage','elapsed_seconds','last_event_age','reasoning_chars','output_chars','errors','retries')},ensure_ascii=False),flush=True)
     original=ChatProvider.generate;traces=[]
     def write(name,value):(out/name).write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf8')

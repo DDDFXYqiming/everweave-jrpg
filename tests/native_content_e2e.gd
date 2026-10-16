@@ -1,5 +1,4 @@
 extends SceneTree
-## Actual UI/input routing + HTTP actions + authoritative executable content.
 var main
 var phase: String = "startup"
 

@@ -1,5 +1,4 @@
 extends RefCounted
-## Original 16-pixel silhouettes; shared HUD and fieldbook vocabulary.
 static var cache: Dictionary = {}
 const SHAPES := {
 	"bag": ["    ####    ","   #    #   ","   #    #   ","  ########  "," ##      ## "," #  ####  # "," #  #  #  # "," #  ####  # "," #        # "," ########## "],

@@ -257,8 +257,6 @@ class DirectorDiagnosticTests(unittest.TestCase):
 
     def test_changed_story_does_not_spend_a_repair_on_stale_invalid_json(self):
         self.w.apply_patch(authored_patch(),self.w.context())
-        # Only reactions depend on the whole current story. A changed target
-        # outline, tested separately, invalidates a region request.
         for target in self.w.state['topology']['r0']['children']:
             self.w.state['topology'][target]['ready']=True
         self.w.reaction_needed=True
@@ -276,7 +274,6 @@ class DirectorDiagnosticTests(unittest.TestCase):
         self.w.apply_patch(authored_patch(),self.w.context())
         target=self.w.state['topology']['r0']['children'][0]
         def answer(provider,ctx,kind,repair=''):
-            # A different response/readied draft was entered while this one ran.
             self.w.state['topology'][target].update(ready=True,visited=True)
             raise ProviderError('outdated refresh failure')
         with patch.object(ChatProvider,'generate',answer):self.d.step()

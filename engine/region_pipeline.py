@@ -89,14 +89,13 @@ def av(raw,contract,context):
     from .audio import validate_audio
     visual_value=value['visuals']
     if isinstance(visual_value,dict) and set(visual_value)-{'style','terrain','palette','sprites','scenery','density','bindings'}=={'scene'}:
-        visual_value=copy.deepcopy(visual_value);visual_value.pop('scene')  # AV has no spatial authority; this hint is redundant.
+        visual_value=copy.deepcopy(visual_value);visual_value.pop('scene')
     audio_value=value['audio']
     if isinstance(audio_value,dict) and isinstance(audio_value.get('music'),dict):
         misplaced=set(audio_value['music'])&{'ambience','cues','bindings','objects'}
         if misplaced and not misplaced&set(audio_value):
             audio_value=copy.deepcopy(audio_value)
             for key in misplaced:audio_value[key]=audio_value['music'].pop(key)
-    # 与整区解析共享音频简写规则，只做格式归一化，不解析尚未合并的对象身份。
     from .normalization import Normalizer,compact_visual_polygons
     visual_value=copy.deepcopy(visual_value)
     compact_visual_polygons(visual_value)
@@ -112,8 +111,6 @@ def av(raw,contract,context):
     missing=required-set(visuals['sprites'])-set(visuals.get('bindings',{}))
     if missing:raise PipelineError('audiovisual worker omitted sprites: '+', '.join(sorted(missing)),component='audiovisual')
     if not audio.get('music',{}).get('explore'):raise PipelineError('audiovisual worker omitted exploration music',component='audiovisual')
-    # Validate here for component-local diagnostics, then let the normal region
-    # parser perform the single canonical normalization after assembly.
     return visual_value,audio_value
 
 
@@ -146,7 +143,6 @@ def gameplay(game_raw,contract):
 def assemble(game_raw,av_raw,contract,context):
     value=gameplay(game_raw,contract);body=value['region']
     visuals,audio=av(av_raw,contract,context);body['visuals']=visuals;body['audio']=audio
-    # 根据实际玩法引用检查两路交集，错误交给能补全定义的视听组件。
     missing=[]
     def walk(value,path):
         if isinstance(value,list):
@@ -213,7 +209,6 @@ def generate(context,system,user,cfg):
         library=world_context.get('library_candidates') or {}
         audit.emit('region.context.split',**cfg.get('_request_meta',{}),source_chars=len(user),gameplay_chars=len(game_context),audiovisual_chars=len(av_context),contract_chars=len(json.dumps(contract_value,ensure_ascii=False,separators=(',',':'))),image_candidates=len(library.get('images',[])),audio_candidates=len(library.get('audio',[])),module_candidates=len(library.get('modules',[])),material_candidates=len(library.get('materials',[])))
     def run(component,prompt_text,input_text,outer=False):
-        # 兼容独立管线工具；正式导演由每次实际请求领取预算。
         call=cfg.get('_request_meta',{}).get('call') if outer and not cfg.get('_region_reserve_all') else reserve(component)
         local=dict(cfg,_request_meta=dict(cfg.get('_request_meta',{}),component=component,call=call))
         progress=cfg.get('_codex_progress')

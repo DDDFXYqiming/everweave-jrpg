@@ -24,8 +24,6 @@ def select(value, keys):
 
 
 def visible_entities(snapshot):
-    # The current client displays the whole current room, without fog of war.
-    # Hidden campaign exits are removed by World.snapshot; spent actors vanish.
     return [e for e in (snapshot.get('region') or {}).get('entities', [])
             if not e.get('spent') and not e.get('hidden')]
 
@@ -48,7 +46,7 @@ def observe(s):
     result['inventory'] = [select(i, ('id', 'name', 'description', 'quantity', 'equipped', 'usable')) for i in s.get('inventory', [])]
     result['goals'] = [select(q, ('id', 'name', 'description', 'status')) for q in s.get('quests', [])]
     if s.get('adventure'):
-        result['adventure'] = s['adventure']  # Already a public projection in World.
+        result['adventure'] = s['adventure']
     result['journal'] = s.get('journal', [])
     result['ui'] = select(ui, ('kind', 'title', 'lines', 'ready', 'name'))
     for key in ('actions', 'choices'):
@@ -88,7 +86,6 @@ class LocalAPI:
             error = json.loads(exc.read()).get('error', 'Game action rejected')
             raise ValueError(error) from None
         except (URLError, TimeoutError) as exc:
-            # A timed-out mutation may have committed: never replay it automatically.
             raise ValueError('Local request failed; observe again before deciding whether to repeat the action.') from exc
 
     def snapshot(self): return self.request('/state')

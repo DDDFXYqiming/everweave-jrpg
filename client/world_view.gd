@@ -1,7 +1,5 @@
 extends Control
 const L = preload("res://client/i18n.gd")
-## Atlas-backed pixel renderer. Only validated runtime data reaches this layer.
-## All scene placement is data; the LLM never supplies GDScript or resource paths.
 
 signal entity_clicked(entity_id: String)
 signal map_requested()
@@ -123,7 +121,6 @@ func _draw() -> void:
 			var painted: bool = false
 			if not generated.is_empty() and not surfaces.is_empty():
 				var surface: String = str(surfaces[y][x])
-				# Older saved rooms may have the floor recipe on blocked wall cells.
 				if typ==3 and not surface.is_empty() and room_floor_keys.get(Vector2i(x,y),"")==surface:surface=""
 				if not surface.is_empty() and generated.has(surface):
 					var texture: Texture2D = materials.texture(surface,typ,int(region.seed),x,y) if materials.styles.has(surface) else VisualCompiler.texture(surface,generated,elapsed)
@@ -212,7 +209,6 @@ func _draw_weather(weather: String) -> void:
 			draw_rect(Rect2(0, top, size.x, 45), Color(0.62, 0.72, 0.80, 0.055))
 
 func _draw_minimap() -> void:
-	# 小地图放大到一眼能读出地形，底色加描边，避免缩成一团像素。
 	var origin := Vector2(size.x - 216.0, 14.0)
 	var hovered: bool = Rect2(origin - Vector2(6,6),Vector2(204,158)).has_point(get_local_mouse_position())
 	var opacity: float = 1.0 if hovered else .82

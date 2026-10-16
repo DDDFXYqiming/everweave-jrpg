@@ -140,7 +140,6 @@ for name,im in art.items():
  atlas.alpha_composite(im,(x,y));index[name]={'rect':[x,y,im.width,im.height]};x+=im.width+2;row_h=max(row_h,im.height)
 atlas.save(OUT/'atlas.png');(OUT/'atlas.json').write_text(json.dumps(index,indent=2),encoding='utf8')
 
-# A quiet original 24-second chiptune loop (no sampled recordings).
 rate=22050; seconds=24; notes=[57,64,69,71,69,64,60,64,55,62,67,69,67,62,59,62]
 with wave.open(str(OUT/'wander.wav'),'wb') as wav:
  wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(rate)

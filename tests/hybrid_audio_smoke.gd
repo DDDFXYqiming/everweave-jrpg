@@ -27,8 +27,6 @@ func _run() -> void:
 	var sound = Soundscape.new()
 	root.add_child(sound)
 	await process_frame
-	# Capture the actual channel mix arriving at Master. The mute flag on Master
-	# and zero channel samples together verify the entire playback path.
 	var bus: int = AudioServer.get_bus_index("Master")
 	var capture := AudioEffectCapture.new()
 	capture.buffer_length = .2
@@ -93,7 +91,6 @@ func _run() -> void:
 	for sample in capture.get_buffer(capture.get_frames_available()): resumed_power += sample.length_squared()
 	assert(resumed_power > .000001)
 	assert(sound.played_effects == before_mute,"Muted queued cues replayed on restore")
-	# The persistent hum responds to Ambience independently from SFX.
 	for player in sound.music_players: player.stop()
 	for player in sound.effect_players: player.stop()
 	capture.clear_buffer()

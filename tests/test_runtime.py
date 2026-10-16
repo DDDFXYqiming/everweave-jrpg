@@ -239,7 +239,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(self.w.state['topology']['r0a']['ready'])
         self.assertFalse(self.w.state['topology']['r0a'].get('needs_refresh',False))
         self.w.action({'op':'close'})
-        self.d.step()  # The reaction explicitly changes the unseen outline.
+        self.d.step()
         self.assertTrue(self.w.state['topology']['r0a']['needs_refresh'])
         for _ in range(3):self.d.step()
         self.assertEqual(original,self.w.region()['tiles'])

@@ -1,5 +1,4 @@
 extends Control
-## Small battle stage with shared pixel assets; combat outcomes are server-authoritative.
 var atlas: Texture2D = preload("res://assets/atlas.png")
 var sprites: Dictionary = {}
 var battle: Dictionary = {}

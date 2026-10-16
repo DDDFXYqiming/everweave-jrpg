@@ -1,5 +1,4 @@
 extends SceneTree
-## Opens an existing generated save through the real client and local HTTP bridge.
 var main
 
 func _initialize() -> void:

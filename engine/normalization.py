@@ -24,7 +24,6 @@ def item_local_id(item, region_id):
     if item.get('local_id'):
         return item['local_id']
     local = key.removeprefix(region_id + ':')
-    # Compatibility for IDs allocated by the runtime before local_id was saved.
     return re.sub(r'^event_[0-9]+_', '', local)
 
 
@@ -161,7 +160,6 @@ class Normalizer:
         if other in raw:
             return
         if root=='region' and self.context.get('chapter_plan') and body.get('destinations')==[]:
-            # 章节路线已有权威定义，显式空列表与省略局部目的地完全等价。
             body.pop('destinations')
             self.record('region.destinations','empty_planned_destinations',[],None)
         if raw.get('type')=='json_object':
@@ -171,9 +169,6 @@ class Normalizer:
             self.move_field(raw, body, field, field, root + '.' + field)
         if root=='region' and isinstance(body.get('program'),dict) and isinstance(body['program'].get('scenes'),list):
             self.move_field(body['program'],body,'scenes',root+'.program.scenes',root+'.scenes')
-        # A library ID in a typed sprite/surface field is already unambiguous.
-        # Materialize its local sprite definition rather than spend a model
-        # repair asking for an otherwise redundant alias declaration.
         from .library import catalog
         art=body.get('visuals')
         for path,before,after in compact_visual_polygons(art,root+'.visuals'):
@@ -350,7 +345,7 @@ class Normalizer:
 
     def ref(self, scope, value, path, *, canonical=False, local_event=False):
         if not isinstance(value, str):
-            return value  # The typed validator reports non-string references.
+            return value
         if scope=='sprites' and value not in self.maps[scope] and value not in self.existing[scope]:
             from .library import catalog
             if value in catalog() and catalog()[value]['kind']=='image' and isinstance(self.body,dict):
@@ -394,7 +389,6 @@ class Normalizer:
             elif scope in ('objects', 'items'):
                 result = self.target + ':' + result
         elif value not in self.maps[scope] and result==value:
-            # Existing canonical item/object references are preserved exactly.
             if scope in ('items','objects') and value in self.existing[scope] and not local_event:
                 return value
             prefix = self.target + ':' if self.target else None
@@ -456,8 +450,6 @@ class Normalizer:
             for field in ('surface','wall_surface','door_surface'):
                 if field in node:self.field_ref(node,field,'sprites',path)
             for key, value in node.items():
-                # Plain scalar values and prose are untouched. Reference expressions
-                # and effects are handled only at their documented syntax locations.
                 if key not in ('vars','state','args'): self.program_refs(value, path + '.' + key)
 
     def references(self):

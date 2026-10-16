@@ -88,8 +88,6 @@ def dress(region):
         skin=skins[y][x] if skins else ''
         if skin in no_dressing:return False
         roles=surface_roles.get(skin,[])
-        # Older models sometimes label an entire indoor floor PATH, or a road
-        # GROUND. Use an explicit material role when available; never block it.
         if roles:return C.GROUND in roles
         return tile==C.GROUND
     for e in objects+[dict(x=region['spawn'][0],y=region['spawn'][1])]:
@@ -107,7 +105,6 @@ def dress(region):
     for roll,x,y in sorted(candidates):
         if count>=192:break
         key=choices[(roll//10000)%len(choices)];sw,sh=sprites[key].get('size',[16,16])
-        # Match renderer's bottom-center visual bounds, not just a one-cell anchor.
         left=math.floor(x+.5-sw/32);right=math.ceil(x+.5+sw/32);top=math.floor(y+1-sh/16)
         area={(xx,yy) for yy in range(top,y+1) for xx in range(left,right)}
         if area & reserved:continue
@@ -131,7 +128,6 @@ def validate_space(region, player=None, full=False):
     if not (0 <= start[0] < w and 0 <= start[1] < h) or region['tiles'][start[1]][start[0]] in C.BLOCKED:
         raise InvalidPatch('player/spawn is in blocked terrain')
     if solid_at(region, *start): raise InvalidPatch('solid object overlaps player/spawn')
-    # Dynamic objects can be doors; do not erase their puzzle to auto-connect them.
     area = reachable(region['tiles'], start)
     gates = [e for e in region['entities'] if e['kind'] == 'exit']
     if gates and not any((g['x'], g['y']) in area for g in gates):

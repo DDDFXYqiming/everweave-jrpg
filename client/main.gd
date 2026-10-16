@@ -1,7 +1,5 @@
 extends Control
 const L = preload("res://client/i18n.gd")
-## Thin Godot client: pixel world, controls and presentation. No paid model calls here.
-## A single local standard-library Python helper owns state, validation and the director.
 
 const WorldView = preload("res://client/world_view.gd")
 const BattleView = preload("res://client/battle_view.gd")
@@ -253,7 +251,6 @@ func _vbox(parent: Node) -> VBoxContainer:
 
 func _read_connection() -> void:
 	if OS.has_feature("web"):
-		# Web 导出与本机服务同源；浏览器保存 HttpOnly 会话 cookie，游戏不读取令牌。
 		var browser_location: Variant = JavaScriptBridge.get_interface("location")
 		var origin: String = str(browser_location.origin) if browser_location else ""
 		if origin.begins_with("http://127.0.0.1:"):
@@ -286,7 +283,6 @@ func _read_connection() -> void:
 			if session_token.is_empty():session_token = str(parsed.get("token", ""))
 			instance = str(parsed.get("instance_id", ""))
 	service_connection.configure(runtime_file,instance)
-	# This client must never send its local session credential to a remote hostname.
 	if not backend_url.begins_with("http://127.0.0.1:"):
 		backend_url = ""
 		session_token = ""
@@ -815,7 +811,6 @@ func _poll() -> void:
 
 func _recover_connection() -> void:
 	if OS.has_feature("web"):
-		# Web 没有原生 runtime.json；同源地址不变，服务换代后刷新页面取得新 cookie。
 		if not backend_url.is_empty():_poll()
 		return
 	var value: Dictionary = service_connection.runtime()
@@ -864,7 +859,6 @@ func _poll_complete(result: int, code: int, _headers_unused: PackedStringArray, 
 	poll_busy = false
 	var data := _decode(result, code, body)
 	if data.has("error"):
-		# 服务重启会让 web 会话失效，401 时自动刷新页面重新握手。
 		if code == 401 and OS.has_feature("web"):
 			JavaScriptBridge.eval("location.reload()")
 			return
@@ -911,7 +905,6 @@ func _action_complete(result: int, code: int, _headers_unused: PackedStringArray
 	blocked_move_until = Time.get_ticks_msec() + 2000 if blocked_move else 0
 	_accept_snapshot(data)
 	if action_route in ["/start", "/configure"]:
-		# Do not retain the credential in the visible control after handoff.
 		key_input.text = ""
 		_sync_configuration()
 	if switch_after_action:
@@ -933,7 +926,6 @@ func _accept_snapshot(data: Dictionary) -> void:
 	if retired_epochs.has(incoming_epoch): return
 	if incoming_epoch != previous_epoch and not previous_epoch.is_empty():
 		retired_epochs[previous_epoch] = true
-	# Requests may return out of order. Never roll the client back to older game state.
 	if str(data.get("epoch", "")) == str(state.get("epoch", "")) and int(data.get("version", 0)) < int(state.get("version", 0)):
 		return
 	if str(data.get("epoch", "")) != str(state.get("epoch", "")):
@@ -987,7 +979,6 @@ func _render() -> void:
 	if world_title=="未写之境 · Everweave":world_title=L.t("未写之境")
 	subtitle_label.text = L.t("第 %d 天 · %02d:%02d") % [day, hour, minute]
 	title_label.tooltip_text = world_title + " · " + title_label.text
-	# 等级与金币放在旅途面板，窄屏右上角只保留生命与补给。
 	hud_meta.text = L.t("等级 %d · 金币 %d") % [int(p.get("level", 1)), int(p.get("gold", 0))]
 	hp_bar.max_value = float(p.get("max_hp", 1))
 	hp_bar.value = float(p.get("hp", 0))
@@ -1142,7 +1133,6 @@ func _render_modal() -> void:
 		modal_overlay.hide()
 		return
 	modal_overlay.show()
-	# 世界变化提示只做播报，不挡住操作，稍后自动收起。
 	if not ui.is_empty() and str(ui.get("kind", "")) == "message" and signature != _auto_dismiss_signature:
 		_auto_dismiss_signature = signature
 		_auto_dismiss_message(signature)
@@ -1235,7 +1225,6 @@ func _render_modal() -> void:
 	)
 
 func _auto_dismiss_message(signature_value: String) -> void:
-	# 世界变化提示只播报一次，留出读完的时间就自行收起，不干扰移动。
 	await get_tree().create_timer(6.0).timeout
 	if signature_value != modal_signature: return
 	var current: Variant = state.get("ui", {})
@@ -1386,7 +1375,6 @@ func _apply_game_spec() -> void:
 		hud_ration_text.text = "%s %d / %d" % [str(first_number.label), number_filled, number_total]
 
 func _update_hud_slots(total: int, filled: int) -> void:
-	# 大上限资源只画十二格，文字仍显示准确数值；复用格子避免每次同步都重建控件。
 	var slots: int = mini(total, 12)
 	var lit: int = clampi(roundi(float(filled) * float(slots) / maxf(1.0, float(total))), 0, slots)
 	if filled > 0 and lit == 0: lit = 1

@@ -97,20 +97,19 @@ class GameServer(ThreadingHTTPServer):
    from .codex_provider import executable,CodexError
    try:executable();s['configuration']['codex_available']=True
    except CodexError:s['configuration']['codex_available']=False
-   s['configuration']['credential_available']=False  # Login is checked by app-server, never guessed from a file.
+   s['configuration']['credential_available']=False
   else:s['configuration']['credential_available']=bool((self.director.cfg or {}).get('api_key') or self.saved_keys.get(base) or (official_deepseek(base) and os.environ.get('DEEPSEEK_API_KEY')) or (official_opencode_go(base) and os.environ.get('OPENCODE_GO_API_KEY')))
   return s
 
 class Handler(BaseHTTPRequestHandler):
  server_version='EverweaveLocal/0.1'
- def log_message(self,*args): pass  # Never log secrets, prompts, URLs, request bodies or auth headers.
+ def log_message(self,*args): pass
  def reply(self,status,value):
   body=dumps(value).encode(); self.send_response(status); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(body))); self.send_header('Cache-Control','no-store'); self.send_header('X-Content-Type-Options','nosniff'); self.end_headers()
   try: self.wfile.write(body)
   except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError): pass
  def authorized(self):
   expected='Bearer '+self.server.token; supplied=self.headers.get('Authorization','')
-  # Web pages cannot use this API: no CORS; reject browser origins and foreign Host headers.
   host=self.headers.get('Host','').split(':')[0]
   return not self.headers.get('Origin') and host in ('127.0.0.1','localhost') and hmac.compare_digest(supplied.encode("utf-8"),expected.encode("utf-8"))
  def do_OPTIONS(self): self.reply(403,dict(error='Browser access is disabled.'))
@@ -163,7 +162,6 @@ class Handler(BaseHTTPRequestHandler):
      self.reply(200,server.snapshot()); return
     if self.path=='/start':
      if w.state and not data.get('replace_save',False): raise GameError('新世界会覆盖当前存档，请明确确认。')
-     # Validate all inputs before replacing an existing save.
      setting=data.get('setting','')
      if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
      if data.get('provider')=='chatgpt_subscription' and not server.subscription.public()['ready']:raise GameError('请先完成 Everweave 的 ChatGPT 订阅授权。')

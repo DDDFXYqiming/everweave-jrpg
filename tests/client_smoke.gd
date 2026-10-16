@@ -1,6 +1,4 @@
 extends SceneTree
-## Run with the actual engine: godot --headless --path . --script res://tests/client_smoke.gd
-## This is not a replacement for native rendering/playtesting.
 
 func _initialize() -> void:
 	_run.call_deferred()

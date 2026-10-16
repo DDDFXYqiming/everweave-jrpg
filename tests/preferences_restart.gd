@@ -1,5 +1,4 @@
 extends SceneTree
-## Executed twice against a test-only settings file to verify process restart.
 func _initialize() -> void: _run.call_deferred()
 func _run() -> void:
 	var prefs = root.get_node("AudioPrefs")

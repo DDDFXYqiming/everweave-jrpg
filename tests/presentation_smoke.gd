@@ -35,7 +35,7 @@ func _run() -> void:
 	accidental_wait.keycode = KEY_PERIOD
 	accidental_wait.pressed = true
 	main._unhandled_key_input(accidental_wait)
-	assert(not main.action_busy) # Reading the bag cannot advance the game.
+	assert(not main.action_busy)
 	var close_book := InputEventKey.new()
 	close_book.keycode = KEY_ESCAPE
 	close_book.pressed = true

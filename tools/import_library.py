@@ -107,8 +107,6 @@ def main():
                             output=io.BytesIO(encode_rgba(image.width,image.height,image.tobytes()))
                             role='building' if 'house' in title else 'vegetation'
                             add(prefix+'_'+title,output.getvalue(),'.png',source,title.replace('_',' '),'image',[role],theme+' '+title.replace('_',' '),size=[48,48],perspective='top_down',family='kenney_tiny',anchor='bottom_center',footprint=[3,2] if role=='building' else [2,1],animation='static',derived_from_tiles=tiles,curated=True)
-                        # Tall trees are a crown over its matching trunk tile. The
-                        # 3x3 forest autotile fragments are not standalone trees.
                         for old in ('pine','round_tree','large_tree','autumn_tree'):
                             assets[prefix+'_'+old]['curated']=False
                         for title,tiles in {'pine':[4,16],'autumn_tree':[3,15]}.items():

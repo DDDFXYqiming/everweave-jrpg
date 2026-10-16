@@ -84,7 +84,7 @@ class ExecutableTests(unittest.TestCase):
         self.w.action({'op':'combat','move':'rule:resonate'})
         self.assertEqual(self.w.state['battle']['hp'],30)
         self.assertEqual(self.w.state['player']['mp'],21)
-        self.assertEqual(self.w.state['player']['hp'],89) # authored turn-dependent opponent
+        self.assertEqual(self.w.state['player']['hp'],89)
         for _ in range(2):self.w.action({'op':'combat','move':'rule:resonate'})
         self.assertIsNone(self.w.state['battle'])
         self.assertTrue(self.w.state['facts']['defeated:r0:foe'])

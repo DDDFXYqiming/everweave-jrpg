@@ -199,13 +199,9 @@ class ChatProvider:
    allowance={'minimal':8192,'low':8192,'medium':16384,'high':16384,'xhigh':32768,'max':32768,'ultra':32768,'default':16384}[effort]
    payload['max_tokens']=allowance
   if kind=='region':
-   # V2 includes a complete scene, executable rules and drawing recipes. Use
-   # DeepSeek's 64K thinking allowance without increasing the reasoning effort.
    minimum=65536 if thinking and context.get('content_version')==2 else 24576 if context.get('content_version')==2 else 16384
    payload['max_tokens']=max(payload['max_tokens'],minimum)
   elif context.get('content_version')==2:
-   # A v2 reaction can author rules and new art too; 8K combined reasoning and
-   # JSON truncated real responses. This is a ceiling, not a requested length.
    payload['max_tokens']=max(payload['max_tokens'],32768 if thinking else 8192)
   base=validate_url(cfg['base_url']); url=base if base.endswith('/chat/completions') else base+'/chat/completions'
   streaming=official_opencode_go(base)
@@ -227,7 +223,6 @@ class ChatProvider:
    return True
   while True:
    try:
-    # 非流式请求要等整段生成返回；v2 区域允许 64K 预算，90 秒读超时会掐断正常生成。
     with opener.open(req,timeout=300 if thinking else 60) as response:
      limit=1024000 if thinking else 192000
      if streaming:data=read_chat_stream(response,limit,cfg.get('_task_deadline'),cfg.get('_stream_progress'))
@@ -459,7 +454,6 @@ class Director:
    if not available('campaign',s['current']) or any(k[1]=='campaign' for k in self.in_flight):return None
    return w.context(s['current'],'campaign'),copy.deepcopy(self.cfg),self.generation
   from . import adventure
-  # A player's waiting exit and a usable near-term buffer own the first slot.
   waiting=s.get('ui',{}).get('target') if s.get('ui',{}).get('kind')=='pending_exit' else None
   if waiting and waiting in s['topology'] and not s['topology'][waiting]['ready'] and available('region',waiting):return region_job(waiting)
   if not s['topology'][s['current']]['ready']:
@@ -535,7 +529,7 @@ class Director:
      with self.world.lock:
       if time.monotonic()>=self.task_metrics[job_key]['_deadline']:raise ProviderError('生成任务已达到共享总时限。',diagnostics={'category':'deadline','deadline_seconds':cfg.get('task_timeout_seconds',900)})
       if self.calls>=cfg['max_calls']:
-       if error is not None:break  # Keep the actionable rejected-patch diagnosis.
+       if error is not None:break
        raise ProviderError('达到本次进程调用上限。')
       if not cfg.get('_parallel_region') or error is not None:
        self.calls+=1
@@ -657,7 +651,6 @@ class Director:
     error=exc
     repair_error=exc;repair_raw=raw
     with self.world.lock: self.rejected+=1
-    # 旧叙事的无效回复不值得再花一次修复请求；新事件会重新排队生成反应。
     with self.world.lock:
      stale_invalid_response=(kind=='reaction' and ctx['story_revision']!=self.world.state['story_revision'])
     if stale_invalid_response:break
@@ -693,7 +686,7 @@ class Director:
      continue
     break
    except Exception as exc:
-    error=exc; break  # Network failures never trigger an automatic retry storm.
+    error=exc; break
   with self.world.lock:
    self.in_flight.pop(job_key,None); self.busy=' / '.join(self.in_flight.values())
    if self.stop_event.is_set():self._finish_task(job_key,'stopped');return True

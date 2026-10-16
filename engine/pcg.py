@@ -51,7 +51,6 @@ def build_region(plan,rid,seed,depth,exits):
   x,y=place(lm['zone']); prop=dict(kind=lm['type'],x=x,y=y)
   if 'sprite' in lm:prop['sprite']=lm['sprite']
   props.append(prop)
-  # Landmark sprites are scenery. Their approach remains walkable and validated.
   important.append((x,y+1))
  item_ids={i['id']:rid+':'+i['id'] for i in plan.get('items',[])}
  for raw in plan['entities']:

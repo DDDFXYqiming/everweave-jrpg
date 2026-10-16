@@ -74,7 +74,6 @@ class CodexTelemetry:
         self.heartbeat()
 
     def stderr(self,line):
-        # Record classification/hash, not raw stderr which can contain credentials.
         low=line.lower();category=next((k for k in ('401','403','429','timeout','reconnect','retry','websocket','transport','config','error') if k in low),'diagnostic')
         self.audit.emit('codex.stderr',request_id=self.request_id,category=category,chars=len(line),sha256=hashlib.sha256(line.encode()).hexdigest())
 
@@ -90,7 +89,6 @@ class CodexTelemetry:
         self.emit('codex.request.finished',status=status,event_counts=dict(self.methods))
         if status!='completed' and self.partial_dir and self.partial:
             path=Path(self.partial_dir);path.mkdir(parents=True,exist_ok=True)
-            # Only assistant game-output fragments, never reasoning events.
             text='\n'.join(v for k,v in self.partial.items() if self.phases.get(k)!='commentary')
             artifact=path/(self.request_id+'.partial.txt');artifact.write_text(text,encoding='utf8')
             self.emit('codex.partial.saved',file=artifact.name,chars=len(text))

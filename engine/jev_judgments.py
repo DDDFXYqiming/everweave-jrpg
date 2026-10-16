@@ -75,7 +75,7 @@ def _asset_roles(slot):
     if slot in ('ground_surface','path_surface','wall_surface','accent_surface'):return ('ground','decoration')
     if slot=='focal':return ('object','building','item')
     if slot in ('npc','enemy','object','building','vegetation','item','hero','decoration'):return (slot,)
-    return ('npc','hero')  # named recurring cast
+    return ('npc','hero')
 
 
 def rank_assets(context,region_design,fallback,cancel_event=None):
@@ -90,7 +90,7 @@ def rank_assets(context,region_design,fallback,cancel_event=None):
         pool=candidate_pool(context);by_id={v['id']:v for v in pool['images']}
         slots=[];questions={};used_candidates=set()
         for slot,brief in region_design.get('slot_briefs',{}).items():
-            if slot.endswith('_surface'):continue  # materials and surface legality stay deterministic
+            if slot.endswith('_surface'):continue
             roles=_asset_roles(slot)
             options=[v for v in pool['images'] if set(roles)&set(v.get('roles',[]))]
             if not options:continue

@@ -247,7 +247,6 @@ def model_context(context,kind,hybrid=False):
         chapter=result['chapter_plan'];rid=context['target']
         neighbors={r['target'] for r in context.get('planned_routes',[])}|{rid}
         chapter['regions']=[r for r in chapter.get('regions',[]) if r['id'] in neighbors]
-        # Preserve complete route prerequisites, omit distant production instructions.
         relevant=set(context.get('required_flag_writes',[]))
         for route in context.get('planned_routes',[]):
             relevant.update(c['flag'] for c in route.get('requires',[])+route.get('discover',[]))

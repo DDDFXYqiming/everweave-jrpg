@@ -1,5 +1,4 @@
 extends SceneTree
-## Render the saved validation snapshot using the actual native client.
 
 func _initialize() -> void:
 	_run.call_deferred()

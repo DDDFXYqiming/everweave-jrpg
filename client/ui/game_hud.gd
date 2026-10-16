@@ -1,5 +1,4 @@
 extends Control
-## Presentation composition. main owns authoritative snapshots and network actions.
 const L = preload("res://client/i18n.gd")
 const Icons = preload("res://client/ui_icons.gd")
 const Pixel = preload("res://assets/fonts/FusionPixel.ttf")
@@ -51,7 +50,6 @@ func build(controller) -> void:
 	main.subtitle_label = main._label(titles,"",14,main.MUTED)
 	main.subtitle_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	main.subtitle_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	# 右上角用血条和格子条表达资源，避免落成一串数字。
 	main.stats_box = HBoxContainer.new()
 	main.stats_box.size_flags_horizontal = Control.SIZE_SHRINK_END
 	main.stats_box.alignment = BoxContainer.ALIGNMENT_END
@@ -80,7 +78,6 @@ func build(controller) -> void:
 	main.task_button.position = Vector2(16,16)
 	main.task_button.size = Vector2(420,52)
 	main.task_button.tooltip_text = L.t("行动记录 · Q")
-	# 与小地图保持同一层半透明底色，任务牌仍能在复杂地形上读清。
 	var task_style := StyleBoxFlat.new()
 	task_style.bg_color = Color(0.035,0.075,0.13,0.73)
 	task_style.border_color = Color(Color("c1a9ef"),0.41)
@@ -97,7 +94,6 @@ func build(controller) -> void:
 	var task_row := HBoxContainer.new()
 	task_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	task_margin.add_child(task_row)
-	# 任务标记用卷轴图标，比字母更像任务追踪器。
 	var marker := TextureRect.new()
 	marker.texture = Icons.get_icon("quest")
 	marker.custom_minimum_size = Vector2(26, 26)

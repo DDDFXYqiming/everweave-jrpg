@@ -26,7 +26,6 @@ def check_entry(world,parsed,context):
     probe=clone(world)
     try:
         rid=context['target']
-        # 首区安装本身会执行 enter；其他地区安装后逐入口试运行。
         probe._apply_patch(None,context,_validated=copy.deepcopy(parsed))
         if rid=='r0':return
         region=probe.region(rid)
@@ -133,10 +132,8 @@ def check_progress(world,body,context):
         for owner in list(reached):
             candidate=bodies.get(owner)
             if candidate is None:
-                # 未制作的可达地区可以提供其承诺的旗标，以及尚未知晓的资源/物品。
                 for key,source in chapter_data['flag_sources'].items():
                     if source==owner:flags[key]=UNKNOWN
-                # 有未知内容时不凭当前背包推断所有未来支付或钥匙不可能。
                 for key in resources:resources[key]=caps.get(key,1000000)
                 continue
             for entry in candidate.get('starting_loadout',{}).get('inventory',[]):items[item_key(entry['item_id'],owner)]=max(items.get(item_key(entry['item_id'],owner),0),entry['count'])

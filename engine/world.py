@@ -19,8 +19,6 @@ class World:
  def __init__(self,store):
   self.store=store; self.lock=threading.RLock(); self.state=store.load_state(); self.cache=OrderedDict(); self.reaction_needed=bool(self.state and self.state.get("director_reaction_pending",False))
   if self.state and self.state.get('prefetch_policy',1)<2:
-   # Earlier versions marked every draft dirty after any player story event.
-   # Keep prepared maps; only explicit outline changes request a full refresh.
    for node in self.state['topology'].values():
     if not node.get('refresh_reason'):node['needs_refresh']=False
    self.state['prefetch_policy']=2
@@ -124,7 +122,6 @@ class World:
   s=self.state
   if not s or context.get('epoch')!=s['epoch']:return False
   if context.get('kind')=='direction':return bool(adventure.state(self) and context.get('chapter_id')==s['campaign']['active'])
-  # 反应叙事先于后续世界推进产生，不因依赖漂移作废。
   if context.get('kind')!='reaction' and context.get('content_dependencies') and context['content_dependencies']!=adventure.dependencies(self,context):return False
   if context.get('kind')=='campaign':return bool(campaign.book(s) and s['campaign']['pending'] and context.get('campaign_revision')==s['campaign']['revision'])
   node=s['topology'].get(context.get('target'))
@@ -132,7 +129,6 @@ class World:
   if context.get('kind')=='region':
    return (not node.get('visited') and context.get('target_revision',0)==node.get('generation_revision',0)
            and context.get('target_parent',node.get('parent'))==node.get('parent'))
-  # 反应服务于刚发生的世界推进；玩家继续操作只会让世界前进，不会让反应失效。
   if context.get('kind')=='reaction':
    return (context.get('story_revision',0)<=s['story_revision'] and context.get('target')==s['current']
            and context.get('current_region',{}).get('id')==s['current'])
@@ -292,8 +288,6 @@ class World:
    check_entry(self,p,context)
    p['_playability']=dict(entry='verified',progress=progress)
   if p['kind']=='reaction':
-   # Validate registration, executable references and causal geometry together
-   # on an isolated copy so semantic failures enter the same bounded repair.
    from .storage import Store
    preview_store=Store(':memory:')
    try:
@@ -320,7 +314,6 @@ class World:
     if planned:pass
     elif p['region'].get('destinations'):
      children=[self._register_destination(rid,spec) for spec in p['region']['destinations']]
-     # The parent has never been visited: its unused outlines are still provisional.
      for old in node['children']:
       if old not in children:
        discarded.extend(self._discard_draft(old))

@@ -16,8 +16,6 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 ALLOWED_ROOTS={'engine','client','assets','docs','tests','tools','.github'}
 ALLOWED_FILES={'project.godot','default_bus_layout.tres','requirements.txt','README.md','README.en.md','LICENSE','LICENSE-NOTICE.md','launch.py','Start.ps1','Start.cmd','Publish-Private.ps1','.gitignore','.gitattributes','.editorconfig'}
-# The client preloads these fonts, so they are the only oversized binaries allowed in.
-# Pins live in one place: tests/test_artifacts.py checks the same sha256 values.
 LARGE_ASSETS={entry['file']:entry['sha256'] for entry in json.loads((ROOT/'assets/fonts/manifest.json').read_text(encoding='utf-8'))['fonts']}
 SKIP_DIRS={'.git','.godot','__pycache__','.pytest_cache','.venv','venv','saves','userdata','build','dist','exports'}
 
@@ -100,13 +98,10 @@ def main(argv=None):
         if remote.stdout.strip() not in (expected,expected.removesuffix('.git'),'git@github.com:'+repo+'.git'):
             raise RuntimeError('origin points somewhere else. It was not changed.')
     else:command(['git','remote','add','origin',expected])
-    # Local-only author identity; never change the user's global Git settings.
     if command(['git','config','user.name'],check=False).returncode:
         command(['git','config','--local','user.name',profile['login']])
     if command(['git','config','user.email'],check=False).returncode:
         command(['git','config','--local','user.email',str(profile['id'])+'+'+profile['login']+'@users.noreply.github.com'])
-    # Remove any stale staging selection from a reused project clone before staging our explicit allow-list.
-    # Refuse rather than silently unstage other work.
     staged=command(['git','diff','--cached','--name-only'],check=False).stdout.splitlines()
     if any(path not in files for path in staged):raise RuntimeError('Unexpected files are already staged. Review them manually first.')
     command(['git','add','--',*files])
@@ -114,7 +109,6 @@ def main(argv=None):
     if changes.returncode==1:
         command(['git','commit','-m','Implement live-directed pixel JRPG runtime, Godot client, original assets and tests'])
     elif changes.returncode!=0:raise RuntimeError('Could not inspect the staged changes.')
-    # Per-command credential helper, no persistent global credential configuration.
     command(['git','-c','credential.helper=','-c','credential.helper=!gh auth git-credential','push','--set-upstream','origin','main'])
     final=json.loads(command(['gh','api',f'repos/{repo}']).stdout)
     if final.get('private') is not True:raise RuntimeError('Repository privacy changed during the operation; inspect it immediately.')

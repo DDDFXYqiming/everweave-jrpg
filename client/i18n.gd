@@ -1,5 +1,4 @@
 extends RefCounted
-## Only framework strings pass through this catalog; authored world text stays intact.
 static var language: String = "zh"
 static var initialized: bool = false
 static var installed: bool = false

@@ -211,7 +211,6 @@ def program(value):
     for field in ('actions', 'hooks', 'objectives'):
         ids = [x['id'] for x in result[field]]
         if len(ids) != len(set(ids)): raise InvalidPatch('duplicate program ' + field)
-    # Bound total syntax size, including nested branches; execution has an independent gas limit.
     def count(node):
         if isinstance(node, dict): return 1 + sum(count(x) for x in node.values())
         if isinstance(node, list): return 1 + sum(count(x) for x in node)
@@ -262,8 +261,6 @@ def paint_commands(value, width, height):
 
 def scene(value):
     obj(value, 'scene', ('size', 'spawn', 'base', 'paint', 'anchors', 'summary'), ('size', 'spawn', 'paint', 'anchors'))
-    # Report independent tile mistakes together instead of consuming a complete
-    # model repair just to reveal the next material/collision-type mix-up.
     errors=[]
     tile_fields=[('base',value.get('base','ground'))]
     if isinstance(value['paint'],list):

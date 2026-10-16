@@ -82,7 +82,6 @@ def validate_visuals(value,minimum_layers=1):
             else:raise InvalidPatch('drawing commands: [rect|ellipse,x,y,w,h,color] or [poly,[[x,y],...],color]')
         result[key]=dict(size=[w,h],layers=layers)
         if 'frames' in sprite:
-            # Validate each frame using the same grammar, without nested animation.
             frames=[]
             for frame_index,commands in enumerate(arr(sprite['frames'],'frames',8,1)):
                 temp=dict(style='frame',terrain='grass',palette=palette,sprites={'frame':dict(size=[w,h],layers=commands)})

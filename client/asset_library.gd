@@ -1,6 +1,5 @@
 extends RefCounted
 const L = preload("res://client/i18n.gd")
-## Only manifest IDs resolve; model text never becomes a resource path.
 static var assets: Dictionary = {}
 static var images: Dictionary = {}
 static var sounds: Dictionary = {}

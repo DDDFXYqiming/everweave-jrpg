@@ -1,5 +1,4 @@
 extends RefCounted
-## 只重新发现启动器明确指定的本机服务；不扫描存档，也不重放玩家动作。
 var runtime_path: String = ""
 var expected_instance_id: String = ""
 var delay_seconds: float = 1.0

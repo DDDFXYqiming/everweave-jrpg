@@ -16,7 +16,6 @@ def balance(state,key):
 
 def requirements(definition):
     result=dict(definition.get('costs',{}))
-    # 旧动作开头的固定非生命扣费也显示为代价，扣费仍由原效果执行。
     for command in definition.get('effects',[]):
         key=command.get('id') if command.get('op')=='resource' else command.get('name') if command.get('op')=='stat' and command.get('target')=='player' else None
         delta=command.get('delta')
@@ -38,7 +37,6 @@ def hint(state,definition):
 
 def pay(state,declared):
     from .game_spec import BUILTINS
-    # 全部检查后才扣除；调用方的事务同时覆盖后续效果。
     for key,amount in declared.items():
         if balance(state,key)<amount:raise InvalidPatch('资源不足，无法支付 '+key,category='gameplay',path='costs.'+key)
     for key,amount in declared.items():

@@ -120,7 +120,6 @@ class EnemyTurnTests(unittest.TestCase):
         w=World(Store(':memory:'));w.start('enemies',authored=True)
         raw=hybrid_patch();r=raw['region'];r['modules']=[r['modules'][0]]
         r['program']['hooks']=[hook]
-        # Remove the generic duel hook so the test isolates actual applicability.
         r['modules']=[];r['program']['actions']=[dict(id='guard',label='观察',target='player',scope='combat',effects=[dict(op='message',text='保持距离。')])]
         r['entities'].append(dict(id='other',kind='enemy',name='另一只守卫',at=[20,12],sprite='enemy',monster='sentinel',tier=1,move='strike',stats=dict(hp=40,attack=7)))
         w.apply_patch(raw,w.context());w.state['player'].update(x=19,y=12);w.action(dict(op='interact',id='r0:other'))

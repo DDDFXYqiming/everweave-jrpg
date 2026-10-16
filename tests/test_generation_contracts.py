@@ -32,7 +32,7 @@ class GenerationContracts(unittest.TestCase):
     def test_new_concept_materializes_and_can_be_collected(self):
         p=self.w.state['player']; before=copy.deepcopy(p['inventory'])
         self.w.apply_patch(expansion(),self.w.context(kind='reaction'))
-        self.assertEqual(p['inventory'],before)  # Creation is not an unearned reward.
+        self.assertEqual(p['inventory'],before)
         e=next(e for e in self.w.region()['entities'] if e['name']=='信使留下的匣子')
         q=next(q for q in self.w.state['quests'].values() if q['name']=='检查新的线索')
         self.assertEqual(q['target'],e['item_id'])
@@ -108,7 +108,7 @@ class GenerationContracts(unittest.TestCase):
             return json.dumps(expansion() if repair else bad),{'input_tokens':1,'output_tokens':1}
         with patch.object(ChatProvider,'generate',side_effect=answer):self.d.step()
         self.assertEqual(self.d.calls,2)
-        self.assertEqual(self.d.accepted,8)  # Seven prepared regions + one repaired reaction.
+        self.assertEqual(self.d.accepted,8)
         self.assertIn('undefined',repairs[1])
         self.assertEqual(len([q for q in self.w.state['quests'].values() if q['name']=='检查新的线索']),1)
 
