@@ -21,6 +21,8 @@ var region: Dictionary = {}
 var visual_player := Vector2.ZERO
 var target_player := Vector2.ZERO
 var camera := Vector2.ZERO
+var world_zoom: float = 1.0
+var terrain_token: String = ""
 var elapsed: float = 0.0
 var walk_frame: int = 0
 var current_id: String = ""
@@ -44,6 +46,19 @@ func update_world(data: Dictionary) -> void:
 		queue_redraw()
 		return
 	region = value
+	var token: String = str(data.get("region_static_token", ""))
+	if token.is_empty() or token != terrain_token:
+		_prepare_terrain()
+		terrain_token = token
+	var p: Dictionary = data.get("player", {})
+	target_player = Vector2(float(p.get("x", 0)), float(p.get("y", 0)))
+	if current_id != str(region.get("id", "")) or visual_player.distance_to(target_player) > 3.0:
+		visual_player = target_player
+		current_id = str(region.get("id", ""))
+	_update_camera()
+	queue_redraw()
+
+func _prepare_terrain() -> void:
 	room_floor_keys.clear()
 	if int(region.get("surface_version",0))<2:
 		for command in region.get("scene",{}).get("paint",[]):
@@ -52,31 +67,32 @@ func update_world(data: Dictionary) -> void:
 			for yy in range(int(box[1]),int(box[1]+box[3])):
 				for xx in range(int(box[0]),int(box[0]+box[2])):
 					if xx in [int(box[0]),int(box[0]+box[2]-1)] or yy in [int(box[1]),int(box[1]+box[3]-1)]:room_floor_keys[Vector2i(xx,yy)]=str(command.surface)
-	var identity: String = JSON.stringify(region.get("visuals", {}))
+	var identity: String = JSON.stringify([region.get("seed", 0), region.get("visuals", {})])
 	if identity != visual_signature:
 		visual_signature = identity
 		generated = VisualCompiler.compile(region.visuals, int(region.seed)) if region.has("visuals") else {}
 		if region.has("visuals"):materials.configure(region.visuals)
 	terrain_grid=materials.display_grid(region) if region.has("visuals") else region.tiles
-	var p: Dictionary = data.get("player", {})
-	target_player = Vector2(float(p.get("x", 0)), float(p.get("y", 0)))
-	if current_id != str(region.get("id", "")) or visual_player.distance_to(target_player) > 3.0:
-		visual_player = target_player
-		current_id = str(region.get("id", ""))
-	queue_redraw()
 
 func _process(delta: float) -> void:
 	elapsed += delta
 	moving = visual_player.distance_to(target_player) > 0.025
 	visual_player = visual_player.move_toward(target_player, delta * 10.0)
 	walk_frame = (1 + int(elapsed * 9.0) % 2) if moving else 0
-	if not region.is_empty():
-		var world_size := Vector2(float(region.width), float(region.height)) * TILE
-		var wanted := (visual_player + Vector2(0.5, 0.5)) * TILE - size * 0.5
-		camera = Vector2(clampf(wanted.x, 0.0, maxf(0.0, world_size.x - size.x)), clampf(wanted.y, 0.0, maxf(0.0, world_size.y - size.y)))
-		if world_size.x < size.x: camera.x = (world_size.x - size.x) * 0.5
-		if world_size.y < size.y: camera.y = (world_size.y - size.y) * 0.5
+	_update_camera()
 	queue_redraw()
+
+func _update_camera() -> void:
+	if region.is_empty() or size.x <= 0 or size.y <= 0: return
+	var world_size := Vector2(float(region.width), float(region.height)) * TILE
+	var framing := Vector2(minf(26.0, float(region.width)), minf(16.0, float(region.height))) * TILE
+	world_zoom = maxf(1.0, maxf(size.x / framing.x, size.y / framing.y))
+	world_zoom = minf(world_zoom, maxf(1.0, size.y / (10.0 * TILE)))
+	var visible_size := size / world_zoom
+	var wanted := (visual_player + Vector2(0.5, 0.5)) * TILE - visible_size * 0.5
+	camera = Vector2(clampf(wanted.x, 0.0, maxf(0.0, world_size.x - visible_size.x)), clampf(wanted.y, 0.0, maxf(0.0, world_size.y - visible_size.y)))
+	if world_size.x < visible_size.x: camera.x = (world_size.x - visible_size.x) * 0.5
+	if world_size.y < visible_size.y: camera.y = (world_size.y - visible_size.y) * 0.5
 
 func _draw_sprite(key: String, foot: Vector2, scale_factor: float = 2.0, tint: Color = Color.WHITE) -> void:
 	if not generated.is_empty():
@@ -104,12 +120,14 @@ func _draw() -> void:
 			var point := Vector2(fmod(i * 53.0 + 19.0, maxf(size.x, 1.0)), fmod(i * 97.0 + elapsed * 6.0, maxf(size.y, 1.0)))
 			draw_rect(Rect2(point, Vector2(2, 2)), Color(0.50, 0.78, 0.74, 0.35))
 		return
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE * world_zoom)
+	var visible_size := size / world_zoom
 	var biome_index: int = maxi(0, BIOMES.find(str(region.biome)))
 	var grid: Array = region.tiles
 	var x0: int = maxi(0, int(camera.x / TILE) - 1)
 	var y0: int = maxi(0, int(camera.y / TILE) - 1)
-	var x1: int = mini(int(region.width), int((camera.x + size.x) / TILE) + 2)
-	var y1: int = mini(int(region.height), int((camera.y + size.y) / TILE) + 2)
+	var x1: int = mini(int(region.width), int((camera.x + visible_size.x) / TILE) + 2)
+	var y1: int = mini(int(region.height), int((camera.y + visible_size.y) / TILE) + 2)
 	for y in range(y0, y1):
 		for x in range(x0, x1):
 			var typ: int = int(grid[y][x])
@@ -134,9 +152,9 @@ func _draw() -> void:
 	var objects: Array = []
 	for prop in region.get("props", []):
 		if bool(prop.get("spent", false)): continue
-		if float(prop.x) * TILE < camera.x - 140 or float(prop.x) * TILE > camera.x + size.x + 140:
+		if float(prop.x) * TILE < camera.x - 140 or float(prop.x) * TILE > camera.x + visible_size.x + 140:
 			continue
-		if float(prop.y) * TILE < camera.y - 100 or float(prop.y) * TILE > camera.y + size.y + 140:
+		if float(prop.y) * TILE < camera.y - 100 or float(prop.y) * TILE > camera.y + visible_size.y + 140:
 			continue
 		objects.append({"y": float(prop.y), "x": float(prop.x), "footprint":prop.get("footprint",[1,1]), "sprite": str(prop.get("sprite", prop.kind)), "kind": "prop"})
 	for entity in region.get("entities", []):
@@ -182,10 +200,15 @@ func _draw() -> void:
 			var marker := foot - Vector2(0, 64 + sin(elapsed * 2 + float(obj.x)) * 2)
 			draw_rect(Rect2(marker - Vector2(2, 7), Vector2(4, 8)), Color("f0d49c"))
 			draw_rect(Rect2(marker + Vector2(-2, 4), Vector2(4, 3)), Color("f0d49c"))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var hour: float = fmod(float(snapshot.get("time", 480)), 1440.0) / 60.0
 	if hour >= 19.0 or hour < 6.0:
 		draw_rect(Rect2(Vector2.ZERO, size), Color(0.035, 0.04, 0.16, 0.25))
 	_draw_weather(str(region.get("weather", "clear")))
+	for band in range(6):
+		var shade := Color(0.025, 0.04, 0.05, 0.62 * (1.0 - float(band) / 6.0))
+		draw_rect(Rect2(0, band * 12, size.x, 12), shade)
+		draw_rect(Rect2(0, size.y - (band + 1) * 12, size.x, 12), shade)
 	_draw_minimap()
 	_draw_nearby_hint()
 
@@ -209,7 +232,7 @@ func _draw_weather(weather: String) -> void:
 			draw_rect(Rect2(0, top, size.x, 45), Color(0.62, 0.72, 0.80, 0.055))
 
 func _draw_minimap() -> void:
-	var origin := Vector2(size.x - 216.0, 14.0)
+	var origin := Vector2(size.x - 216.0, 82.0)
 	var hovered: bool = Rect2(origin - Vector2(6,6),Vector2(204,158)).has_point(get_local_mouse_position())
 	var opacity: float = 1.0 if hovered else .82
 	draw_rect(Rect2(origin - Vector2(6, 6), Vector2(204, 158)), Color(0.035, 0.075, 0.13, 0.89*opacity))
@@ -237,7 +260,7 @@ func _draw_nearby_hint() -> void:
 		if _distance_to_object(e,Vector2(float(p.get("x",0)),float(p.get("y",0)))) <= 1:
 			var text: String = "E  ·  " + str(e.name)
 			var width: float = minf(size.x - 40, font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x + 28)
-			var at := Vector2((size.x - width) / 2, size.y - 48)
+			var at := Vector2((size.x - width) / 2, size.y - 96)
 			draw_rect(Rect2(at, Vector2(width, 34)), Color(0.035, 0.075, 0.13, 0.93))
 			draw_string(font, at + Vector2(14, 23), text, HORIZONTAL_ALIGNMENT_LEFT, width - 24, 16, Color("e6dcbf"))
 			return
@@ -250,13 +273,13 @@ func _distance_to_object(e: Dictionary, p: Vector2) -> float:
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
-		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if Rect2(Vector2(size.x-131,9),Vector2(114,100)).has_point(event.position) else Control.CURSOR_ARROW
+		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if Rect2(Vector2(size.x-222,76),Vector2(204,158)).has_point(event.position) else Control.CURSOR_ARROW
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if Rect2(Vector2(size.x-131,9),Vector2(114,100)).has_point(event.position):
+		if Rect2(Vector2(size.x-222,76),Vector2(204,158)).has_point(event.position):
 			map_requested.emit()
 			accept_event()
 			return
-		var cell: Vector2 = ((event.position + camera) / TILE).floor()
+		var cell: Vector2 = ((event.position / world_zoom + camera) / TILE).floor()
 		for e in region.get("entities", []):
 			if _distance_to_object(e,cell) == 0:
 				entity_clicked.emit(str(e.id))

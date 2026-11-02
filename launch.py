@@ -83,6 +83,7 @@ def build_web_client(executable: str, export_root: Path) -> Path:
         if result.returncode:
             detail = '\n'.join((result.stdout + result.stderr).splitlines()[-18:])
             raise RuntimeError('Godot Web 导出失败：\n' + detail)
+    shutil.copyfile(ROOT / 'web/background_frames.js', export_root / 'index.frames.js')
     print(f'Godot Web export ready: same client/main.tscn and GameHUD as desktop; {count} raw assets packed.', flush=True)
     return export_root
 
@@ -93,16 +94,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('--data-dir', type=Path, default=data_dir(), help='Save folder (outside the repository)')
     p.add_argument('--server-only', action='store_true', help='Run the local helper for editor F6; no Godot process')
     p.add_argument('--web', action='store_true', help='导出同一 Godot 客户端并在本机浏览器运行')
+    p.add_argument('--web-export', type=Path, help='使用已有 Godot Web 导出目录启动服务')
     p.add_argument('--port',type=int,default=0,help='指定本机端口；默认自动分配')
     p.add_argument('--headless-smoke', action='store_true', help='Run the real Godot client headlessly for 120 frames')
     p.add_argument('--demo', action='store_true', help='Create an offline demo if no save exists; no network calls')
     args = p.parse_args(argv)
+    if args.web_export and not args.web: p.error('--web-export 需要 --web')
     if not 0<=args.port<=65535:p.error('--port 必须在 0～65535 之间')
     if sys.version_info < (3, 11):
         print('Python 3.11 or newer is required.', file=sys.stderr)
         return 2
     executable = find_godot(args.godot)
-    if not executable and not args.server_only:
+    if not executable and not args.server_only and not args.web_export:
         print('Godot 4 Standard was not found. Download it from the official Godot site.', file=sys.stderr)
         print('Then: python launch.py --godot "./tools/Godot.exe"', file=sys.stderr)
         print('Or set GODOT_BIN / place the official executable in this project folder.', file=sys.stderr)
@@ -124,13 +127,14 @@ def main(argv: list[str] | None = None) -> int:
     runtime_file = args.data_dir / 'runtime.json'
     code = 0
     try:
-        from engine.asset_cache import prepare
-        result = prepare(download=True, progress=lambda message: print(message, flush=True))
-        print(f'Local asset cache ready: {result["assets"]} entries.', flush=True)
+        if not args.web_export:
+            from engine.asset_cache import prepare
+            result = prepare(download=True, progress=lambda message: print(message, flush=True))
+            print(f'Local asset cache ready: {result["assets"]} entries.', flush=True)
         token = secrets.token_urlsafe(32)
         if args.web:
             from engine.web_server import WebGameServer
-            export_root = build_web_client(executable, args.data_dir / 'web-export')
+            export_root = args.web_export.expanduser().resolve() if args.web_export else build_web_client(executable, args.data_dir / 'web-export')
             server = WebGameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token, export_root, ROOT / 'userdata/provider-keys.local.json')
         else:server = GameServer(('127.0.0.1', args.port), args.data_dir / 'world.sqlite3', token, credential_path=ROOT / 'userdata/provider-keys.local.json')
         url = f'http://127.0.0.1:{server.server_port}'

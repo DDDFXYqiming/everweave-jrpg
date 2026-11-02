@@ -26,6 +26,11 @@ class Store:
  def load_region(self,rid):
   row=self.db.execute('SELECT body FROM regions WHERE id=?',(rid,)).fetchone(); return json.loads(row[0]) if row else None
  def commit(self,state,regions=(),events=(),delete_regions=(),reset=False):
+  regions=tuple(regions)
+  state_body=dumps(state)
+  region_rows=[(r['id'],dumps({k:v for k,v in r.items() if k!='_generation_raw'})) for r in regions]
+  source_rows=[(r['id'],dumps(r['_generation_raw'])) for r in regions if '_generation_raw' in r]
+  event_rows=[(dumps(event),) for event in events]
   with self.db:
    if reset:
     for table in ('state','regions','events','journal','generation_components','generation_requests','region_sources'): self.db.execute('DELETE FROM '+table)
@@ -36,11 +41,10 @@ class Store:
      [(start+i,state.get('current',''),state.get('time',0),line) for i,line in enumerate(state.get('journal',[])) if start+i>recorded])
    for rid in delete_regions:
     self.db.execute('DELETE FROM regions WHERE id=?',(rid,));self.db.execute('DELETE FROM region_sources WHERE id=?',(rid,))
-   for r in regions:
-    if '_generation_raw' in r:self.db.execute('INSERT OR REPLACE INTO region_sources VALUES(?,?)',(r['id'],dumps(r['_generation_raw'])))
-    self.db.execute('INSERT OR REPLACE INTO regions VALUES(?,?)',(r['id'],dumps({k:v for k,v in r.items() if k!='_generation_raw'})))
-   for e in events: self.db.execute('INSERT INTO events(body) VALUES(?)',(dumps(e),))
-   self.db.execute('INSERT OR REPLACE INTO state VALUES(1,?)',(dumps(state),))
+   self.db.executemany('INSERT OR REPLACE INTO region_sources VALUES(?,?)',source_rows)
+   self.db.executemany('INSERT OR REPLACE INTO regions VALUES(?,?)',region_rows)
+   self.db.executemany('INSERT INTO events(body) VALUES(?)',event_rows)
+   self.db.execute('INSERT OR REPLACE INTO state VALUES(1,?)',(state_body,))
   for r in regions:r.pop('_generation_raw',None)
  def recent_events(self,limit=18):
   rows=self.db.execute('SELECT body FROM events ORDER BY seq DESC LIMIT ?',(min(limit,100),)).fetchall(); return [json.loads(r[0]) for r in reversed(rows)]

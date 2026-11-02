@@ -4,6 +4,7 @@ import hashlib
 import json
 import time
 from .diagnostics import InvalidPatch
+from .causal_memory import retrieve
 
 def state(world):return world.state.get('adventure') if world.state else None
 
@@ -130,12 +131,13 @@ def context(world,rid):
     adv=state(world)
     if not adv:return {}
     jobs=ready_jobs(world,rid)
+    recalled=retrieve(world,rid)
     current=world.cache.get(rid,{})
     actor_ids={k for j in jobs for k in j['cast']}|{e.get('actor_id') for e in current.get('entities',[])}
     skill_ids={k for j in jobs for k in j['skills']}|set(world.state['player'].get('abilities',[]))
     return dict(adventure_revision=adv['revision'],reserve_director_gates=True,content_contract=dict(commissions=copy.deepcopy(jobs),
         cast=copy.deepcopy([v for k,v in adv['cast'].items() if k in actor_ids]),skills=copy.deepcopy([v for k,v in adv['skills'].items() if k in skill_ids]),learned=list(world.state['player'].get('abilities',[])),
-        missions=copy.deepcopy([m for m in adv['missions'].values() if m['region']==rid or m['status']=='active'][-16:]),economy=copy.deepcopy(adv['economy'])))
+        missions=recalled['missions'],causal_memory=recalled['causal_memory'],economy=copy.deepcopy(adv['economy'])))
 
 def refresh(world):
     from .campaign import satisfied
@@ -181,19 +183,19 @@ def review_due(world):
 def memory(world):
     adv=state(world)
     if not adv:return None
-    return dict(cast=[{k:copy.deepcopy(a[k]) for k in ('id','name','role','motive','state')} for a in list(adv['cast'].values())[-16:]],
-                skills=[{k:copy.deepcopy(a[k]) for k in ('id','name','description','scope')} for a in list(adv['skills'].values())[-16:]],
-                missions=copy.deepcopy(list(adv['missions'].values())[-24:]),economy=copy.deepcopy(adv['economy']))
+    recalled=retrieve(world)
+    return dict(cast=recalled['cast'],skills=recalled['skills'],missions=recalled['missions'],
+                economy=copy.deepcopy(adv['economy']),causal_memory=recalled['causal_memory'])
 
 def director_context(world):
     adv=state(world);s=world.state;cid=s['campaign']['active'];c=s['campaign']['chapters'][cid]
+    recalled=retrieve(world)
     return dict(kind='direction',target=s['current'],epoch=s['epoch'],story_revision=s['story_revision'],content_version=2,
         adventure_revision=adv['revision'],event_seq=adv['event_seq'],setting=s['setting'],game_spec=s['game_spec'],chapter_id=cid,
         chapter={k:copy.deepcopy(c.get(k)) for k in ('goal','flags','flag_sources','regions','links','planning','ending_brief')},
-        cast=memory(world)['cast'],skills=memory(world)['skills'],
-        missions=copy.deepcopy(list(adv['missions'].values())[-24:]),jobs=copy.deepcopy(list(adv['jobs'].values())[-16:]),
-        known_regions=[dict(id=rid,name=n['name'],visited=n['visited'],ready=n['ready']) for rid,n in s['topology'].items()][-32:],
-        recent_events=world.store.recent_events(12),economy=adv['economy'])
+        cast=recalled['cast'],skills=recalled['skills'],missions=recalled['missions'],jobs=recalled['jobs'],
+        known_regions=recalled['known_regions'],causal_memory=recalled['causal_memory'],
+        recent_events=world.store.recent_events(12),economy=copy.deepcopy(adv['economy']))
 
 def validate_direction(world,raw):
     import json

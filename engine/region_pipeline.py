@@ -40,7 +40,12 @@ class PipelineError(RuntimeError):
 
 def parsed(raw,label):
     try:value=json.loads(raw) if isinstance(raw,str) else copy.deepcopy(raw)
-    except (ValueError,TypeError) as exc:raise PipelineError(label+' returned invalid JSON') from exc
+    except json.JSONDecodeError as exc:
+        detail=dict(path='$',category='format',code='invalid_json',message=exc.msg,line=exc.lineno,column=exc.colno,
+                    offset=exc.pos,at_end=exc.pos==len(raw),excerpt=raw[max(0,exc.pos-100):exc.pos+100],
+                    expected='完整且严格合法的单个 JSON 对象；只修复所报语法位置，保留已有内容')
+        raise PipelineError(label+f' returned invalid JSON: {exc.msg} at line {exc.lineno} column {exc.colno} (char {exc.pos})',issues=[detail]) from exc
+    except (ValueError,TypeError) as exc:raise PipelineError(label+' returned invalid JSON',issues=[dict(path='$',category='format',message=str(exc))]) from exc
     if not isinstance(value,dict):raise PipelineError(label+' must return an object')
     return value
 
@@ -162,9 +167,9 @@ def assemble(game_raw,av_raw,contract,context):
     return json.dumps(value,ensure_ascii=False,separators=(',',':'))
 
 
-def aggregate(usages,effort='high',model='gpt-6-luna'):
+def aggregate(usages,effort='high',model='gpt-6-luna',provider='chatgpt_subscription'):
     result=dict(input_tokens=0,output_tokens=0,reasoning_tokens=0,cached_input_tokens=0,reasoning_observed=False,
-                provider='chatgpt_subscription',model=model,effort=effort,pipeline_requests=sum(int(u.get('model_requests',1)) for u in usages),transport_retries=sum(int(u.get('transport_retries',0)) for u in usages),unknown_usage_attempts=sum(int(u.get('unknown_usage_attempts',0)) for u in usages))
+                provider=provider,model=model,effort=effort,pipeline_requests=sum(int(u.get('model_requests',1)) for u in usages),transport_retries=sum(int(u.get('transport_retries',0)) for u in usages),unknown_usage_attempts=sum(int(u.get('unknown_usage_attempts',0)) for u in usages))
     for usage in usages:
         for key in ('input_tokens','output_tokens','reasoning_tokens','cached_input_tokens'):result[key]+=usage.get(key,0)
         result['reasoning_observed']|=bool(usage.get('reasoning_observed'))
@@ -189,7 +194,7 @@ def worker_contexts(user,contract):
 
 
 def generate(context,system,user,cfg):
-    from .chatgpt_provider import generate as request
+    from .director import generate_messages as request
     reserve=cfg['_region_subrequest'];usages=[];usage_lock=threading.Lock()
     contract_value=contract(context);game_context,av_context,world_context=worker_contexts(user,contract_value)
     captured=cfg.get('_region_component_output')
@@ -198,11 +203,19 @@ def generate(context,system,user,cfg):
     audit=cfg.get('_audit')
     identity={'version':2,'context':context,'system':system,'user':user,'gameplay_prompt':GAMEPLAY_COMPONENT,
               'av_prompt':AV_PROMPT,'model':cfg.get('model'),'effort':cfg.get('reasoning_effort'),
+              'provider':cfg.get('provider'),'base_url':cfg.get('base_url'),
               'hybrid':cfg.get('hybrid_content',True),'jev':cfg.get('jev_enabled',True)}
     checkpoint_key=hashlib.sha256(json.dumps(identity,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
-    responses=cfg.get('_region_checkpoint_load',lambda key:{})(checkpoint_key)
+    load_checkpoint=cfg.get('_region_checkpoint_load',lambda key:{})
+    responses=load_checkpoint(checkpoint_key)
+    if not responses and cfg.get('provider')=='chatgpt_subscription':
+        legacy={key:value for key,value in identity.items() if key not in ('provider','base_url')}
+        legacy_key=hashlib.sha256(json.dumps(legacy,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        responses=load_checkpoint(legacy_key)
+        if cfg.get('_region_checkpoint_save'):
+            for component,raw in responses.items():cfg['_region_checkpoint_save'](checkpoint_key,component,raw)
     def stats():
-        result=aggregate(usages,cfg.get('reasoning_effort','high'),cfg.get('model','gpt-6-luna'))
+        result=aggregate(usages,cfg.get('reasoning_effort','high'),cfg.get('model','gpt-6-luna'),cfg.get('provider','chatgpt_subscription'))
         result['usage_recorded']=bool(cfg.get('_region_usage'))
         return result
     if audit:
@@ -213,19 +226,22 @@ def generate(context,system,user,cfg):
         local=dict(cfg,_request_meta=dict(cfg.get('_request_meta',{}),component=component,call=call))
         progress=cfg.get('_codex_progress')
         if progress:local['_codex_progress']=lambda value:progress(dict(value,component=component))
-        try:raw,usage=request(prompt_text,input_text,local)
-        except Exception as exc:
-            usage=getattr(exc,'usage',{}) or {}
+        try:
+            try:raw,usage=request(prompt_text,input_text,local)
+            except Exception as exc:
+                usage=getattr(exc,'usage',{}) or {}
+                with usage_lock:usages.append(usage)
+                if cfg.get('_region_usage'):cfg['_region_usage'](component,call,usage,exc)
+                raise
             with usage_lock:usages.append(usage)
-            if cfg.get('_region_usage'):cfg['_region_usage'](component,call,usage,exc)
-            raise
-        with usage_lock:usages.append(usage)
-        if cfg.get('_region_usage'):cfg['_region_usage'](component,call,usage,None)
-        if cfg.get('_region_checkpoint_save'):cfg['_region_checkpoint_save'](checkpoint_key,component,raw)
-        if captured:captured(component,raw,usage)
-        finished=cfg.get('_region_component_done')
-        if finished:finished(component)
-        return raw
+            if cfg.get('_region_usage'):cfg['_region_usage'](component,call,usage,None,raw)
+            if cfg.get('_region_checkpoint_save'):cfg['_region_checkpoint_save'](checkpoint_key,component,raw)
+            if captured:captured(component,raw,usage)
+            finished=cfg.get('_region_component_done')
+            if finished:finished(component)
+            return raw
+        finally:
+            if cfg.get('_region_request_finished'):cfg['_region_request_finished'](component)
     gameplay_system=system.split('\nHYBRID CONTENT:',1)[0].split('\nFor regions, visuals is REQUIRED;',1)[0]+GAMEPLAY_COMPONENT
     av_system=AV_PROMPT+'\n'+(HYBRID if cfg.get('hybrid_content',True) else VISUAL_PROMPT)
     systems={'gameplay':gameplay_system,'audiovisual':av_system};inputs={'gameplay':game_context,'audiovisual':av_context}
@@ -233,7 +249,7 @@ def generate(context,system,user,cfg):
         if cfg.get('jev_enabled',True) and cfg.get('hybrid_content',True):
             value=parsed(inputs['audiovisual'],'audiovisual context');av_world=value['world_context']
             from .jev_judgments import rank_assets
-            ranked,report=rank_assets(context,contract_value,av_world.get('library_candidates',{}),cfg.get('_cancel_event'))
+            ranked,report=rank_assets(context,contract_value,av_world.get('library_candidates',{}),cfg.get('_cancel_event'),cfg.get('_task_deadline'))
             av_world['library_candidates']=ranked
             inputs['audiovisual']=json.dumps(value,ensure_ascii=False,separators=(',',':'))
             notify=cfg.get('_jev_event')
@@ -255,7 +271,7 @@ def generate(context,system,user,cfg):
             error.diagnostics['usage_recorded']=bool(cfg.get('_region_usage'))
             error.diagnostics['retries_exhausted']=any(getattr(e,'diagnostics',{}).get('retries_exhausted') for e in failures)
         raise error
-    repaired=set()
+    repaired={};repair_limit=max(0,int(cfg.get('max_generation_attempts',4))-1)
     def repair(component,error):
         base=parsed(inputs[component],component+' context')
         try:base['rejected_component']=parsed(responses[component],component+' response')
@@ -265,7 +281,8 @@ def generate(context,system,user,cfg):
             base['required_audio_references']=[i for i in error.issues if i.get('cue')]
         repair_system=systems[component]+'\nRepair only rejected_component using validation_error. Preserve valid content and the region_design contract; return the complete corrected component.'
         responses[component]=run(component,repair_system,json.dumps(base,ensure_ascii=False,separators=(',',':')))
-        repaired.add(component)
+        category='json' if any(issue.get('code')=='invalid_json' for issue in error.issues) else 'validation'
+        repaired.setdefault(component,{'json':0,'validation':0})[category]+=1
     try:
         while True:
             try:
@@ -279,7 +296,13 @@ def generate(context,system,user,cfg):
                         raise PipelineError(str(exc),component='audiovisual' if visual else 'gameplay',issues=exc.issues) from None
                 return assembled,stats()
             except PipelineError as exc:
-                if not exc.component or exc.component in repaired or not cfg.get('_region_can_repair',lambda:False)():raise
+                category='json' if any(issue.get('code')=='invalid_json' for issue in exc.issues) else 'validation'
+                counts=repaired.get(exc.component,{'json':0,'validation':0});attempts=sum(counts.values())
+                allowed=(bool(exc.component) and attempts<repair_limit and (category=='json' or counts['validation']==0)
+                         and cfg.get('_region_can_repair',lambda:False)())
+                if audit:audit.emit('region.component.rejected',**cfg.get('_request_meta',{}),component=exc.component,issues=exc.issues,
+                                    repair_category=category,repairs=attempts,repair_limit=repair_limit,will_repair=allowed)
+                if not allowed:raise
                 repair(exc.component,exc)
     except Exception as exc:
         exc.usage=stats()

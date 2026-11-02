@@ -12,7 +12,8 @@ var tutorial: Label
 var title_region: String = ""
 var arrival_until: int = 0
 var tutorial_until: int = 0
-var ready_count: int = -1
+var ready_regions: Dictionary = {}
+var notice_epoch: String = ""
 var ready_notice_until: int = 0
 
 func icon_button(parent: Node, icon: String, tip: String, callback: Callable, text: String = "") -> Button:
@@ -33,9 +34,16 @@ func build(controller) -> void:
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(background)
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var margin: MarginContainer = main._margin(self, 20)
+	main.world_view = preload("res://client/world_view.gd").new()
+	add_child(main.world_view)
+	main.world_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	main.world_view.entity_clicked.connect(func(id: String) -> void: main._send_action({"op":"interact","id":id}))
+	main.world_view.map_requested.connect(func() -> void: main._toggle_panel("atlas"))
+	var margin: MarginContainer = main._margin(self, 16)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var stack: VBoxContainer = main._vbox(margin)
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_theme_constant_override("separation",8)
 	var header := HBoxContainer.new()
 	stack.add_child(header)
@@ -68,12 +76,8 @@ func build(controller) -> void:
 	main.hud_ration_text = main._label(food_group, "", 12, main.MUTED)
 	var map_stack := Control.new()
 	map_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	map_stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(map_stack)
-	main.world_view = preload("res://client/world_view.gd").new()
-	map_stack.add_child(main.world_view)
-	main.world_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	main.world_view.entity_clicked.connect(func(id: String) -> void: main._send_action({"op":"interact","id":id}))
-	main.world_view.map_requested.connect(func() -> void: main._toggle_panel("atlas"))
 	main.task_button = main._button(map_stack, "", main._toggle_panel.bind("missions"))
 	main.task_button.position = Vector2(16,16)
 	main.task_button.size = Vector2(420,52)
@@ -125,8 +129,8 @@ func build(controller) -> void:
 	var footer := HBoxContainer.new()
 	stack.add_child(footer)
 	for entry in [["bag","inventory","行囊  I"],["book","journal","手记  J"]]:
-		main.panel_buttons[entry[1]] = icon_button(footer,entry[0],L.t(entry[2]),main._toggle_panel.bind(entry[1]),L.t(entry[2]))
-	icon_button(footer,"compass",L.t("旅途 · Tab"),main._toggle_aux.bind("journey"),L.t("旅途  Tab"))
+		main.panel_buttons[entry[1]] = icon_button(footer,entry[0],L.t(entry[2]),main._toggle_panel.bind(entry[1]))
+	icon_button(footer,"compass",L.t("旅途 · Tab"),main._toggle_aux.bind("journey"))
 	main.hint_label = main._label(footer,"",16,main.MUTED)
 	main.hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	main.hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -245,12 +249,25 @@ func update(snapshot: Dictionary) -> void:
 	main.title_label.add_theme_font_size_override("font_size",36 if now < arrival_until else 24)
 	var d: Dictionary = snapshot.get("director",{})
 	var failed: bool = not d.get("failed_tasks",[]).is_empty()
-	var ready: int = int(snapshot.get("map_count",0))
-	if ready_count >= 0 and ready > ready_count: ready_notice_until = now + 6000
-	ready_count = ready
-	status_button.text = L.t("生成暂时失败 · 查看") if failed else L.t("新地区已经准备好") if now < ready_notice_until else L.t("远方正在编织…") if int(d.get("active_requests",0)) > 0 else ""
-	status_button.icon = Icons.get_icon("warning" if failed else "generation") if not status_button.text.is_empty() else null
-	status_button.tooltip_text = L.t("旅途 · Tab")
+	var epoch: String = str(snapshot.get("epoch", ""))
+	var first_observation: bool = epoch != notice_epoch
+	if first_observation:
+		ready_regions.clear()
+		ready_notice_until = 0
+		notice_epoch = epoch
+	for route in snapshot.get("frontier", []):
+		var route_id: String = str(route.get("id", ""))
+		if bool(route.get("ready", false)):
+			if not first_observation and not ready_regions.has(route_id): ready_notice_until = now + 6000
+			ready_regions[route_id] = true
+	var preparing: bool = int(d.get("active_requests", 0)) > 0
+	var arrived: bool = now < ready_notice_until
+	status_button.text = ""
+	status_button.icon = Icons.get_icon("warning" if failed else "compass" if arrived else "generation")
+	status_button.visible = failed or preparing or arrived
+	status_button.custom_minimum_size = Vector2(42, 42)
+	status_button.modulate.a = 0.65 + 0.35 * absf(sin(float(now) / 650.0)) if preparing and not failed else 1.0
+	status_button.tooltip_text = L.t("生成暂时失败 · 查看") if failed else L.t("新地区已经准备好") if arrived else L.t("远方正在编织…")
 	main.hint_label.text = ""
 	if main.local_panel.is_empty() and snapshot.get("ui",{}).is_empty() and snapshot.get("battle") == null:
 		if now < main.blocked_move_until:

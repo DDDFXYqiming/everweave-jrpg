@@ -172,98 +172,104 @@ class ChatProvider:
    try:source_chars=len(json.dumps(context,ensure_ascii=False,separators=(',',':')))
    except (TypeError,ValueError):source_chars=None
    projected_chars=len(payload['messages'][1]['content']);saved=max(0,source_chars-projected_chars) if source_chars is not None else None
-   audit.emit('model.context.prepared',**meta,source_chars=source_chars,projected_chars=projected_chars,system_chars=len(payload['messages'][0]['content']),projection_saved_chars=saved,projection_ratio=round(projected_chars/max(1,source_chars),4) if source_chars is not None else None,repair_chars=len(repair or ''),has_rejected_response=bool(context.get('rejected_response')))
-  if cfg.get('provider')=='codex_subscription':
-   from .codex_provider import generate,CodexError
-   try:return generate(payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
-   except CodexError as exc:raise ProviderError(str(exc),getattr(exc,'usage',None),diagnostics=getattr(exc,'diagnostics',None)) from None
-  if cfg.get('provider')=='chatgpt_subscription':
-   from .chatgpt_provider import generate,DirectError
-   try:
-    if kind=='region' and not repair and cfg.get('_parallel_region'):
-     from .region_pipeline import generate as generate_region
-     return generate_region(context,payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
-    return generate(payload['messages'][0]['content'],payload['messages'][1]['content'],cfg)
-   except DirectError as exc:raise ProviderError(str(exc),exc.usage,diagnostics={'transport':'direct_sse','category':exc.category,**exc.diagnostics}) from None
-   except Exception as exc:
-    from .region_pipeline import PipelineError
-    if isinstance(exc,PipelineError):raise ProviderError(str(exc),getattr(exc,'usage',None),diagnostics={'transport':'direct_sse','category':'assembly','usage_recorded':exc.usage.get('usage_recorded',False)}) from None
-    raise
-  effort=reasoning_effort(cfg)
-  if cfg.get('deepseek_options',True): payload['thinking']={'type':'disabled' if effort=='none' else 'enabled'}
-  if effort!='default': payload['reasoning_effort']=effort
-  if kind=='reaction': payload['max_tokens']=1500
-  # The completion allowance includes reasoning. Keep room for both reasoning and JSON.
-  thinking=effort!='none'
-  if thinking:
-   allowance={'minimal':8192,'low':8192,'medium':16384,'high':16384,'xhigh':32768,'max':32768,'ultra':32768,'default':16384}[effort]
-   payload['max_tokens']=allowance
-  if kind=='region':
-   minimum=65536 if thinking and context.get('content_version')==2 else 24576 if context.get('content_version')==2 else 16384
-   payload['max_tokens']=max(payload['max_tokens'],minimum)
-  elif context.get('content_version')==2:
-   payload['max_tokens']=max(payload['max_tokens'],32768 if thinking else 8192)
-  base=validate_url(cfg['base_url']); url=base if base.endswith('/chat/completions') else base+'/chat/completions'
-  streaming=official_opencode_go(base)
-  if streaming:
-   payload['stream']=True
-   payload['stream_options']={'include_usage':True}
-  req=urllib.request.Request(url,data=json.dumps(payload,ensure_ascii=False).encode(),headers=provider_headers(cfg),method='POST')
-  opener=urllib.request.build_opener(NoRedirect)
-  transport_retries=0
-  previous_call=(cfg.get('_request_meta') or {}).get('call')
-  def retry_transport(reason):
-   nonlocal transport_retries,previous_call
-   reserve=cfg.get('_reserve_transport_retry')
-   if not callable(reserve) or transport_retries>=int(cfg.get('max_transport_retries',0)):return False
-   call=reserve({'retry_kind':reason,'previous_call':previous_call,'usage_unknown':True})
-   if call is None:return False
-   previous_call=call;transport_retries+=1
-   time.sleep(min(1.0,0.35*transport_retries))
-   return True
-  while True:
-   try:
-    with opener.open(req,timeout=300 if thinking else 60) as response:
-     limit=1024000 if thinking else 192000
-     if streaming:data=read_chat_stream(response,limit,cfg.get('_task_deadline'),cfg.get('_stream_progress'))
-     else:
-      body=response.read(limit+1)
-      if len(body)>limit: raise ProviderError('Model response exceeds size limit.')
-      data=json.loads(body)
-    break
-   except urllib.error.HTTPError as exc:
-    if exc.code in (429,502,503,504) and retry_transport('http_'+str(exc.code)):continue
-    if exc.code==403 and official_opencode_go(base):
-     try:
-      upstream=json.loads(exc.read(4096))
-      detail=upstream.get('error',{})
-      message=detail.get('message','') if isinstance(detail,dict) else ''
-     except (ValueError,UnicodeError,OSError,AttributeError):message=''
-     if 'active OpenCode Go subscription is required' in message:
-      raise ProviderError('当前 OpenCode Go Key 未获订阅工作区访问权限；请核对项目所用 Key 与控制台的有效 Key。') from None
-    diagnostics={'usage_unknown':True,'last_call':previous_call} if exc.code in (429,502,503,504) else None
-    raise ProviderError(f'Provider HTTP {exc.code}. Check model, API key, balance or JSON-mode compatibility.',diagnostics=diagnostics) from None
-   except (urllib.error.URLError,TimeoutError,OSError) as exc:
-    reason=exc.reason if isinstance(exc,urllib.error.URLError) else exc
-    transient=isinstance(reason,(TimeoutError,ConnectionError))
-    if transient and retry_transport(type(reason).__name__):continue
-    raise ProviderError('Model request failed or timed out; retry manually. '+type(exc).__name__,
-                        diagnostics={'usage_unknown':True,'last_call':previous_call} if transient else None) from None
-   except (UnicodeError,json.JSONDecodeError):raise ProviderError('Provider did not return JSON.') from None
-  usage={}
+   projected=json.loads(payload['messages'][1]['content']).get('world_context',{})
+   causal=projected.get('causal_memory') or (projected.get('content_contract') or {}).get('causal_memory') or {}
+   causal_summary=dict(selected_mission_ids=[value['id'] for value in causal.get('open_missions',[])],selected_job_ids=[value['id'] for value in causal.get('commissions',[])],omitted=causal.get('omitted',{}))
+   audit.emit('model.context.prepared',**meta,causal_memory=causal_summary,source_chars=source_chars,projected_chars=projected_chars,system_chars=len(payload['messages'][0]['content']),projection_saved_chars=saved,projection_ratio=round(projected_chars/max(1,source_chars),4) if source_chars is not None else None,repair_chars=len(repair or ''),has_rejected_response=bool(context.get('rejected_response')))
+  system,user=(message['content'] for message in payload['messages'])
+  if kind=='region' and not repair and cfg.get('_parallel_region'):
+   from .region_pipeline import generate as generate_region,PipelineError
+   try:return generate_region(context,system,user,cfg)
+   except PipelineError as exc:
+    raise ProviderError(str(exc),exc.usage,diagnostics={'category':'assembly','component':exc.component,'issues':exc.issues,'usage_recorded':exc.usage.get('usage_recorded',False)}) from None
+  return generate_messages(system,user,cfg,kind,context.get('content_version'))
+
+
+def generate_messages(system,user,cfg,kind='region',content_version=2):
+ if cfg.get('provider')=='codex_subscription':
+  from .codex_provider import generate,CodexError
+  try:return generate(system,user,cfg)
+  except CodexError as exc:raise ProviderError(str(exc),getattr(exc,'usage',None),diagnostics=getattr(exc,'diagnostics',None)) from None
+ if cfg.get('provider')=='chatgpt_subscription':
+  from .chatgpt_provider import generate,DirectError
+  try:return generate(system,user,cfg)
+  except DirectError as exc:raise ProviderError(str(exc),exc.usage,diagnostics={'transport':'direct_sse','category':exc.category,**exc.diagnostics}) from None
+ payload=dict(model=cfg['model'],messages=[dict(role='system',content=system),dict(role='user',content=user)],
+              stream=False,max_tokens=3600,response_format={'type':'json_object'})
+ effort=reasoning_effort(cfg)
+ if cfg.get('deepseek_options',True): payload['thinking']={'type':'disabled' if effort=='none' else 'enabled'}
+ if effort!='default': payload['reasoning_effort']=effort
+ if kind=='reaction': payload['max_tokens']=1500
+ thinking=effort!='none'
+ if thinking:
+  allowance={'minimal':8192,'low':8192,'medium':16384,'high':16384,'xhigh':32768,'max':32768,'ultra':32768,'default':16384}[effort]
+  payload['max_tokens']=allowance
+ if kind=='region':
+  minimum=65536 if thinking and content_version==2 else 24576 if content_version==2 else 16384
+  payload['max_tokens']=max(payload['max_tokens'],minimum)
+ elif content_version==2:
+  payload['max_tokens']=max(payload['max_tokens'],32768 if thinking else 8192)
+ base=validate_url(cfg['base_url']); url=base if base.endswith('/chat/completions') else base+'/chat/completions'
+ streaming=official_opencode_go(base)
+ if streaming:
+  payload['stream']=True
+  payload['stream_options']={'include_usage':True}
+ req=urllib.request.Request(url,data=json.dumps(payload,ensure_ascii=False).encode(),headers=provider_headers(cfg),method='POST')
+ opener=urllib.request.build_opener(NoRedirect)
+ transport_retries=0
+ previous_call=(cfg.get('_request_meta') or {}).get('call')
+ def retry_transport(reason):
+  nonlocal transport_retries,previous_call
+  reserve=cfg.get('_reserve_transport_retry')
+  if not callable(reserve) or transport_retries>=int(cfg.get('max_transport_retries',0)):return False
+  call=reserve({'retry_kind':reason,'previous_call':previous_call,'usage_unknown':True,'component':(cfg.get('_request_meta') or {}).get('component')})
+  if call is None:return False
+  previous_call=call;transport_retries+=1
+  time.sleep(min(1.0,0.35*transport_retries))
+  return True
+ while True:
   try:
-   reported=data.get('usage') or {}
-   usage=dict(input_tokens=max(0,int(reported.get('prompt_tokens',0))),output_tokens=max(0,int(reported.get('completion_tokens',0))),reasoning_tokens=max(0,int((reported.get('completion_tokens_details') or {}).get('reasoning_tokens',0))),reasoning_observed=False)
-   usage['transport_retries']=transport_retries
-   usage['model_requests']=transport_retries+1
-   choice=data['choices'][0]
-   usage['reasoning_observed']=bool(choice['message'].get('reasoning_content'))
-   if choice.get('finish_reason')=='length':
-    raise ProviderError('Model output reached the completion limit; this request was counted. Retry manually or use a smaller initial scope.',usage,'length')
-   content=choice['message']['content']
-   if not isinstance(content,str) or not content.strip(): raise ProviderError('Empty final model content; check output budget / JSON support.',usage,choice.get('finish_reason'))
-   return content,usage
-  except (KeyError,IndexError,TypeError,ValueError,AttributeError): raise ProviderError('Unexpected Chat Completions response shape.',usage) from None
+   with opener.open(req,timeout=300 if thinking else 60) as response:
+    limit=1024000 if thinking else 192000
+    if streaming:data=read_chat_stream(response,limit,cfg.get('_task_deadline'),cfg.get('_stream_progress'))
+    else:
+     body=response.read(limit+1)
+     if len(body)>limit: raise ProviderError('Model response exceeds size limit.')
+     data=json.loads(body)
+   break
+  except urllib.error.HTTPError as exc:
+   if exc.code in (429,502,503,504) and retry_transport('http_'+str(exc.code)):continue
+   if exc.code==403 and official_opencode_go(base):
+    try:
+     upstream=json.loads(exc.read(4096))
+     detail=upstream.get('error',{})
+     message=detail.get('message','') if isinstance(detail,dict) else ''
+    except (ValueError,UnicodeError,OSError,AttributeError):message=''
+    if 'active OpenCode Go subscription is required' in message:
+     raise ProviderError('当前 OpenCode Go Key 未获订阅工作区访问权限；请核对项目所用 Key 与控制台的有效 Key。') from None
+   diagnostics={'usage_unknown':True,'last_call':previous_call} if exc.code in (429,502,503,504) else None
+   raise ProviderError(f'Provider HTTP {exc.code}. Check model, API key, balance or JSON-mode compatibility.',diagnostics=diagnostics) from None
+  except (urllib.error.URLError,TimeoutError,OSError) as exc:
+   reason=exc.reason if isinstance(exc,urllib.error.URLError) else exc
+   transient=isinstance(reason,(TimeoutError,ConnectionError))
+   if transient and retry_transport(type(reason).__name__):continue
+   raise ProviderError('Model request failed or timed out; retry manually. '+type(exc).__name__,
+                       diagnostics={'usage_unknown':True,'last_call':previous_call} if transient else None) from None
+  except (UnicodeError,json.JSONDecodeError):raise ProviderError('Provider did not return JSON.') from None
+ usage={}
+ try:
+  reported=data.get('usage') or {}
+  usage=dict(input_tokens=max(0,int(reported.get('prompt_tokens',0))),output_tokens=max(0,int(reported.get('completion_tokens',0))),reasoning_tokens=max(0,int((reported.get('completion_tokens_details') or {}).get('reasoning_tokens',0))),reasoning_observed=False)
+  usage['transport_retries']=transport_retries
+  usage['model_requests']=transport_retries+1
+  choice=data['choices'][0]
+  usage['reasoning_observed']=bool(choice['message'].get('reasoning_content'))
+  if choice.get('finish_reason')=='length':
+   raise ProviderError('Model output reached the completion limit; this request was counted. Retry manually or use a smaller initial scope.',usage,'length')
+  content=choice['message']['content']
+  if not isinstance(content,str) or not content.strip(): raise ProviderError('Empty final model content; check output budget / JSON support.',usage,choice.get('finish_reason'))
+  return content,usage
+ except (KeyError,IndexError,TypeError,ValueError,AttributeError): raise ProviderError('Unexpected Chat Completions response shape.',usage) from None
 
 class Director:
  def __init__(self,world):
@@ -271,11 +277,15 @@ class Director:
   self.stop_event=threading.Event(); self.wake=threading.Event(); self.thread=None
   self.tokens_reasoning=0; self.reasoning_responses=0
   self.threads=[]; self.in_flight={}
+  self.request_condition=threading.Condition(world.lock);self.model_requests={};self.request_waiters={};self.request_sequence=0
+  from .semantic_review import ReviewQueue
+  self.review_queue=ReviewQueue(self._review_finished);self.review_targets={}
   self.failures={}; self.failed_payloads={}; self.repair_calls=0
   self.normalized_responses=0; self.normalization_count=0; self.recent_corrections=[]
   self.task_metrics={}; self.task_history=[];self.task_sequence=0
   self.unknown_usage_calls=0
   self.jev_requests=0;self.jev_tokens_in=0;self.jev_tokens_out=0;self.jev_failures=0;self.jev_unavailable=0;self.jev_concerns=0;self.jev_reports=[]
+  self.jev_unknown_usage_calls=0;self.jev_cache_hits=0;self.jev_request_seconds=0.0
   self.audit=NullAudit()
   self.codex_partial_dir=None
  def configure(self,cfg):
@@ -307,6 +317,7 @@ class Director:
   self.audit.add_secret(key)
   self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit,max_transport_retries=retries,max_generation_attempts=max_attempts,task_timeout_seconds=task_timeout,parallel_region=self.cfg['parallel_region'],jev_enabled=self.cfg['jev_enabled'])
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
+  self.review_queue.cancel();self.review_targets.clear()
   self.generation+=1; self.failed.clear(); self.failures.clear(); self.failed_payloads.clear(); self.error=''; self.deferred=None; self.paused=False; self.wake.set()
  def start_worker(self):
   if self.thread: return
@@ -314,7 +325,8 @@ class Director:
   self.thread=self.threads[0]
   for worker in self.threads:worker.start()
  def stop(self):
-  self.stop_event.set(); self.wake.set()
+  self.stop_event.set(); self.wake.set();self.review_queue.stop()
+  with self.request_condition:self.request_condition.notify_all()
   for worker in self.threads:worker.join(timeout=1)
  def retry(self,target=None,kind=None,mode='repair'):
   self._sync_content_failures()
@@ -380,7 +392,8 @@ class Director:
  def _failure(self,error,ctx,raw=None,attempts=1):
   key=(ctx['kind'],ctx['target'])
   category='provider' if isinstance(error,ProviderError) else None
-  issues=as_issues(error,category=category)
+  issues=([dict(copy.deepcopy(entry),category=entry.get('category','format')) for entry in error.diagnostics['issues']]
+          if isinstance(error,ProviderError) and error.diagnostics.get('issues') else as_issues(error,category=category))
   entry=dict(kind=key[0],target=key[1],name=self._title(key[1]),category=issues[0]['category'],
              message=str(error)[:1600],issues=issues[:20],attempts=attempts,max_attempts=int((self.cfg or {}).get('max_generation_attempts',4)))
   self.failed.add(key);self.failures[key]=entry;self.error=entry['message'][:260]
@@ -398,25 +411,94 @@ class Director:
   self.recent_corrections.append(dict(target=ctx['target'],name=self._title(ctx['target']),kind=ctx['kind'],changes=changes[:128]))
   self.recent_corrections=self.recent_corrections[-6:]
   self.audit.emit('generation.normalized',target=ctx['target'],kind=ctx['kind'],changes=changes[:128])
+ def _request_priority(self,ctx):
+  s=self.world.state or {};target=ctx['target'];kind=ctx['kind']
+  ui=s.get('ui') or {}
+  if kind=='region' and (target==s.get('current') or (ui.get('kind')=='pending_exit' and ui.get('target')==target)):return 0
+  if kind=='reaction' and target==s.get('current'):return 1
+  if kind in ('campaign','direction'):return 2
+  return 4 if ctx.get('refresh') or ctx.get('target_depth',0)>1 else 3
+ def _acquire_request(self,ctx,generation,job_key,component=None):
+  started=time.monotonic()
+  with self.request_condition:
+   self.request_sequence+=1;token=self.request_sequence
+   self.request_waiters[token]=(ctx,job_key,component)
+   try:
+    while True:
+     metrics=self.task_metrics.get(job_key)
+     if metrics is None or self.stop_event.is_set() or self.paused or not self._current(ctx,generation):
+      raise ProviderError('模型请求已取消或内容上下文已过期。',diagnostics={'category':'cancelled'})
+     remaining=metrics['_deadline']-time.monotonic()
+     if remaining<=0:raise ProviderError('模型请求等待已达到任务总时限。',diagnostics={'category':'deadline'})
+     def eligible(waiter):
+      _,key,part=waiter
+      current=(self.world.state or {}).get('current');node=(self.world.state or {}).get('topology',{}).get(current,{})
+      return not (part and node.get('ready') and any(active[0]==key for active in self.model_requests.values()))
+     candidates=[key for key,value in self.request_waiters.items() if eligible(value)]
+     first=min(candidates,key=lambda key:(self._request_priority(self.request_waiters[key][0]),key)) if candidates else None
+     if len(self.model_requests)<2 and first==token:
+      self.model_requests[token]=(job_key,component);self.request_waiters.pop(token,None)
+      metrics['request_wait_seconds']=metrics.get('request_wait_seconds',0)+time.monotonic()-started
+      self.audit.emit('model.capacity.acquired',task_id=metrics['task_id'],epoch=ctx['epoch'],kind=ctx['kind'],target=ctx['target'],component=component,priority=self._request_priority(ctx),active_model_requests=len(self.model_requests),wait_seconds=round(time.monotonic()-started,3))
+      return token
+     metrics['phase']='waiting_capacity'
+     if component:metrics['components'][component]='waiting'
+     self.request_condition.wait(timeout=min(.15,remaining))
+   finally:self.request_waiters.pop(token,None)
+ def _release_request(self,token):
+  if token is None:return
+  with self.request_condition:
+   entry=self.model_requests.pop(token,None)
+   self.request_condition.notify_all();self.wake.set()
+   if entry:self.audit.emit('model.capacity.released',epoch=entry[0][0],kind=entry[0][1],target=entry[0][2],component=entry[1],active_model_requests=len(self.model_requests))
+ def _review_finished(self,report,identity):
+  with self.world.lock:
+   s=self.world.state or {};node=s.get('topology',{}).get(identity['target'],{})
+   current=(identity['generation']==self.generation and identity['epoch']==s.get('epoch') and
+            node.get('generation_revision',0)==identity.get('target_revision',0) and
+            self.review_targets.get((identity['epoch'],identity['target']))==identity['task_id'])
+   if not current:report=dict(report,status='expired',reason='superseded',concerns=[],checks=[])
+   self._record_jev('content_review',dict(report,**identity),identity,None)
+ def _queue_review(self,validated,ctx,cfg,generation,metrics):
+  identity={key:ctx.get(key) for key in ('epoch','kind','target','target_revision')}
+  identity.update(task_id=metrics['task_id'],generation=generation)
+  self.review_targets={key:value for key,value in self.review_targets.items() if key[0]==identity['epoch']}
+  self.review_targets[(identity['epoch'],identity['target'])]=identity['task_id']
+  def current():
+   with self.world.lock:
+    s=self.world.state or {};node=s.get('topology',{}).get(identity['target'],{})
+    return generation==self.generation and s.get('epoch')==identity['epoch'] and node.get('ready',False) and node.get('generation_revision',0)==identity.get('target_revision',0)
+  try:
+   result=self.review_queue.submit(validated,identity,cfg.get('jev_enabled',True),min(metrics['_deadline'],time.monotonic()+15),current,self.stop_event)
+   metrics['jev_status']=result['status']
+   self.audit.emit('jev.queued',**identity,**result)
+  except Exception as exc:self.audit.emit('jev.queue.failed',level=logging.WARNING,**identity,reason=type(exc).__name__)
  def _record_usage(self,usage):
   self.tokens_in+=usage.get('input_tokens',0); self.tokens_out+=usage.get('output_tokens',0)
   self.tokens_reasoning+=usage.get('reasoning_tokens',0); self.reasoning_responses+=int(usage.get('reasoning_observed',False))
  def _record_jev(self,stage,report,ctx,job_key):
   usage=report.get('usage') or {};status=report.get('status','error');requests=int(report.get('requests',0))
-  self.jev_requests+=requests
+  self.jev_requests+=requests;self.jev_unknown_usage_calls+=int(bool(report.get('usage_unknown')))
+  self.jev_cache_hits+=int(bool(report.get('cached')));self.jev_request_seconds+=float(report.get('request_seconds',0))
   if requests:
    self.jev_tokens_in+=int(usage.get('input_tokens',0));self.jev_tokens_out+=int(usage.get('output_tokens',0))
   self.jev_failures+=int(status=='error');self.jev_unavailable+=int(status=='unavailable')
-  concerns=report.get('concerns') or [];self.jev_concerns+=len(concerns)
+  current_epoch=ctx.get('epoch')==(self.world.state or {}).get('epoch')
+  concerns=(report.get('concerns') or []) if current_epoch else [];self.jev_concerns+=len(concerns)
   public_concerns=[{key:value[key] for key in ('kind','verdict','confidence','content_id','path') if key in value} for value in concerns[:20]]
   entry=dict(stage=stage,status=status,target=ctx.get('target'),kind=ctx.get('kind'),model=report.get('model',''),
              reason=report.get('reason',''),cached=bool(report.get('cached',False)),gaps=report.get('gaps',[])[:24],
-             concerns=public_concerns,question_version=report.get('question_version'))
-  self.jev_reports.append(entry);self.jev_reports=self.jev_reports[-8:]
+             concerns=public_concerns,question_version=report.get('question_version'),epoch=ctx.get('epoch'),task_id=report.get('task_id'),
+             target_revision=ctx.get('target_revision'),requests=requests,usage_unknown=bool(report.get('usage_unknown')),
+             request_seconds=report.get('request_seconds',0),queue_seconds=report.get('queue_seconds',0),elapsed_seconds=report.get('elapsed_seconds',0))
+  if current_epoch:self.jev_reports.append(entry);self.jev_reports=self.jev_reports[-8:]
+  for metrics in reversed(self.task_history):
+   if metrics['task_id']==report.get('task_id'):
+    metrics.update(jev_status=status,jev_concerns=len(concerns));break
   if job_key in self.task_metrics:
    self.task_metrics[job_key]['jev_status']=status;self.task_metrics[job_key]['jev_concerns']=len(concerns)
-  self.audit.emit('jev.finished',stage=stage,status=status,target=ctx.get('target'),kind=ctx.get('kind'),
-                  requests=report.get('requests',0),usage=usage,concerns=concerns[:20],gaps=report.get('gaps',[])[:24],reason=report.get('reason'))
+  self.audit.emit('jev.finished',**{key:value for key,value in entry.items() if key not in ('concerns','gaps')},
+                  usage=usage,concerns=concerns[:20],gaps=report.get('gaps',[])[:24])
  def status(self):
   self._sync_content_failures()
   for kind,target in list(self.failed):
@@ -434,16 +516,15 @@ class Director:
    active_tasks.append(dict(kind=kind,target=target,name=self._title(target),phase=metrics.get('phase','generating'),component=metrics.get('component'),components=metrics.get('components',{}),pipeline=bool(metrics.get('pipeline')),
      source=metrics.get('source','prefetch'),started_at=metrics.get('started_at'),started_steps=metrics.get('started_steps'),
       elapsed_seconds=round(time.monotonic()-metrics.get('_start',time.monotonic()),1),deadline_remaining=round(max(0,metrics.get('_deadline',time.monotonic())-time.monotonic()),1),attempts=metrics.get('attempts',0),max_attempts=metrics.get('max_attempts',4),transport_retries=metrics.get('transport_retries',0),unknown_usage_calls=metrics.get('unknown_usage_calls',0),progress=metrics.get('progress')))
-  active_model_requests=sum(sum(state=='running' for state in metrics.get('components',{}).values()) if metrics.get('pipeline') else 1 for metrics in self.task_metrics.values())
+  active_model_requests=len(self.model_requests)
   return copy.deepcopy(dict(failed_tasks=failed_tasks,active_tasks=active_tasks,task_history=self.task_history,repair_calls=self.repair_calls,max_generation_attempts=(self.cfg or {}).get('max_generation_attempts',4),normalized_responses=self.normalized_responses,normalization_count=self.normalization_count,recent_corrections=self.recent_corrections,
-    jev_enabled=(self.cfg or {}).get('jev_enabled',True),jev_requests=self.jev_requests,jev_input_tokens=self.jev_tokens_in,jev_output_tokens=self.jev_tokens_out,jev_failures=self.jev_failures,jev_unavailable=self.jev_unavailable,jev_concerns=self.jev_concerns,jev_reports=self.jev_reports,
+    jev_unknown_usage_calls=self.jev_unknown_usage_calls,jev_cache_hits=self.jev_cache_hits,jev_request_seconds=round(self.jev_request_seconds,3),jev_review_queue=self.review_queue.status(),jev_enabled=(self.cfg or {}).get('jev_enabled',True),jev_requests=self.jev_requests,jev_input_tokens=self.jev_tokens_in,jev_output_tokens=self.jev_tokens_out,jev_failures=self.jev_failures,jev_unavailable=self.jev_unavailable,jev_concerns=self.jev_concerns,jev_reports=self.jev_reports,
     prefetch_depth=2,prefetch_ready=ready,prefetch_total=len(horizon),active_requests=len(self.in_flight),active_model_requests=active_model_requests,mode='not_configured' if not self.cfg else ('offline_demo' if self.cfg['offline'] else 'live_llm'),provider=(self.cfg or {}).get('provider',''),model=(self.cfg or {}).get('model',''),reasoning_effort=(self.cfg or {}).get('reasoning_effort','low'),reasoning_tokens=self.tokens_reasoning,reasoning_responses=self.reasoning_responses,busy=self.busy,error=self.error,calls=self.calls,max_calls=(self.cfg or {}).get('max_calls',60),max_transport_retries=(self.cfg or {}).get('max_transport_retries',1),unknown_usage_calls=self.unknown_usage_calls,input_tokens=self.tokens_in,output_tokens=self.tokens_out,accepted=self.accepted,rejected=self.rejected,stale=self.stale,paused=self.paused))
  def _next_job(self):
   self._sync_content_failures()
   w=self.world; s=w.state
   if s and s.get('game_over'):return None
   if not s or not self.cfg or self.paused or len(self.in_flight)>=2: return None
-  if any(metrics.get('pipeline') for metrics in self.task_metrics.values()):return None
   if not self.cfg['offline'] and self.calls>=self.cfg['max_calls']:
    self.error='本次进程的模型调用已达上限。现有地图仍可玩；设置里可提高上限。'; return None
   if time.monotonic()-self.last_request<self.cfg['cooldown']: return None
@@ -458,35 +539,22 @@ class Director:
   if waiting and waiting in s['topology'] and not s['topology'][waiting]['ready'] and available('region',waiting):return region_job(waiting)
   if not s['topology'][s['current']]['ready']:
    return region_job(s['current']) if available('region',s['current']) else None
-  horizon=w.prefetch_targets()
-  nearby=[rid for rid,distance in horizon if distance==1 and available('region',rid) and not s['topology'][rid]['ready']]
-  region_in_flight=any(k[1]=='region' for k in self.in_flight)
-  if nearby and not region_in_flight:return region_job(nearby[0])
   if s['topology'][s['current']]['ready'] and not s['battle'] and not s['ui']:
    jobs=adventure.ready_jobs(w,s['current'])
    if jobs and available('reaction',s['current']):
     ctx=w.context(kind='reaction');ctx['commission_ids']=[jobs[0]['id']];ctx['content_contract']['commissions']=[copy.deepcopy(jobs[0])]
     ctx['content_dependencies']=adventure.dependencies(w,ctx)
     return ctx,copy.deepcopy(self.cfg),self.generation
+   if w.reaction_needed and self.deferred is None and available('reaction',s['current']):
+    w.reaction_needed=False
+    return w.context(kind='reaction'),copy.deepcopy(self.cfg),self.generation
    if adventure.review_due(w) and available('direction',s['current']) and not any(k[1]=='direction' for k in self.in_flight):return w.context(kind='direction'),copy.deepcopy(self.cfg),self.generation
+  if any(k[1]=='region' for k in self.in_flight):return None
   pending=[(rid,distance) for rid,distance in w.prefetch_targets() if not s['topology'][rid]['ready'] and available('region',rid)]
   if s.get('campaign'):pending.sort(key=lambda item:(item[1],s['topology'][item[0]].get('chapter_id')!=s['campaign']['active']))
-  if not s['topology'][s['current']]['ready']:
-   if not available('region',s['current']):return None
-   target=s['current']; kind='region'
-  elif pending and pending[0][1]==1:
-   target=pending[0][0]; kind='region'
-  elif w.reaction_needed and not s['battle'] and not s['ui'] and available('reaction',s['current']):
-   target=s['current']; kind='reaction'
-  elif pending:
-   target=pending[0][0]; kind='region'
-  else:
-   choices=[rid for rid,distance in w.prefetch_targets() if not w.reaction_needed and s['topology'][rid].get('needs_refresh') and available('region',rid)]
-   if not choices: return None
-   target=choices[0]; kind='region'
-  if (kind,target) in self.failed: return None
-  if kind=='reaction': w.reaction_needed=False
-  return w.context(target,kind),copy.deepcopy(self.cfg),self.generation
+  if pending:return region_job(pending[0][0])
+  choices=[rid for rid,distance in w.prefetch_targets() if not w.reaction_needed and s['topology'][rid].get('needs_refresh') and available('region',rid)]
+  return region_job(choices[0]) if choices else None
  def step(self):
   """A single deterministic scheduler step, also used by tests."""
   with self.world.lock:
@@ -501,17 +569,17 @@ class Director:
    if not job: return False
    ctx,cfg,generation=job; kind=ctx['kind']; target=ctx['target']; job_key=(ctx['epoch'],kind,target)
    if kind=='region' and not cfg['offline'] and self.world.state.get('adventure'):ctx['require_overworld_threats']=True
-   split_region=(kind=='region' and cfg.get('provider')=='chatgpt_subscription' and cfg.get('parallel_region',True)
+   split_region=(kind=='region' and cfg.get('provider') in ('chatgpt_subscription','chat_completions') and cfg.get('parallel_region',True)
                  and not cfg['offline'] and bool(ctx.get('chapter_plan') or ctx.get('content_contract') or ctx.get('require_overworld_threats'))
                  and not ctx.get('refresh')
-                 and not self.in_flight and (self.calls+2<=cfg['max_calls'] or self.world.store.has_components(ctx['epoch'],target)))
+                 and (self.calls+2<=cfg['max_calls'] or self.world.store.has_components(ctx['epoch'],target)))
    cfg['_parallel_region']=split_region
    self.in_flight[job_key]=('统筹冒险 ' if kind=='direction' else '规划章节 ' if kind=='campaign' else '落实委托 ' if ctx.get('commission_ids') else '续写 ' if kind=='reaction' else '生成 ')+self._title(target)
    self._begin_task(job_key,ctx,cfg)
    self.task_metrics[job_key]['pipeline']=split_region
-   if split_region:self.task_metrics[job_key].update(component='parallel',components={'gameplay':'running','audiovisual':'pending'})
+   if split_region:self.task_metrics[job_key].update(component='parallel',components={'gameplay':'pending','audiovisual':'pending'})
    self.busy=' / '.join(self.in_flight.values()); self.last_request=time.monotonic()
-  raw=None; error=None;attempts=0;stale_invalid_response=False
+  raw=None; error=None;attempts=0;stale_invalid_response=False;validated=None
   cached=self.failed_payloads.get((kind,target))
   cache_fields=('epoch','target','kind','refresh','target_revision','content_dependencies')+(('story_revision','commission_ids') if kind=='reaction' else ())
   if cached and cached['generation']==generation and all(cached['context'].get(k)==ctx.get(k) for k in cache_fields):
@@ -520,18 +588,20 @@ class Director:
   repair_raw=raw if repair_error is not None else None
   max_attempts=int(cfg.get('max_generation_attempts',4))
   for attempt in range(max_attempts):
-   request_number=None;request_started=None
+   request_number=None;request_started=None;request_token=None
    try:
     with self.world.lock:
      if not self._current(ctx,generation): break
     if cfg['offline']: raw=make_patch(ctx,kind)
     else:
+     pipeline_request=cfg.get('_parallel_region') and repair_error is None
+     if not pipeline_request:request_token=self._acquire_request(ctx,generation,job_key)
      with self.world.lock:
       if time.monotonic()>=self.task_metrics[job_key]['_deadline']:raise ProviderError('生成任务已达到共享总时限。',diagnostics={'category':'deadline','deadline_seconds':cfg.get('task_timeout_seconds',900)})
       if self.calls>=cfg['max_calls']:
        if error is not None:break
        raise ProviderError('达到本次进程调用上限。')
-      if not cfg.get('_parallel_region') or error is not None:
+      if not pipeline_request:
        self.calls+=1
        request_number=self.calls
       self.repair_calls+=int(error is not None and raw is not None)
@@ -543,7 +613,7 @@ class Director:
      if request_number is not None:self.audit.emit('model.request',kind=kind,target=target,call=request_number,repair=bool(repair),model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
      model_started=time.perf_counter()
      cfg['_cancel_event']=self.stop_event
-     cfg['_audit']=self.audit;cfg['_request_meta']=dict(kind=kind,target=target,call=request_number)
+     cfg['_audit']=self.audit;cfg['_request_meta']=dict(kind=kind,target=target,call=request_number,epoch=ctx['epoch'],task_id=self.task_metrics[job_key]['task_id'])
      cfg['_task_deadline']=self.task_metrics[job_key]['_deadline']
      def reserve_transport_retry(details):
       with self.world.lock:
@@ -569,7 +639,7 @@ class Director:
         self.task_metrics[job_key]['progress']=progress
         if progress.get('component'):self.task_metrics[job_key]['component']=progress['component']
      cfg.setdefault('_codex_progress',update_progress)
-     if cfg.get('_parallel_region'):
+     if pipeline_request:
       cfg['_region_reserve_all']=True
       cfg['_region_validation_context']=self.world.validation_context(ctx)
       def checkpoint_load(key):
@@ -577,7 +647,7 @@ class Director:
       def checkpoint_save(key,component,result):
        with self.world.lock:
         if self._current(ctx,generation):self.world.store.save_component(key,component,ctx['epoch'],target,result)
-      def component_usage(component,call,usage,failure):
+      def component_usage(component,call,usage,failure,response_text=None):
        with self.world.lock:
         self._record_usage(usage)
         unknown=bool(getattr(failure,'diagnostics',{}).get('usage_unknown'))
@@ -585,18 +655,29 @@ class Director:
          self.unknown_usage_calls+=1
          self.task_metrics[job_key]['unknown_usage_calls']+=1
         self.world.store.record_generation_request(dict(epoch=ctx['epoch'],target=target,component=component,call=call,
-         usage=usage,usage_unknown=unknown,status='failed' if failure else 'completed',time=time.time()))
+         usage=usage,usage_unknown=unknown,status='failed' if failure else 'completed',time=time.time(),
+         response_text=response_text[:131072] if isinstance(response_text,str) else None,
+         response_chars=len(response_text) if isinstance(response_text,str) else 0,
+         response_truncated=isinstance(response_text,str) and len(response_text)>131072))
       cfg['_region_checkpoint_load']=checkpoint_load;cfg['_region_checkpoint_save']=checkpoint_save;cfg['_region_usage']=component_usage
+      component_tokens={}
       def reserve_component(component):
-       with self.world.lock:
-        if self.stop_event.is_set() or self.paused or not self._current(ctx,generation) or time.monotonic()>=self.task_metrics[job_key]['_deadline']:raise ProviderError('区域组件请求已超过任务边界。',diagnostics={'category':'deadline','component':component})
-        if self.calls>=cfg['max_calls']:raise ProviderError('区域并行制作所需的调用额度已经用完。')
-        self.calls+=1;call=self.calls
-        if job_key in self.task_metrics:
+       token=self._acquire_request(ctx,generation,job_key,component)
+       try:
+        with self.world.lock:
+         if self.calls>=cfg['max_calls']:raise ProviderError('区域并行制作所需的调用额度已经用完。')
+         self.calls+=1;call=self.calls;component_tokens[component]=token
          self.task_metrics[job_key].update(component=component,phase='generating')
          self.task_metrics[job_key]['components'][component]='running'
-       self.audit.emit('model.request',kind=kind,target=target,call=call,component=component,repair=False,model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
-       return call
+        self.audit.emit('model.request',kind=kind,target=target,call=call,component=component,repair=False,model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
+        return call
+       except Exception:
+        self._release_request(token);raise
+      def release_component(component):
+       with self.world.lock:
+        if self.task_metrics[job_key]['components'].get(component)=='running':self.task_metrics[job_key]['components'][component]='failed'
+        self._release_request(component_tokens.pop(component,None))
+      cfg['_region_request_finished']=release_component
       def component_done(component):
        with self.world.lock:
         if job_key in self.task_metrics:self.task_metrics[job_key]['components'][component]='done'
@@ -606,6 +687,7 @@ class Director:
       cfg['_region_subrequest']=reserve_component;cfg['_region_component_done']=component_done;cfg['_region_can_repair']=can_repair_component
      try:raw,usage=ChatProvider(cfg).generate(request_ctx,kind,repair)
      finally:
+      self._release_request(request_token);request_token=None
       with self.world.lock:self.task_metrics[job_key]['request_seconds']+=time.perf_counter()-model_started
      self.audit.emit('model.response',kind=kind,target=target,call=request_number,seconds=round(time.monotonic()-request_started,3),usage=usage,response_chars=len(raw))
      with self.world.lock:
@@ -637,14 +719,6 @@ class Director:
       validation_started=time.monotonic()
       try:validated=self.world.validate_patch(raw,ctx)
       finally:self.task_metrics[job_key]['validation_seconds']+=time.monotonic()-validation_started
-    if validated is not None and not cfg['offline'] and kind=='region':
-     with self.world.lock:
-      if job_key in self.task_metrics:self.task_metrics[job_key]['phase']='semantic_review'
-     from .semantic_review import review as semantic_review
-     jev_report=semantic_review(validated,ctx,cfg)
-     with self.world.lock:
-      self._record_jev('content_review',jev_report,ctx,job_key)
-      if not self._current(ctx,generation):break
     error=None; break
    except InvalidPatch as exc:
     self.audit.emit('generation.rejected',level=logging.WARNING,kind=kind,target=target,call=request_number,attempt=attempt+1,issues=exc.issues)
@@ -687,6 +761,7 @@ class Director:
     break
    except Exception as exc:
     error=exc; break
+   finally:self._release_request(request_token)
   with self.world.lock:
    self.in_flight.pop(job_key,None); self.busy=' / '.join(self.in_flight.values())
    if self.stop_event.is_set():self._finish_task(job_key,'stopped');return True
@@ -707,6 +782,8 @@ class Director:
    if kind=='reaction' and (self.world.state['battle'] or self.world.state['ui']):
     self.deferred=(raw,ctx,source,generation);outcome='deferred'
    else:outcome=self._deliver(raw,ctx,source)
+   if outcome=='ready' and validated is not None and not cfg['offline']:
+    self._queue_review(validated,ctx,cfg,generation,self.task_metrics[job_key])
    self._finish_task(job_key,outcome)
   return True
  def _deliver(self,raw,ctx,source):

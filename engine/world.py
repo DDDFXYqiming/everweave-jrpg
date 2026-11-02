@@ -12,19 +12,21 @@ from . import gameplay
 from .runtime import Runtime, install
 from .scene import solid_at, cells_for
 from . import campaign,game_spec,adventure
+from .snapshots import RegionSnapshots, SnapshotRead
 
 class GameError(ValueError): pass
 
 class World:
  def __init__(self,store):
   self.store=store; self.lock=threading.RLock(); self.state=store.load_state(); self.cache=OrderedDict(); self.reaction_needed=bool(self.state and self.state.get("director_reaction_pending",False))
+  self._region_snapshots=RegionSnapshots()
   if self.state and self.state.get('prefetch_policy',1)<2:
    for node in self.state['topology'].values():
     if not node.get('refresh_reason'):node['needs_refresh']=False
    self.state['prefetch_policy']=2
  def start(self,setting,*,authored=False,language='zh',planned=False):
   if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
-  self.cache.clear(); self.reaction_needed=False
+  self.cache.clear(); self._region_snapshots.clear(); self._map_cards={}; self.reaction_needed=False
   self.state=dict(schema_version=2,prefetch_policy=2,director_reaction_pending=False,epoch=uuid.uuid4().hex,version=1,story_revision=0,setting=setting.strip(),title='未写之境 · Everweave',current='r0',time=480,steps=0,
    player=dict(x=26,y=31,facing=[0,-1],hp=90,max_hp=90,mp=24,max_mp=24,level=1,xp=0,gold=35,inventory=dict(potion=3,ether=1,wayfarer_blade=1),weapon='wayfarer_blade',charm=''),
    topology={'r0':dict(parent=None,depth=0,ready=False,visited=False,name='最初的落脚处',children=[])},items=copy.deepcopy(C.BASE_ITEMS),quests={},lore={},threads={},facts={},battle=None,ui={},journal=['你的一句话，正在成为一个可以走进去的世界。'])
@@ -40,6 +42,8 @@ class World:
  def region(self,rid=None):
   rid=rid or self.state['current']
   if rid in self.cache:
+   batch=getattr(self,'_batch',None)
+   if batch is not None:batch['rollback'].touch(self.cache[rid])
    self.cache.move_to_end(rid);campaign.sync_gates(self,self.cache[rid]);adventure.sync_cast(self,self.cache[rid]);return self.cache[rid]
   r=self.store.load_region(rid)
   if r:
@@ -55,7 +59,9 @@ class World:
   adventure.refresh(self)
   adventure.record(self,event)
   from .scene import dress
-  for r in regions:dress(r)
+  for r in regions:
+   dress(r);self._region_snapshots.invalidate(r['id'])
+   if getattr(self,'_map_cards',{}).get('cards') is not None:self._map_cards['cards'].pop(r['id'],None)
   self.state['version']+=1
   if getattr(self,'_batch',None) is not None:
    self._batch['regions'].update({r['id']:r for r in regions})
@@ -299,146 +305,149 @@ class World:
  def apply_patch(self,raw,context,source='llm'):
   return gameplay.transaction(self,lambda:self._apply_patch(raw,context,source))
  def _apply_patch(self,raw,context,source='llm',_validated=None):
+  if getattr(self,'_batch',None) is None:
+   return gameplay.transaction(self,lambda:self._apply_patch(raw,context,source,_validated))
   s=self.state
   if not self.context_is_current(context): return False
   p=self.validate_patch(raw,context) if _validated is None else _validated
   if p['kind']=='campaign':campaign.apply(self,p['campaign']);return True
   if p['kind']=='direction':adventure.apply_direction(self,p['direction'],context);return True
-  before=copy.deepcopy(s); cache_before=copy.deepcopy(self.cache)
-  try:
-   if p['kind']=='region':
-    rid=context['target']; node=s['topology'].get(rid)
-    if node is None or node['visited'] or (node['ready'] and not node.get('needs_refresh')): return False
-    discarded=[]
-    planned=campaign.chapter(s,rid)
-    if planned:pass
-    elif p['region'].get('destinations'):
-     children=[self._register_destination(rid,spec) for spec in p['region']['destinations']]
-     for old in node['children']:
-      if old not in children:
-       discarded.extend(self._discard_draft(old))
-     node['children']=children
-    elif not node['children']:
-     node['children']=[rid+'a',rid+'b']
-     for n,child in enumerate(node['children']): s['topology'][child]=dict(parent=rid,depth=node['depth']+1,ready=False,visited=False,name='远处的灯火' if n==0 else '尚未命名的道路',children=[])
-    exits=[dict(target=ch,direction='forward',label='前往 '+s['topology'][ch]['name']) for ch in node['children']]
-    if node['parent']: exits.append(dict(target=node['parent'],direction='back',label='返回 '+s['topology'][node['parent']]['name']))
-    if planned:exits=campaign.routes(s,rid)
-    r=build_region(p['region'],rid,C.stable_seed(s['setting'],rid),node['depth'],exits); r.update(plan=p['region'],source=source,pending_lore=p['lore'],pending_threads=p['threads'],normalizations=p['_corrections'][-128:],generated_story_revision=context['story_revision']); node.update(ready=True,name=r['name'],needs_refresh=False,refresh_reason=None)
-    r['_generation_raw']=copy.deepcopy(raw) if raw is not None else dict(kind='region',region=copy.deepcopy(p['region']),lore=p['lore'],threads=p['threads'])
-    node.pop('content_failure',None)
-    if p.get('_playability'):r['playability']=copy.deepcopy(p['_playability'])
-    if planned:r['chapter_id']=node['chapter_id'];campaign.sync_gates(self,r)
-    if r.get('visuals'):
-     if rid=='r0' and not s.get('hero_visual'):s['hero_visual']=freeze_sprite(r['visuals']['sprites'][resolve_sprite('hero',r['visuals'])],r['visuals']['palette'])
-     if s.get('hero_visual'):r['visuals']['sprites']['hero']=copy.deepcopy(s['hero_visual'])
-    if rid=='r0':
-     if 'world_title' in p: s['title']=p['world_title']
-     self._enter_content(r); s['player']['x'],s['player']['y']=r['spawn']; self.note(r['description'])
-    from .story_content import install as install_story
-    install_story(self,r,p['region'],context)
-    gameplay.definitions(self,r)
-    if rid=='r0':gameplay.enter(self,r)
-    self.persist(r,delete=discarded)
-   else:
-    rid=context['current_region'].get('id'); r=copy.deepcopy(self.region(rid))
-    if not r: return False
-    re=p['reaction']
-    for k in ('weather','rule'):
-     if k in re: r[k]=re[k]
-    for up in re['npc_lines']:
-     e=next((e for e in r['entities'] if e['id']==up['id'] and e['kind']=='npc' and not e['spent']),None)
-     if e is None: raise InvalidPatch('unknown/nonliving NPC')
-     e['dialogue']=up['dialogue']
-    occupied={(e['x'],e['y']) for e in r['entities']}|{tuple(r['spawn'])}
-    if s['current']==rid: occupied.add((s['player']['x'],s['player']['y']))
-    occupied.update((e['x'],e['y']-1) for e in r['entities'] if e['kind']=='exit')
-    free=sorted(reachable(r['tiles'],r['spawn']))
-    prefix=f'{rid}:event_{s["story_revision"]}_'
-    item_refs={i['id']:prefix+i['id'] for i in re['items']}
-    entity_refs={e['id']:prefix+e['id'] for e in re['spawns']}
-    for raw_item in re['items']:
-     i=copy.deepcopy(raw_item); i['local_id']=raw_item['id'];i['id']=item_refs[i['id']];i['origin']=rid
-     if i['id'] in s['items']: raise InvalidPatch('item already exists')
-     item_art=re.get('visuals',r.get('visuals',{}))
-     if i.get('sprite') in item_art.get('sprites',{}):i['icon_visual']=freeze_sprite(item_art['sprites'][i['sprite']],item_art['palette'])
-     s['items'][i['id']]=i
-    for raw in re['spawns']:
-     if len(r['entities'])>=28: raise InvalidPatch('region entity capacity reached')
-     e=copy.deepcopy(raw); e['id']=entity_refs[e['id']]
-     if any(x['id']==e['id'] for x in r['entities']): raise InvalidPatch('entity already exists')
-     if e['kind']=='chest':
-      e['item_id']=item_refs.get(e['item_id'],e['item_id'])
-      if e['item_id'] not in s['items'] and rid+':'+e['item_id'] in s['items']: e['item_id']=rid+':'+e['item_id']
-      if e['item_id'] not in s['items']: raise InvalidPatch('unknown reaction item')
-     zones={'north':(r['width']//2,8),'south':(r['width']//2,r['height']-10),'east':(r['width']-11,r['height']//2),'west':(10,r['height']//2),'center':(r['width']//2,r['height']//2)}
-     zx,zy=zones[e['zone']]
-     pos=next((pos for pos in sorted(free,key=lambda p:abs(p[0]-zx)+abs(p[1]-zy)) if pos not in occupied and 3<pos[0]<r['width']-4 and 4<pos[1]<r['height']-4),None)
-     if pos is None: raise InvalidPatch('no room for new entity')
-     pos=tuple(e.get('at',pos))
-     e.update(x=pos[0],y=pos[1],spent=False,local_id=raw['id']); occupied.add(pos); r['entities'].append(e)
-    for raw_quest in re['quests']:
-     q=copy.deepcopy(raw_quest); q['id']=prefix+q['id']
-     if q['id'] in s['quests']: raise InvalidPatch('quest already exists')
-     refs=item_refs if q['goal']=='collect' else entity_refs
-     q['target']=refs.get(q['target'],q['target'])
-     existing_targets=s['items'] if q['goal']=='collect' else {e['id'] for e in r['entities']}
-     if q['target'] not in existing_targets and rid+':'+q['target'] in existing_targets: q['target']=rid+':'+q['target']
-     if q['goal']=='collect': valid=any(e['kind']=='chest' and not e['spent'] and e['item_id']==q['target'] for e in r['entities'])
-     else: valid=any(e['id']==q['target'] and not e['spent'] and e['kind']==('npc' if q['goal']=='talk' else 'enemy') for e in r['entities'])
-     if not valid: raise InvalidPatch('quest target is absent or wrong kind')
-     q.update(status='active',region=rid,reward=15+r['depth']*5); s['quests'][q['id']]=q
-    for spec in re['locations']:
-     children=s['topology'][rid]['children']
-     target=self._register_destination(rid,spec)
-     if target in children: continue
-     if len(children)>=4 or len(r['entities'])>=28: raise InvalidPatch('region connection capacity reached')
-     pos=next((p for p in sorted(free,key=lambda p:(p[1],p[0])) if p[1]>=5 and p not in occupied and (p[0],p[1]-1) in free and (p[0],p[1]-1) not in occupied),None)
-     if pos is None: raise InvalidPatch('no room for new connection')
-     occupied.add(pos); occupied.add((pos[0],pos[1]-1)); children.append(target)
-     r['entities'].append(dict(id=prefix+'gate_'+spec['id'],kind='exit',name='前往 '+spec['name'],target=target,direction='forward',x=pos[0],y=pos[1],spent=False))
-    from .story_content import install as install_story
-    install_story(self,r,re,context)
-    gameplay.reaction(self,r,re)
-    for index,update in enumerate(re.get('future_updates',[])):
-     target=update['id'];node=s['topology'].get(target)
-     if node is None or target not in s['topology'][rid]['children'] or node['visited']:
-      raise InvalidPatch('future update must target an unvisited direct exit',path=f'reaction.future_updates[{index}].id',category='reference',value=target)
-     outline=dict(node.get('outline') or {'id':target,'name':node['name']})
-     outline['description']=update['description']
-     if 'name' in update:outline['name']=update['name']
-     self._update_outline(node,outline)
-     if not node['ready']:node['name']=outline['name']
-    r['normalizations']=(r.get('normalizations',[])+p['_corrections'])[-128:]
-    self._merge_lore(p['lore'],p['threads']); s['director_reaction_pending']=False;self.reaction_needed=False; r['revision']+=1; self.note('世界回应：'+re['text']); self.persist(r)
-  except Exception:
-   self.state=before; self.cache=cache_before; raise
+  if p['kind']=='region':
+   rid=context['target']; node=s['topology'].get(rid)
+   if node is None or node['visited'] or (node['ready'] and not node.get('needs_refresh')): return False
+   discarded=[]
+   planned=campaign.chapter(s,rid)
+   if planned:pass
+   elif p['region'].get('destinations'):
+    children=[self._register_destination(rid,spec) for spec in p['region']['destinations']]
+    for old in node['children']:
+     if old not in children:
+      discarded.extend(self._discard_draft(old))
+    node['children']=children
+   elif not node['children']:
+    node['children']=[rid+'a',rid+'b']
+    for n,child in enumerate(node['children']): s['topology'][child]=dict(parent=rid,depth=node['depth']+1,ready=False,visited=False,name='远处的灯火' if n==0 else '尚未命名的道路',children=[])
+   exits=[dict(target=ch,direction='forward',label='前往 '+s['topology'][ch]['name']) for ch in node['children']]
+   if node['parent']: exits.append(dict(target=node['parent'],direction='back',label='返回 '+s['topology'][node['parent']]['name']))
+   if planned:exits=campaign.routes(s,rid)
+   r=build_region(p['region'],rid,C.stable_seed(s['setting'],rid),node['depth'],exits); r.update(plan=p['region'],source=source,pending_lore=p['lore'],pending_threads=p['threads'],normalizations=p['_corrections'][-128:],generated_story_revision=context['story_revision']); node.update(ready=True,name=r['name'],needs_refresh=False,refresh_reason=None)
+   r['_generation_raw']=copy.deepcopy(raw) if raw is not None else dict(kind='region',region=copy.deepcopy(p['region']),lore=p['lore'],threads=p['threads'])
+   node.pop('content_failure',None)
+   if p.get('_playability'):r['playability']=copy.deepcopy(p['_playability'])
+   if planned:r['chapter_id']=node['chapter_id'];campaign.sync_gates(self,r)
+   if r.get('visuals'):
+    if rid=='r0' and not s.get('hero_visual'):s['hero_visual']=freeze_sprite(r['visuals']['sprites'][resolve_sprite('hero',r['visuals'])],r['visuals']['palette'])
+    if s.get('hero_visual'):r['visuals']['sprites']['hero']=copy.deepcopy(s['hero_visual'])
+   if rid=='r0':
+    if 'world_title' in p: s['title']=p['world_title']
+    self._enter_content(r); s['player']['x'],s['player']['y']=r['spawn']; self.note(r['description'])
+   from .story_content import install as install_story
+   install_story(self,r,p['region'],context)
+   gameplay.definitions(self,r)
+   if rid=='r0':gameplay.enter(self,r)
+   self.persist(r,delete=discarded)
+  else:
+   rid=context['current_region'].get('id'); r=self.region(rid)
+   if not r: return False
+   re=p['reaction']
+   for k in ('weather','rule'):
+    if k in re: r[k]=re[k]
+   for up in re['npc_lines']:
+    e=next((e for e in r['entities'] if e['id']==up['id'] and e['kind']=='npc' and not e['spent']),None)
+    if e is None: raise InvalidPatch('unknown/nonliving NPC')
+    e['dialogue']=up['dialogue']
+   occupied={(e['x'],e['y']) for e in r['entities']}|{tuple(r['spawn'])}
+   if s['current']==rid: occupied.add((s['player']['x'],s['player']['y']))
+   occupied.update((e['x'],e['y']-1) for e in r['entities'] if e['kind']=='exit')
+   free=sorted(reachable(r['tiles'],r['spawn']))
+   prefix=f'{rid}:event_{s["story_revision"]}_'
+   item_refs={i['id']:prefix+i['id'] for i in re['items']}
+   entity_refs={e['id']:prefix+e['id'] for e in re['spawns']}
+   for raw_item in re['items']:
+    i=copy.deepcopy(raw_item); i['local_id']=raw_item['id'];i['id']=item_refs[i['id']];i['origin']=rid
+    if i['id'] in s['items']: raise InvalidPatch('item already exists')
+    item_art=re.get('visuals',r.get('visuals',{}))
+    if i.get('sprite') in item_art.get('sprites',{}):i['icon_visual']=freeze_sprite(item_art['sprites'][i['sprite']],item_art['palette'])
+    s['items'][i['id']]=i
+   for raw in re['spawns']:
+    if len(r['entities'])>=28: raise InvalidPatch('region entity capacity reached')
+    e=copy.deepcopy(raw); e['id']=entity_refs[e['id']]
+    if any(x['id']==e['id'] for x in r['entities']): raise InvalidPatch('entity already exists')
+    if e['kind']=='chest':
+     e['item_id']=item_refs.get(e['item_id'],e['item_id'])
+     if e['item_id'] not in s['items'] and rid+':'+e['item_id'] in s['items']: e['item_id']=rid+':'+e['item_id']
+     if e['item_id'] not in s['items']: raise InvalidPatch('unknown reaction item')
+    zones={'north':(r['width']//2,8),'south':(r['width']//2,r['height']-10),'east':(r['width']-11,r['height']//2),'west':(10,r['height']//2),'center':(r['width']//2,r['height']//2)}
+    zx,zy=zones[e['zone']]
+    pos=next((pos for pos in sorted(free,key=lambda p:abs(p[0]-zx)+abs(p[1]-zy)) if pos not in occupied and 3<pos[0]<r['width']-4 and 4<pos[1]<r['height']-4),None)
+    if pos is None: raise InvalidPatch('no room for new entity')
+    pos=tuple(e.get('at',pos))
+    e.update(x=pos[0],y=pos[1],spent=False,local_id=raw['id']); occupied.add(pos); r['entities'].append(e)
+   for raw_quest in re['quests']:
+    q=copy.deepcopy(raw_quest); q['id']=prefix+q['id']
+    if q['id'] in s['quests']: raise InvalidPatch('quest already exists')
+    refs=item_refs if q['goal']=='collect' else entity_refs
+    q['target']=refs.get(q['target'],q['target'])
+    existing_targets=s['items'] if q['goal']=='collect' else {e['id'] for e in r['entities']}
+    if q['target'] not in existing_targets and rid+':'+q['target'] in existing_targets: q['target']=rid+':'+q['target']
+    if q['goal']=='collect': valid=any(e['kind']=='chest' and not e['spent'] and e['item_id']==q['target'] for e in r['entities'])
+    else: valid=any(e['id']==q['target'] and not e['spent'] and e['kind']==('npc' if q['goal']=='talk' else 'enemy') for e in r['entities'])
+    if not valid: raise InvalidPatch('quest target is absent or wrong kind')
+    q.update(status='active',region=rid,reward=15+r['depth']*5); s['quests'][q['id']]=q
+   for spec in re['locations']:
+    children=s['topology'][rid]['children']
+    target=self._register_destination(rid,spec)
+    if target in children: continue
+    if len(children)>=4 or len(r['entities'])>=28: raise InvalidPatch('region connection capacity reached')
+    pos=next((p for p in sorted(free,key=lambda p:(p[1],p[0])) if p[1]>=5 and p not in occupied and (p[0],p[1]-1) in free and (p[0],p[1]-1) not in occupied),None)
+    if pos is None: raise InvalidPatch('no room for new connection')
+    occupied.add(pos); occupied.add((pos[0],pos[1]-1)); children.append(target)
+    r['entities'].append(dict(id=prefix+'gate_'+spec['id'],kind='exit',name='前往 '+spec['name'],target=target,direction='forward',x=pos[0],y=pos[1],spent=False))
+   from .story_content import install as install_story
+   install_story(self,r,re,context)
+   gameplay.reaction(self,r,re)
+   for index,update in enumerate(re.get('future_updates',[])):
+    target=update['id'];node=s['topology'].get(target)
+    if node is None or target not in s['topology'][rid]['children'] or node['visited']:
+     raise InvalidPatch('future update must target an unvisited direct exit',path=f'reaction.future_updates[{index}].id',category='reference',value=target)
+    outline=dict(node.get('outline') or {'id':target,'name':node['name']})
+    outline['description']=update['description']
+    if 'name' in update:outline['name']=update['name']
+    self._update_outline(node,outline)
+    if not node['ready']:node['name']=outline['name']
+   r['normalizations']=(r.get('normalizations',[])+p['_corrections'])[-128:]
+   self._merge_lore(p['lore'],p['threads']); s['director_reaction_pending']=False;self.reaction_needed=False; r['revision']+=1; self.note('世界回应：'+re['text']); self.persist(r)
   return True
  def check_quests(self,goal,target):
   for q in self.state['quests'].values():
    if q['status']=='active' and q['goal']==goal and q['target']==target:
     q['status']='complete'; self.state['player']['gold']+=q['reward']; self.state['facts']['quest:'+q['id']]='complete'; self.note('完成委托：'+q['name']+f'  +{q["reward"]} 金币')
- def snapshot(self):
-  if not self.state: return dict(started=False,version=0)
-  s=self.state; r=copy.deepcopy(self.region()); p=s['player']
+ def snapshot(self,region_token=None):
+  if not self.state:return dict(started=False,version=0,region_static_token='',region_static_unchanged=False,region_static_fields=[])
+  s=self.state; source=self.region(); p=s['player']
+  reader=SnapshotRead(self,source) if source else None
+  r,static_token,static_unchanged,static_fields=self._region_snapshots.project(source,s['epoch'],region_token)
   from .read_views import player_quests
   known_quests=player_quests(self)
   if r:
-   if campaign.book(s):r['entities']=[e for e in r['entities'] if not (e['kind']=='exit' and e.get('spent'))]
+   if 'runtime' not in r:r['runtime']=reader.rt
+   r['entities']=[dict(e) for e in r['entities'] if not (campaign.book(s) and e['kind']=='exit' and e.get('spent'))]
    for e in r['entities']:
     if e['kind']=='exit': e['name']=('返回 ' if e['direction']=='back' else '前往 ')+s['topology'][e['target']]['name']
   inv=[dict(s['items'][k],quantity=n,equipped=k in (p['weapon'],p['charm'])) for k,n in p['inventory'].items() if n>0 and k in s['items']]
-  for item in inv:item['usable']=gameplay.item_availability(self,item)
-  generated_actions=Runtime(self,r).available(scope='combat' if s['battle'] else 'explore') if r and r.get('program') and not s.get('game_over') else []
+  for item in inv:item['usable']=gameplay.item_availability(self,item,reader)
+  generated_actions=reader.reset().available(scope='combat' if s['battle'] else 'explore') if reader and source.get('program') and not s.get('game_over') else []
   ui=copy.deepcopy(s['ui'])
   if ui.get('kind')=='pending_exit':
    node=s['topology'].get(ui.get('target'),{})
    ui['ready']=bool(node.get('ready'));ui['name']=node.get('name','下一个地区')
    ui['title']='下一地区已准备好' if ui['ready'] else '地区正在后台准备'
    ui['lines']=['可以进入 '+ui['name']+'。'] if ui['ready'] else ['这条道路尚未准备好。你可以继续探索，后台会提前生成。']
-  return copy.deepcopy(dict(adventure=adventure.public_view(self),game_over=bool(s.get('game_over')),game_spec=game_spec.snapshot(s),campaign=campaign.overview(s),audio_seq=s.get('audio_seq',0),audio_events=s.get('audio_events',[]),available_actions=generated_actions,content_version=2,started=True,version=s['version'],epoch=s['epoch'],title=s['title'],setting=s['setting'],story_revision=s['story_revision'],time=s['time'],
-    region={k:v for k,v in r.items() if k not in ('plan','pending_lore','pending_threads','_generation_raw')} if r else None,player=p,inventory=inv,quests=known_quests[-20:],threads=list(s['threads'].values())[-10:],journal=s['journal'][-10:],battle=s['battle'],ui=ui,map_count=sum(n['visited'] for n in s['topology'].values()),
-   frontier=[dict(id=rid,name=s['topology'][rid]['name'],ready=s['topology'][rid]['ready']) for rid in (campaign.neighbors(s,s['current'],True) if campaign.book(s) else s['topology'][s['current']]['children'])]))
+  result=dict(region_static_token=static_token,region_static_unchanged=static_unchanged,adventure=adventure.public_view(self),game_over=bool(s.get('game_over')),game_spec=game_spec.snapshot(s),campaign=campaign.overview(s),audio_seq=s.get('audio_seq',0),audio_events=s.get('audio_events',[]),available_actions=generated_actions,content_version=2,started=True,version=s['version'],epoch=s['epoch'],title=s['title'],setting=s['setting'],story_revision=s['story_revision'],time=s['time'],
+    region=r,player=p,inventory=inv,quests=known_quests[-20:],threads=list(s['threads'].values())[-10:],journal=s['journal'][-10:],battle=s['battle'],ui=ui,map_count=sum(n['visited'] for n in s['topology'].values()),
+   frontier=[dict(id=rid,name=s['topology'][rid]['name'],ready=s['topology'][rid]['ready']) for rid in (campaign.neighbors(s,s['current'],True) if campaign.book(s) else s['topology'][s['current']]['children'])])
+  if not static_unchanged:result['region_static_fields']=static_fields
+  return copy.deepcopy(result)
  def action(self,a):
   from .playability import RegionEntryError
   try:return gameplay.action(self,a)

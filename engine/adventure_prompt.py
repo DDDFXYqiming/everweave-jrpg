@@ -1,4 +1,13 @@
-PLAN='''
+MEMORY='''
+causal_memory 是按当前地区、任务依赖和早期未兑现目标检索的权威状态切片。
+规划时读取 adventure_memory.causal_memory，复盘时读取 causal_memory，内容作者读取 content_contract.causal_memory。
+open_missions 包含仍有效的目标、前置任务状态及所属章节的旗标实际值和生产地区；以 chapter_id 区分同名旗标。
+commissions 的 queued 表示尚待制作，applied/receipt 表示已经安装内容，任务完成仍以 mission.status 为准。
+人物 state 和技能 learned/implemented 表达实际后果；近期事件补充这些事实。omitted/truncated 明确检索范围，范围外事实保持未知。
+历史委托和其他地区目标仅供连贯性参考，本次制作范围仍由 content_contract.commissions 和当前章节权限决定。
+'''
+
+PLAN=MEMORY+'''
 Global-director responsibility: connect the whole adventure, not just doors and flag puzzles.
 Include campaign.adventure={cast,skills,missions,endings,economy,commissions}:
 cast:[{id,name,role,motive,state:{alive:true,trust:0,...bounded scalar fields}}] (0..8).
@@ -55,7 +64,7 @@ For encounters create actual enemy behavior/costs/consequences (unless combat is
 For scenes create scenes plus an exploration action triggering op:scene; do not deliver only a summary.
 '''
 
-CONTENT='''
+CONTENT=MEMORY+'''
 content_contract is the global director's bounded work order. Implement ready commissions in the requested region.
 Respect each encounter's limits with explicit enemy stats. Give each enemy distinct purpose, telegraphing and
 victory/escape consequences; do not substitute a flag-only console for an encounter.

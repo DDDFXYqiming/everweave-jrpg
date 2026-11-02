@@ -10,9 +10,10 @@ def transaction(world, operation):
     if getattr(world, '_batch', None) is not None:
         return operation()
     before = copy.deepcopy(world.state)
-    cache_before = copy.deepcopy(world.cache)
+    from .snapshots import RegionRollback
+    rollback = RegionRollback(world.cache)
     pending_before = world.reaction_needed
-    world._batch = dict(regions={}, events=[], delete=set())
+    world._batch = dict(regions={}, events=[], delete=set(), rollback=rollback)
     try:
         result = operation()
         old_cast=before.get('adventure',{}).get('cast',{})
@@ -38,7 +39,9 @@ def transaction(world, operation):
                                delete_regions=batch['delete'])
         return result
     except Exception:
-        world.state, world.cache, world.reaction_needed = before, cache_before, pending_before
+        world.state, world.cache, world.reaction_needed = before, rollback.restore(), pending_before
+        world._region_snapshots.clear()
+        world._map_cards = {}
         raise
     finally:
         world._batch = None
@@ -130,8 +133,8 @@ def item_local_dependency(node):
     return any(item_local_dependency(v) for v in node.values())
 
 
-def item_availability(world,item):
-    p=world.state['player'];r=world.region();use=item.get('use')
+def item_availability(world,item,reader=None):
+    p=world.state['player'];r=reader.region if reader else world.region();use=item.get('use')
     label=(use or {}).get('label','装备' if item.get('kind') in ('weapon','charm') else '使用')
     reason=''
     if world.state.get('game_over'):reason='这次行动已经结束。'
@@ -142,8 +145,8 @@ def item_availability(world,item):
         if not r:reason='地区尚未就绪。'
         elif item.get('origin',r['id'])!=r['id'] and item_local_dependency(use):reason='此物品的交互绑定原地区；请返回后使用。'
         else:
-            view=copy.copy(world);view.state=dict(world.state,player=copy.deepcopy(p))
-            vm=Runtime(view,copy.deepcopy(r))
+            from .snapshots import SnapshotRead
+            vm=(reader or SnapshotRead(world,r)).reset()
             try:
                 if not vm.expr(use['when']):reason=vm._resource_hint(use['when']) or '当前不满足物品使用条件。'
                 if not reason:

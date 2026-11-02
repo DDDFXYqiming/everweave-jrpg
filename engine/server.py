@@ -25,7 +25,7 @@ class GameServer(ThreadingHTTPServer):
  def __init__(self,address,save_path,token,handler_class=None,credential_path=None):
   if address[0]!='127.0.0.1': raise ValueError('Only IPv4 loopback binding is supported')
   self.token=token;self.instance_id=secrets.token_hex(16); self.world=World(Store(save_path)); self.director=Director(self.world); self.seen=OrderedDict()
-  self.snapshot_sequence=0
+  self.snapshot_sequence=0;self._next_snapshot_log=0
   self.preference_keys=('provider','offline','base_url','model','deepseek_options','reasoning_effort','max_calls','max_transport_retries','max_generation_attempts','task_timeout_seconds','hybrid_content','parallel_region','jev_enabled','language')
   self.preferences=dict(provider='chatgpt_subscription',offline=False,base_url='',model='gpt-6-luna',deepseek_options=False,reasoning_effort='high',max_calls=60,max_transport_retries=1,max_generation_attempts=4,task_timeout_seconds=900,hybrid_content=True,parallel_region=True,jev_enabled=True,language='zh')
   self.preference_path=None if str(save_path)==':memory:' else Path(save_path).with_name('settings.json')
@@ -83,8 +83,8 @@ class GameServer(ThreadingHTTPServer):
   if self.preference_path:
    temporary=self.preference_path.with_suffix('.tmp')
    temporary.write_text(dumps(self.preferences),encoding='utf-8'); temporary.replace(self.preference_path)
- def snapshot(self):
-  s=self.world.snapshot(); s['director']=self.director.status()
+ def snapshot(self,region_token=None):
+  s=self.world.snapshot(region_token); s['director']=self.director.status()
   s['subscription']=self.subscription.public()
   self.snapshot_sequence+=1; s['snapshot_sequence']=self.snapshot_sequence;s['instance_id']=self.instance_id
   s['configuration']={k:(self.director.cfg or self.preferences)[k] for k in self.preference_keys}
@@ -104,9 +104,24 @@ class GameServer(ThreadingHTTPServer):
 class Handler(BaseHTTPRequestHandler):
  server_version='EverweaveLocal/0.1'
  def log_message(self,*args): pass
+ def capture_snapshot(self):
+  started=time.monotonic()
+  value=self.server.snapshot(self.headers.get('X-Region-Token',''))
+  now=time.monotonic()
+  if self.command!='GET' or now>=self.server._next_snapshot_log:
+   self.server._next_snapshot_log=now+10
+   self.snapshot_metrics=dict(route=urlsplit(self.path).path,elapsed_ms=round((now-started)*1000,2),
+    region_static_unchanged=value.get('region_static_unchanged',False),version=value.get('version',0),snapshot_sequence=value['snapshot_sequence'])
+  return value
  def reply(self,status,value):
-  body=dumps(value).encode(); self.send_response(status); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(body))); self.send_header('Cache-Control','no-store'); self.send_header('X-Content-Type-Options','nosniff'); self.end_headers()
-  try: self.wfile.write(body)
+  started=time.monotonic();body=dumps(value).encode()
+  metrics=getattr(self,'snapshot_metrics',None)
+  if metrics is not None:
+   self.server.audit.emit('snapshot.prepared',**metrics,encode_ms=round((time.monotonic()-started)*1000,2),response_bytes=len(body))
+   self.snapshot_metrics=None
+  try:
+   self.send_response(status); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(body))); self.send_header('Cache-Control','no-store'); self.send_header('X-Content-Type-Options','nosniff'); self.end_headers()
+   self.wfile.write(body)
   except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError): pass
  def authorized(self):
   expected='Bearer '+self.server.token; supplied=self.headers.get('Authorization','')
@@ -115,20 +130,21 @@ class Handler(BaseHTTPRequestHandler):
  def do_OPTIONS(self): self.reply(403,dict(error='Browser access is disabled.'))
  def do_GET(self):
   if not self.authorized(): self.reply(401,dict(error='Local session token required.')); return
-  path=urlsplit(self.path)
+  path=urlsplit(self.path);status=200
   with self.server.world.lock:
-   if path.path=='/state':self.reply(200,self.server.snapshot())
+   if path.path=='/state':value=self.capture_snapshot()
    elif path.path=='/atlas':
     from .read_views import atlas
-    self.reply(200,atlas(self.server.world))
+    value=atlas(self.server.world)
    elif path.path=='/journal':
     from .read_views import journal
     query=parse_qs(path.query)
     try:
      before=int(query['before'][0]) if 'before' in query else None
-     self.reply(200,journal(self.server.world,query.get('tab',['history'])[0],before,int(query.get('limit',['30'])[0])))
-    except ValueError as exc:self.reply(400,dict(error=str(exc)))
-   else:self.reply(404,dict(error='Not found'))
+     value=journal(self.server.world,query.get('tab',['history'])[0],before,int(query.get('limit',['30'])[0]))
+    except ValueError as exc:status=400;value=dict(error=str(exc))
+   else:status=404;value=dict(error='Not found')
+  self.reply(status,value)
  def do_POST(self):
   if not self.authorized(): self.reply(401,dict(error='Local session token required.')); return
   try:
@@ -151,46 +167,49 @@ class Handler(BaseHTTPRequestHandler):
   server=self.server; w=server.world; d=server.director
   started=time.monotonic()
   action={key:data[key] for key in ('op','id','dx','dy','move','target','kind') if key in data}
-  before={}
+  before={};event=None;details={};status=200;wake=False
   try:
    with w.lock:
     before={key:(w.state or {}).get(key) for key in ('current','steps','story_revision')}
     before['player']={key:(w.state or {}).get('player',{}).get(key) for key in ('x','y','hp','mp','gold')}
     request_id=self.headers.get('X-Request-ID','')
     if request_id and request_id in server.seen:
-     server.audit.emit('request.duplicate',route=self.path,request_id=request_id[:96])
-     self.reply(200,server.snapshot()); return
-    if self.path=='/start':
-     if w.state and not data.get('replace_save',False): raise GameError('新世界会覆盖当前存档，请明确确认。')
-     setting=data.get('setting','')
-     if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
-     if data.get('provider')=='chatgpt_subscription' and not server.subscription.public()['ready']:raise GameError('请先完成 Everweave 的 ChatGPT 订阅授权。')
-     credential=server.configure_generation(data); w.start(setting,authored=not d.cfg['offline'],language=d.cfg['language'],planned=not d.cfg['offline']); server.seen.clear();server.remember_configuration(credential)
-    elif self.path=='/configure':
-     if data.get('provider')=='chatgpt_subscription' and not server.subscription.public()['ready']:raise GameError('请先完成 Everweave 的 ChatGPT 订阅授权。')
-     credential=server.configure_generation(data);server.remember_configuration(credential)
-    elif self.path=='/subscription/login':server.subscription.start()
-    elif self.path=='/language':
-     language=data.get('language')
-     if language not in ('zh','en'):raise ValueError('Unsupported language')
-     server.preferences['language']=language
-     if d.cfg is not None:d.cfg['language']=language
-     server.save_preferences()
-    elif self.path=='/action': w.action(data)
-    elif self.path=='/retry': d.retry(data.get('target'),data.get('kind'),data.get('mode','repair'))
-    elif self.path=='/pause': d.paused=bool(data.get('paused',True))
-    else: self.reply(404,dict(error='Not found')); return
-    if request_id:
-     server.seen[request_id]=True
-     while len(server.seen)>512: server.seen.popitem(last=False)
-    self.reply(200,server.snapshot())
-    if self.path!='/state':
-     after={key:(w.state or {}).get(key) for key in ('current','steps','story_revision')}
-     after['player']={key:(w.state or {}).get('player',{}).get(key) for key in ('x','y','hp','mp','gold')}
-     server.audit.emit('action.completed' if self.path=='/action' else 'request.completed',
-       route=self.path,request_id=request_id[:96],action=action,before=before,after=after,
+     event='request.duplicate';details=dict(route=self.path,request_id=request_id[:96])
+     value=self.capture_snapshot()
+    else:
+     if self.path=='/start':
+      if w.state and not data.get('replace_save',False): raise GameError('新世界会覆盖当前存档，请明确确认。')
+      setting=data.get('setting','')
+      if not isinstance(setting,str) or not 3<=len(setting.strip())<=600: raise GameError('世界设定需要 3～600 个字符。')
+      if data.get('provider')=='chatgpt_subscription' and not server.subscription.public()['ready']:raise GameError('请先完成 Everweave 的 ChatGPT 订阅授权。')
+      credential=server.configure_generation(data); w.start(setting,authored=not d.cfg['offline'],language=d.cfg['language'],planned=not d.cfg['offline']); server.seen.clear();server.remember_configuration(credential)
+     elif self.path=='/configure':
+      if data.get('provider')=='chatgpt_subscription' and not server.subscription.public()['ready']:raise GameError('请先完成 Everweave 的 ChatGPT 订阅授权。')
+      credential=server.configure_generation(data);server.remember_configuration(credential)
+     elif self.path=='/subscription/login':server.subscription.start()
+     elif self.path=='/language':
+      language=data.get('language')
+      if language not in ('zh','en'):raise ValueError('Unsupported language')
+      server.preferences['language']=language
+      if d.cfg is not None:d.cfg['language']=language
+      server.save_preferences()
+     elif self.path=='/action': w.action(data)
+     elif self.path=='/retry': d.retry(data.get('target'),data.get('kind'),data.get('mode','repair'))
+     elif self.path=='/pause': d.paused=bool(data.get('paused',True))
+     else:status=404;value=dict(error='Not found')
+     if status==200:
+      if request_id:
+       server.seen[request_id]=True
+       while len(server.seen)>512: server.seen.popitem(last=False)
+      value=self.capture_snapshot();wake=True
+      after={key:(w.state or {}).get(key) for key in ('current','steps','story_revision')}
+      after['player']={key:(w.state or {}).get('player',{}).get(key) for key in ('x','y','hp','mp','gold')}
+      event='action.completed' if self.path=='/action' else 'request.completed'
+      details=dict(route=self.path,request_id=request_id[:96],action=action,before=before,after=after,
        ui_kind=(w.state or {}).get('ui',{}).get('kind'),milliseconds=round((time.monotonic()-started)*1000,2))
-   d.wake.set()
+   if wake:d.wake.set()
+   if event:server.audit.emit(event,**details)
+   self.reply(status,value)
   except (GameError,ProviderError,ValueError,TypeError,KeyError) as exc:
    server.audit.emit('action.rejected',level=logging.WARNING,exception=exc,route=self.path,action=action,error=str(exc),before=before)
    self.reply(400,dict(error=str(exc)[:260]))

@@ -6,7 +6,7 @@
 python launch.py --web --data-dir ./userdata/web-journey
 ```
 
-也可双击 `Start-Web.cmd`，或用 PowerShell 7 执行 `./Start.ps1 -Web -DataDir ./userdata/web-journey`。启动器会准备素材、导入 Godot 工程、在该存档目录的 `web-export/` 生成 Web 导出，然后打印 `http://127.0.0.1:端口`。每次启动都会重新导出当前工程；不同存档各有自己的导出文件，不会相互覆盖。需要固定端口时加 `--port 61012`。
+也可双击 `Start-Web.cmd`，或用 PowerShell 7 执行 `./Start.ps1 -Web -DataDir ./userdata/web-journey`。启动器会准备素材、导入 Godot 工程、在该存档目录的 `web-export/` 生成 Web 导出，然后打印 `http://127.0.0.1:端口`。每次启动都会重新导出当前工程；不同存档各有自己的导出文件，不会相互覆盖。需要固定端口时加 `--port 61012`。已有导出文件时可用 `--web-export <导出目录>` 复用客户端，只启动新的存档服务；修改 GDScript 或导出配置后先重新导出。
 
 在连接页填入第三方服务的 API Key 并成功应用后，服务会按完整 URL 把它保存在项目内的 `userdata/provider-keys.local.json`。重启后，同一 URL 的 Key 可以留空复用；改用其他 URL 时不会自动带上旧 Key。该文件被 Git 忽略，`userdata/.gdignore` 也使它不进入 Godot 导出包；游戏状态接口不返回 Key。
 
@@ -22,6 +22,6 @@ python launch.py --web --demo --data-dir ./userdata/web-demo
 
 本机服务只监听 `127.0.0.1`。Web 页面由同一服务提供，浏览器保存本次进程的 HttpOnly、SameSite cookie；Godot Web 客户端通过同源请求调用原动作 API，不读取或传输原生客户端的 Bearer 令牌。原生客户端仍使用其已有的启动器令牌。两端收到相同的世界快照，所以浏览器测试能直接覆盖玩家实际看到的 HUD 与画面。服务重启后刷新浏览器页面可取得新会话 cookie；存档仍由启动器独占锁保护。
 
-Godot Web 运行在浏览器 Canvas 中，因此浏览器自动化需要按实际画面操作，不能依赖旧 HTML 试玩界面的 DOM 按钮。浏览器需支持 WebAssembly 和 WebGL 2.0；音频通常要先有一次用户点击。浏览器标签页的后台暂停和原生窗口行为也会有所差异，但游戏 UI、渲染代码和动作逻辑是同一份。
+Godot Web 运行在浏览器 Canvas 中，因此浏览器自动化需要按实际画面操作，不能依赖旧 HTML 试玩界面的 DOM 按钮。浏览器需支持 WebAssembly 和 WebGL 2.0；音频通常要先有一次用户点击。Web 壳为动画帧增加低频计时兜底，隐藏页面也能处理输入和本机请求完成事件；可见时优先使用浏览器原生动画帧。浏览器仍可按节能策略降低后台计时频率，游戏 UI、渲染代码和动作逻辑与原生端共用。
 
 之前的 [Web 实测报告](WEB_LIVE_REVIEW_2026-09-22.md) 属于已移除 HTML 包装层的阶段记录，其模型耗时和规则日志仍保留作历史对照。

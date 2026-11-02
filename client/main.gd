@@ -48,6 +48,9 @@ var service_connection = preload("res://client/service_connection.gd").new()
 var poll_instance_id: String = ""
 var action_instance_id: String = ""
 var state: Dictionary = {}
+var region_static_token: String = ""
+var region_static_data: Dictionary = {}
+var region_static_id: String = ""
 var action_http: HTTPRequest
 var poll_http: HTTPRequest
 var action_busy: bool = false
@@ -795,8 +798,9 @@ func _headers() -> PackedStringArray:
 	return headers
 
 func _read_headers() -> PackedStringArray:
-	if OS.has_feature("web"):return PackedStringArray(["X-Everweave-Web: 1"])
-	return PackedStringArray(["Authorization: Bearer " + session_token])
+	var headers := PackedStringArray(["X-Everweave-Web: 1"]) if OS.has_feature("web") else PackedStringArray(["Authorization: Bearer " + session_token])
+	if not region_static_token.is_empty(): headers.append("X-Region-Token: " + region_static_token)
+	return headers
 
 func _poll() -> void:
 	if poll_busy or backend_url.is_empty() or session_token.is_empty(): return
@@ -936,6 +940,31 @@ func _accept_snapshot(data: Dictionary) -> void:
 		journal_pages.clear()
 		journal_generation += 1
 		journal_error = ""
+	if instance_changed or incoming_epoch != previous_epoch:
+		region_static_token = ""
+		region_static_data.clear()
+		region_static_id = ""
+	var incoming_token: String = str(data.get("region_static_token", ""))
+	if data.get("region") is Dictionary:
+		var incoming_region: Dictionary = data.region
+		if bool(data.get("region_static_unchanged", false)):
+			if incoming_token.is_empty() or incoming_token != region_static_token or str(incoming_region.get("id", "")) != region_static_id:
+				region_static_token = ""
+				region_static_data.clear()
+				return
+			var merged: Dictionary = region_static_data.duplicate()
+			merged.merge(incoming_region, true)
+			data.region = merged
+		else:
+			region_static_data = {}
+			for field in data.get("region_static_fields", []):
+				if incoming_region.has(field): region_static_data[field] = incoming_region[field]
+			region_static_token = incoming_token if not region_static_data.is_empty() else ""
+			region_static_id = str(incoming_region.get("id", ""))
+	else:
+		region_static_token = ""
+		region_static_data.clear()
+		region_static_id = ""
 	state = data
 	var map_key: String = JSON.stringify([state.get("epoch"),state.get("map_count"),state.get("frontier"),state.get("quests")])
 	if map_key != atlas_signature:

@@ -99,7 +99,9 @@ class WebHandler(Handler):
         name = 'index.html' if path == '/' else unquote(path.removeprefix('/'))
         file = self.server.web_files.get(name)
         if file and path in ('/', '/' + name):
-            if not self.same_host() or self.headers.get('Sec-Fetch-Site', 'none') not in ('none', 'same-origin'):
+            entry_navigation = (name == 'index.html' and self.headers.get('Sec-Fetch-Mode') == 'navigate'
+                                and self.headers.get('Sec-Fetch-Dest') == 'document')
+            if not self.same_host() or (not entry_navigation and self.headers.get('Sec-Fetch-Site', 'none') not in ('none', 'same-origin')):
                 self.reply(403, {'error': '请直接打开本机游戏地址。'})
                 return
             if name != 'index.html' and not self.cookie_valid():
