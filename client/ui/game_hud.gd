@@ -131,6 +131,7 @@ func build(controller) -> void:
 	for entry in [["bag","inventory","行囊  I"],["book","journal","手记  J"]]:
 		main.panel_buttons[entry[1]] = icon_button(footer,entry[0],L.t(entry[2]),main._toggle_panel.bind(entry[1]))
 	icon_button(footer,"compass",L.t("旅途 · Tab"),main._toggle_aux.bind("journey"))
+	icon_button(footer,"speech",L.t("行动 · T"),main._toggle_intent)
 	main.hint_label = main._label(footer,"",16,main.MUTED)
 	main.hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	main.hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

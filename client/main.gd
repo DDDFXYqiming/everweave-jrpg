@@ -113,6 +113,7 @@ var role_label: Label
 var world_resources: VBoxContainer
 var resource_rows: Dictionary = {}
 var panel_buttons: Dictionary = {}
+var intent_panel
 var hp_bar: ProgressBar
 var mp_bar: ProgressBar
 var quest_label: Label
@@ -620,8 +621,15 @@ func _build_game() -> void:
 	game = preload("res://client/ui/game_hud.tscn").instantiate()
 	add_child(game)
 	game.build(self)
+	intent_panel = preload("res://client/intent_panel.gd").new()
+	game.add_child(intent_panel)
+	intent_panel.build(self)
+
+func _toggle_intent() -> void:
+	if is_instance_valid(intent_panel): intent_panel.toggle()
 
 func _toggle_aux(name: String) -> void:
+	if is_instance_valid(intent_panel): intent_panel.dismiss()
 	local_panel = "" if local_panel == name else name
 	modal_signature = ""
 	_render_modal()
@@ -755,6 +763,7 @@ func _continue_world() -> void:
 	_post("/configure", _configuration())
 
 func _show_home() -> void:
+	if is_instance_valid(intent_panel): intent_panel.dismiss()
 	local_panel = ""
 	game.show_aux("")
 	_sync_configuration()
@@ -966,6 +975,7 @@ func _accept_snapshot(data: Dictionary) -> void:
 		region_static_data.clear()
 		region_static_id = ""
 	state = data
+	if is_instance_valid(intent_panel): intent_panel.update_state(state)
 	var map_key: String = JSON.stringify([state.get("epoch"),state.get("map_count"),state.get("frontier"),state.get("quests")])
 	if map_key != atlas_signature:
 		atlas_signature = map_key
@@ -1281,6 +1291,9 @@ func _process(delta: float) -> void:
 		poll_clock=0.0
 		_recover_connection()
 	move_clock = maxf(0, move_clock - delta)
+	if is_instance_valid(intent_panel) and intent_panel.visible: return
+	var focused: Control = get_viewport().gui_get_focus_owner()
+	if focused is LineEdit or focused is TextEdit: return
 	if not is_instance_valid(game) or not game.visible or not connection_ready or action_busy or move_clock > 0:
 		return
 	if not bool(state.get("started", false)) or state.get("battle") is Dictionary or not state.get("ui", {}).is_empty() or not local_panel.is_empty():
@@ -1303,6 +1316,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# Windows accessibility input can supply a valid logical key with an unrelated
 	# scan code. Hotkeys follow the logical key; physical-only input still works.
 	var key: int = event.keycode if event.keycode != 0 else event.physical_keycode
+	if is_instance_valid(intent_panel) and intent_panel.visible: return
+	if key == KEY_T:
+		_toggle_intent()
+		get_viewport().set_input_as_handled()
+		return
 	if not local_panel.is_empty() and key != KEY_M:
 		if key == KEY_I: _toggle_panel("inventory")
 		elif key == KEY_J: _toggle_panel("journal")

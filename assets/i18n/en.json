@@ -1,4 +1,11 @@
 {
+  "行动 · T": "Act · T",
+  "行动 · Enter": "Act · Enter",
+  "执行 · Enter": "Confirm · Enter",
+  "收起 · Esc": "Close · Esc",
+  "你想做什么？": "What would you like to do?",
+  "正在思量…": "Thinking…",
+  "行动未发出，请再试一次。": "Action not sent. Try again.",
   "Luna 模型": "Luna model",
   "素材库缺少：": "Missing library asset: ",
   "素材版本或类型不匹配：": "Asset version or type mismatch: ",

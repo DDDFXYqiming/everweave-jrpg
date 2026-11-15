@@ -51,8 +51,11 @@ class GameServer(ThreadingHTTPServer):
   self.audit=NullAudit() if str(save_path)==':memory:' else AuditLog(Path(save_path).parent/'logs')
   if str(save_path)!=':memory:':self.director.codex_partial_dir=Path(save_path).parent/'logs'/'codex-partials'
   self.audit.add_secret(token);self.director.audit=self.audit
+  from .intents import IntentService
+  self.intents=IntentService(self)
   self.audit.emit('server.started',port=self.server_port,world_loaded=bool(self.world.state))
  def server_close(self):
+  if hasattr(self,'intents'):self.intents.stop()
   super().server_close()
   if hasattr(self,'audit'):
    self.audit.emit('server.stopped');self.audit.close()
@@ -84,7 +87,8 @@ class GameServer(ThreadingHTTPServer):
    temporary=self.preference_path.with_suffix('.tmp')
    temporary.write_text(dumps(self.preferences),encoding='utf-8'); temporary.replace(self.preference_path)
  def snapshot(self,region_token=None):
-  s=self.world.snapshot(region_token); s['director']=self.director.status()
+  intent=self.intents.public()
+  s=self.world.snapshot(region_token); s['director']=self.director.status();s['intent']=intent
   s['subscription']=self.subscription.public()
   self.snapshot_sequence+=1; s['snapshot_sequence']=self.snapshot_sequence;s['instance_id']=self.instance_id
   s['configuration']={k:(self.director.cfg or self.preferences)[k] for k in self.preference_keys}
@@ -173,7 +177,7 @@ class Handler(BaseHTTPRequestHandler):
     before={key:(w.state or {}).get(key) for key in ('current','steps','story_revision')}
     before['player']={key:(w.state or {}).get('player',{}).get(key) for key in ('x','y','hp','mp','gold')}
     request_id=self.headers.get('X-Request-ID','')
-    if request_id and request_id in server.seen:
+    if self.path not in ('/intent','/intent/confirm') and request_id and request_id in server.seen:
      event='request.duplicate';details=dict(route=self.path,request_id=request_id[:96])
      value=self.capture_snapshot()
     else:
@@ -193,7 +197,10 @@ class Handler(BaseHTTPRequestHandler):
       server.preferences['language']=language
       if d.cfg is not None:d.cfg['language']=language
       server.save_preferences()
-     elif self.path=='/action': w.action(data)
+     elif self.path=='/intent':server.intents.submit(data,request_id)
+     elif self.path=='/intent/confirm':server.intents.confirm(data,request_id)
+     elif self.path=='/action':
+      server.intents.external_action();w.action(data)
      elif self.path=='/retry': d.retry(data.get('target'),data.get('kind'),data.get('mode','repair'))
      elif self.path=='/pause': d.paused=bool(data.get('paused',True))
      else:status=404;value=dict(error='Not found')

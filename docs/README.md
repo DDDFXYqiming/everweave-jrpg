@@ -13,6 +13,7 @@
 - [示例世界](SHOWCASE.md) 记录 README 中章节系统加入前的场景与截图
 - [开发与测试](DEVELOPMENT.md) 说明资源准备和回归方法
 - [架构](ARCHITECTURE.md) 介绍客户端、本机服务与生成调度
+- [自然语言行动](NATURAL_ACTIONS.md) 说明游戏输入入口、已有动作选择和执行边界
 - [内容协议](EXECUTABLE_CONTENT.md) 说明场景、规则和可执行效果
 - [章节与游戏规格](CAMPAIGNS.md) 说明规划、共享线索、连接图和可选资源系统
 - [冒险导演](ADVENTURE_DIRECTOR.md) 说明持续复盘、人物、跨区技能、任务与内容委托

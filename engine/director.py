@@ -103,11 +103,25 @@ def provider_headers(cfg):
   headers['User-Agent']='Everweave/0.1'
  return headers
 
-def read_chat_stream(response,limit=1024000,deadline=None,progress=None,wire_limit=32*1024*1024):
+def request_boundary(deadline,cancel,response=None,timeout=300):
+ if cancel is not None and cancel.is_set():
+  raise ProviderError('模型请求已取消。',diagnostics={'category':'cancelled','usage_unknown':response is not None})
+ if deadline is None:return timeout
+ remaining=deadline-time.monotonic()
+ if remaining<=0:raise ProviderError('模型请求已达到总时限。',diagnostics={'category':'deadline','usage_unknown':response is not None})
+ seconds=max(.01,min(timeout,remaining))
+ if response is not None:
+  try:response.fp.raw._sock.settimeout(seconds)
+  except (AttributeError,OSError):pass
+ return seconds
+
+def read_chat_stream(response,limit=1024000,deadline=None,progress=None,wire_limit=32*1024*1024,cancel=None):
  content=[];size=0;content_chars=0;wire_bytes=0;reported={};finish=None;reasoning=False;complete=False;last_progress=time.monotonic()
- while line:=response.readline():
-  if deadline and time.monotonic()>=deadline:
-   raise ProviderError('生成任务已达到共享总时限。',diagnostics={'usage_unknown':True,'category':'deadline','transport':'chat_sse'})
+ while True:
+  request_boundary(deadline,cancel,response)
+  line=response.readline()
+  if not line:break
+  request_boundary(deadline,cancel,response)
   wire_bytes+=len(line)
   if wire_bytes>wire_limit:
    raise ProviderError('Provider stream exceeds size limit.',diagnostics={'usage_unknown':True,'transport':'chat_sse'})
@@ -209,6 +223,8 @@ def generate_messages(system,user,cfg,kind='region',content_version=2):
   payload['max_tokens']=max(payload['max_tokens'],minimum)
  elif content_version==2:
   payload['max_tokens']=max(payload['max_tokens'],32768 if thinking else 8192)
+ if kind=='intent':payload['max_tokens']=8192
+ deadline=cfg.get('_task_deadline');cancel=cfg.get('_cancel_event')
  base=validate_url(cfg['base_url']); url=base if base.endswith('/chat/completions') else base+'/chat/completions'
  streaming=official_opencode_go(base)
  if streaming:
@@ -229,11 +245,20 @@ def generate_messages(system,user,cfg,kind='region',content_version=2):
   return True
  while True:
   try:
-   with opener.open(req,timeout=300 if thinking else 60) as response:
+   timeout=request_boundary(deadline,cancel,timeout=300 if thinking else 60)
+   with opener.open(req,timeout=timeout) as response:
     limit=1024000 if thinking else 192000
-    if streaming:data=read_chat_stream(response,limit,cfg.get('_task_deadline'),cfg.get('_stream_progress'))
+    if streaming:data=read_chat_stream(response,limit,deadline,cfg.get('_stream_progress'),cancel=cancel)
     else:
-     body=response.read(limit+1)
+     if deadline is None and cancel is None:body=response.read(limit+1)
+     else:
+      chunks=[];size=0;read=getattr(response,'read1',response.read)
+      while size<=limit:
+       request_boundary(deadline,cancel,response,timeout)
+       chunk=read(min(65536,limit+1-size))
+       if not chunk:break
+       chunks.append(chunk);size+=len(chunk)
+      body=b''.join(chunks);request_boundary(deadline,cancel,response,timeout)
      if len(body)>limit: raise ProviderError('Model response exceeds size limit.')
      data=json.loads(body)
    break
@@ -246,15 +271,15 @@ def generate_messages(system,user,cfg,kind='region',content_version=2):
      message=detail.get('message','') if isinstance(detail,dict) else ''
     except (ValueError,UnicodeError,OSError,AttributeError):message=''
     if 'active OpenCode Go subscription is required' in message:
-     raise ProviderError('当前 OpenCode Go Key 未获订阅工作区访问权限；请核对项目所用 Key 与控制台的有效 Key。') from None
-   diagnostics={'usage_unknown':True,'last_call':previous_call} if exc.code in (429,502,503,504) else None
+     raise ProviderError('当前 OpenCode Go Key 未获订阅工作区访问权限；请核对项目所用 Key 与控制台的有效 Key。',diagnostics={'http_status':403,'category':'auth'}) from None
+   diagnostics={'http_status':exc.code,'last_call':previous_call,'usage_unknown':exc.code in (429,502,503,504)}
    raise ProviderError(f'Provider HTTP {exc.code}. Check model, API key, balance or JSON-mode compatibility.',diagnostics=diagnostics) from None
   except (urllib.error.URLError,TimeoutError,OSError) as exc:
    reason=exc.reason if isinstance(exc,urllib.error.URLError) else exc
    transient=isinstance(reason,(TimeoutError,ConnectionError))
    if transient and retry_transport(type(reason).__name__):continue
    raise ProviderError('Model request failed or timed out; retry manually. '+type(exc).__name__,
-                       diagnostics={'usage_unknown':True,'last_call':previous_call} if transient else None) from None
+                       diagnostics={'usage_unknown':True,'last_call':previous_call,'category':'timeout' if isinstance(reason,TimeoutError) else 'connection'}) from None
   except (UnicodeError,json.JSONDecodeError):raise ProviderError('Provider did not return JSON.') from None
  usage={}
  try:
@@ -262,6 +287,7 @@ def generate_messages(system,user,cfg,kind='region',content_version=2):
   usage=dict(input_tokens=max(0,int(reported.get('prompt_tokens',0))),output_tokens=max(0,int(reported.get('completion_tokens',0))),reasoning_tokens=max(0,int((reported.get('completion_tokens_details') or {}).get('reasoning_tokens',0))),reasoning_observed=False)
   usage['transport_retries']=transport_retries
   usage['model_requests']=transport_retries+1
+  if kind=='intent':usage.update(model=data.get('model') or cfg['model'],provider='chat_completions',effort=effort,usage_unknown=not bool(reported))
   choice=data['choices'][0]
   usage['reasoning_observed']=bool(choice['message'].get('reasoning_content'))
   if choice.get('finish_reason')=='length':
@@ -388,7 +414,11 @@ class Director:
   self.task_history.append(data);self.task_history=self.task_history[-24:]
   self._audit_task('generation.finished',**data)
  def _current(self,ctx,generation):
-  return generation==self.generation and self.world.context_is_current(ctx)
+  if generation!=self.generation:return False
+  if ctx.get('kind')=='intent':
+   s=self.world.state or {}
+   return ctx['epoch']==s.get('epoch') and ctx['target']==s.get('current') and not ctx['_cancel_event'].is_set()
+  return self.world.context_is_current(ctx)
  def _failure(self,error,ctx,raw=None,attempts=1):
   key=(ctx['kind'],ctx['target'])
   category='provider' if isinstance(error,ProviderError) else None
@@ -414,6 +444,7 @@ class Director:
  def _request_priority(self,ctx):
   s=self.world.state or {};target=ctx['target'];kind=ctx['kind']
   ui=s.get('ui') or {}
+  if kind=='intent':return -1
   if kind=='region' and (target==s.get('current') or (ui.get('kind')=='pending_exit' and ui.get('target')==target)):return 0
   if kind=='reaction' and target==s.get('current'):return 1
   if kind in ('campaign','direction'):return 2
@@ -426,7 +457,7 @@ class Director:
    try:
     while True:
      metrics=self.task_metrics.get(job_key)
-     if metrics is None or self.stop_event.is_set() or self.paused or not self._current(ctx,generation):
+     if metrics is None or self.stop_event.is_set() or (self.paused and ctx['kind']!='intent') or not self._current(ctx,generation):
       raise ProviderError('模型请求已取消或内容上下文已过期。',diagnostics={'category':'cancelled'})
      remaining=metrics['_deadline']-time.monotonic()
      if remaining<=0:raise ProviderError('模型请求等待已达到任务总时限。',diagnostics={'category':'deadline'})
@@ -473,6 +504,47 @@ class Director:
    metrics['jev_status']=result['status']
    self.audit.emit('jev.queued',**identity,**result)
   except Exception as exc:self.audit.emit('jev.queue.failed',level=logging.WARNING,**identity,reason=type(exc).__name__)
+ def request_intent(self,ctx,system,user,cancel,deadline,generation):
+  key=(ctx['epoch'],'intent',ctx['target']);token=None;usage={};failure=None;raw=None;call=None;started=None
+  with self.world.lock:
+   if not self.cfg or self.cfg.get('offline') or self.cfg.get('provider')!='chat_completions' or self.cfg.get('reasoning_effort')!='high':
+    raise ProviderError('请先连接当前在线 high 模型，再发送行动。')
+   cfg=dict(self.cfg,max_transport_retries=0,max_generation_attempts=1,task_timeout_seconds=max(.01,deadline-time.monotonic()))
+   ctx=dict(ctx,_cancel_event=cancel)
+   if not self._current(ctx,generation):raise ProviderError('行动上下文已过期。',diagnostics={'category':'cancelled'})
+   self.in_flight[key]='理解行动 '+self._title(ctx['target']);self._begin_task(key,ctx,cfg)
+   self.task_metrics[key].update(source='intent',_deadline=deadline)
+   self.busy=' / '.join(self.in_flight.values())
+  outcome='failed'
+  try:
+   token=self._acquire_request(ctx,generation,key)
+   with self.world.lock:
+    if not self._current(ctx,generation):raise ProviderError('行动上下文已过期。',diagnostics={'category':'cancelled'})
+    if self.calls>=cfg['max_calls']:raise ProviderError('本次进程的模型调用额度已用完。')
+    self.calls+=1;call=self.calls;self.task_metrics[key].update(attempts=1,phase='resolving')
+    cfg.update(_cancel_event=cancel,_task_deadline=deadline,_audit=self.audit,
+               _request_meta=dict(kind='intent',target=ctx['target'],epoch=ctx['epoch'],intent_id=ctx['intent_id'],call=call))
+   started=time.monotonic()
+   self.audit.emit('model.request',**cfg['_request_meta'],model=cfg['model'],reasoning_effort=cfg['reasoning_effort'])
+   try:raw,usage=generate_messages(system,user,cfg,'intent',None)
+   except ProviderError as exc:
+    failure=exc;usage=exc.usage or {};raise
+   outcome='resolved'
+   return raw,usage
+  finally:
+   self._release_request(token)
+   with self.world.lock:
+    if call is not None:
+     unknown=bool(usage.get('usage_unknown') or not usage or getattr(failure,'diagnostics',{}).get('usage_unknown'))
+     self._record_usage(usage);self.unknown_usage_calls+=int(unknown)
+     if failure is not None:failure.diagnostics['usage_unknown']=unknown
+     self.task_metrics[key]['request_seconds']=time.monotonic()-started if started is not None else 0
+     self.task_metrics[key]['unknown_usage_calls']=int(unknown)
+     self.world.store.record_generation_request(dict(kind='intent',epoch=ctx['epoch'],target=ctx['target'],
+      intent_id=ctx['intent_id'],request_id=ctx['request_id'],call=call,usage=usage,usage_unknown=unknown,
+      status='completed' if outcome=='resolved' else 'failed',time=time.time(),
+      response_text=raw[:131072] if isinstance(raw,str) else None,response_truncated=isinstance(raw,str) and len(raw)>131072))
+    self.in_flight.pop(key,None);self.busy=' / '.join(self.in_flight.values());self._finish_task(key,outcome)
  def _record_usage(self,usage):
   self.tokens_in+=usage.get('input_tokens',0); self.tokens_out+=usage.get('output_tokens',0)
   self.tokens_reasoning+=usage.get('reasoning_tokens',0); self.reasoning_responses+=int(usage.get('reasoning_observed',False))
