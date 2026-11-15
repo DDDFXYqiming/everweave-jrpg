@@ -2,6 +2,10 @@
 
 当前默认生成服务为 `chatgpt_subscription`，新世界默认 `gpt-6-luna / high`；可选 `gpt-5.6-luna`，并完整支持 `none/low/medium/high/xhigh/max`。界面中的 Off 对应 `none`。旧存档保存的 GPT-5.6 模型选择不会被自动换成 GPT-6。Everweave 使用独立设备 OAuth，直接读取 ChatGPT Codex Responses SSE，不向 OpenAI Platform API 提交 API Key。官方区分 [ChatGPT 订阅登录与 API Key 按量登录](https://learn.chatgpt.com/docs/auth)。直连实现参考同机 Loreweaver 已验证的订阅适配；该 ChatGPT 后端不是官方文档面向普通第三方应用承诺的公共 API，若上游协议改变，需要同步维护。
 
+## OpenAI API Key（`openai_api`）
+
+连接页选「OpenAI API · Luna」：同一条 Responses SSE 实现改发 `https://api.openai.com/v1/responses`，以 `Authorization: Bearer <API Key>` 认证，模型和思考等级照常选择（默认 `gpt-6-luna / high`），按 Platform 组织的 API 用量计费。密钥在界面输入后经 `/configure` 或 `/start` 写入 `userdata/provider-keys.local.json`（以 `https://api.openai.com/v1` 为键），之后留空即可复用；也可用环境变量 `OPENAI_API_KEY`。日志 `chatgpt.request.started/finished` 带 `provider` 与 `endpoint`，`usage` 里的 `provider` 为 `openai_api`。
+
 ## 使用
 
 在游戏连接页完成一次授权：

@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 from .world import World,GameError
 from .storage import Store,dumps
-from .director import Director,ProviderError,official_deepseek,official_opencode_go,validate_url
+from .director import Director,ProviderError,official_deepseek,official_opencode_go,validate_url,OPENAI_BASE
 from .audit import AuditLog,NullAudit
 
 def data_dir():
@@ -69,8 +69,9 @@ class GameServer(ThreadingHTTPServer):
   configuration=dict(data)
   supplied=configuration.get('api_key')
   base=None
-  if configuration.get('provider','chat_completions')=='chat_completions' and not configuration.get('offline',False):
-   base=validate_url(configuration.get('base_url','https://api.deepseek.com'))
+  provider=configuration.get('provider','chat_completions')
+  if provider in ('chat_completions','openai_api') and not configuration.get('offline',False):
+   base=OPENAI_BASE if provider=='openai_api' else validate_url(configuration.get('base_url','https://api.deepseek.com'))
    if not supplied and base in self.saved_keys:configuration['api_key']=self.saved_keys[base]
   self.director.configure(configuration)
   return (base,supplied.strip()) if base and isinstance(supplied,str) and supplied.strip() else None
@@ -101,7 +102,7 @@ class GameServer(ThreadingHTTPServer):
    try:executable();s['configuration']['codex_available']=True
    except CodexError:s['configuration']['codex_available']=False
    s['configuration']['credential_available']=False
-  else:s['configuration']['credential_available']=bool((self.director.cfg or {}).get('api_key') or self.saved_keys.get(base) or (official_deepseek(base) and os.environ.get('DEEPSEEK_API_KEY')) or (official_opencode_go(base) and os.environ.get('OPENCODE_GO_API_KEY')))
+  else:s['configuration']['credential_available']=bool((self.director.cfg or {}).get('api_key') or self.saved_keys.get(base) or (official_deepseek(base) and os.environ.get('DEEPSEEK_API_KEY')) or (official_opencode_go(base) and os.environ.get('OPENCODE_GO_API_KEY')) or (base==OPENAI_BASE and os.environ.get('OPENAI_API_KEY')))
   return s
 
 class Handler(BaseHTTPRequestHandler):

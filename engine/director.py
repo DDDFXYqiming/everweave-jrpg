@@ -92,6 +92,7 @@ def official_opencode_go(url):
  return u.scheme=='https' and u.hostname=='opencode.ai' and u.port in (None,443) and u.path=='/zen/go/v1'
 
 # OpenCode Go 订阅端点要求每次请求带稳定的 x-opencode-session 头，缺少时直接拒绝。
+OPENAI_BASE='https://api.openai.com/v1'
 OPENCODE_HOST='opencode.ai'
 OPENCODE_SESSION='everweave-'+secrets.token_hex(8)
 
@@ -203,7 +204,7 @@ def generate_messages(system,user,cfg,kind='region',content_version=2):
   from .codex_provider import generate,CodexError
   try:return generate(system,user,cfg)
   except CodexError as exc:raise ProviderError(str(exc),getattr(exc,'usage',None),diagnostics=getattr(exc,'diagnostics',None)) from None
- if cfg.get('provider')=='chatgpt_subscription':
+ if cfg.get('provider') in ('chatgpt_subscription','openai_api'):
   from .chatgpt_provider import generate,DirectError
   try:return generate(system,user,cfg)
   except DirectError as exc:raise ProviderError(str(exc),exc.usage,diagnostics={'transport':'direct_sse','category':exc.category,**exc.diagnostics}) from None
@@ -315,9 +316,10 @@ class Director:
   self.codex_partial_dir=None
  def configure(self,cfg):
   provider=cfg.get('provider','chat_completions')
-  if provider not in ('chat_completions','codex_subscription','chatgpt_subscription'):raise ProviderError('Unsupported generation provider.')
+  if provider not in ('chat_completions','codex_subscription','chatgpt_subscription','openai_api'):raise ProviderError('Unsupported generation provider.')
   subscription=provider in ('codex_subscription','chatgpt_subscription')
-  offline=bool(cfg.get('offline',True)); base='' if subscription else validate_url(cfg.get('base_url','https://api.deepseek.com')); model=str(cfg.get('model',('gpt-5.6-luna' if provider=='codex_subscription' else 'gpt-6-luna') if subscription else 'deepseek-flash')).strip()
+  luna=provider in ('chatgpt_subscription','openai_api')
+  offline=bool(cfg.get('offline',True)); base='' if subscription else OPENAI_BASE if provider=='openai_api' else validate_url(cfg.get('base_url','https://api.deepseek.com')); model=str(cfg.get('model',('gpt-5.6-luna' if provider=='codex_subscription' else 'gpt-6-luna') if subscription or luna else 'deepseek-flash')).strip()
   if not model or len(model)>150: raise ProviderError('请输入有效模型名。')
   if provider=='codex_subscription' and model!='gpt-5.6-luna':raise ProviderError('Codex compatibility mode requires gpt-5.6-luna.')
   if provider=='chatgpt_subscription' and model not in ('gpt-5.6-luna','gpt-6-luna'):raise ProviderError('订阅直连仅支持明确选择的 GPT-5.6 / GPT-6 Luna，不自动切换模型。')
@@ -325,6 +327,7 @@ class Director:
   if not key and self.cfg and base==self.cfg['base_url']: key=self.cfg['api_key']
   if not key and official_deepseek(base): key=os.environ.get('DEEPSEEK_API_KEY','')
   if not key and official_opencode_go(base): key=os.environ.get('OPENCODE_GO_API_KEY','')
+  if not key and base==OPENAI_BASE: key=os.environ.get('OPENAI_API_KEY','')
   if not subscription and not offline and not key and urllib.parse.urlsplit(base).hostname not in ('localhost','127.0.0.1','::1'): raise ProviderError('在线模式需要 API Key；密钥仅保留在本机进程内存。')
   limit=int(cfg.get('max_calls',60))
   if not 1<=limit<=1000: raise ProviderError('调用上限应为 1～1000。')
@@ -335,12 +338,12 @@ class Director:
   if not 1<=max_attempts<=6:raise ProviderError('单项内容的自动尝试上限应为 1～6。')
   language=cfg.get('language','zh')
   if language not in ('zh','en'):raise ProviderError('Unsupported language')
-  effort=reasoning_effort(dict(cfg,deepseek_options=False,reasoning_effort=cfg.get('reasoning_effort','high'))) if subscription else reasoning_effort(cfg)
-  if provider=='chatgpt_subscription' and effort not in ('none','low','medium','high','xhigh','max'):raise ProviderError('Luna 订阅生成支持 none/low/medium/high/xhigh/max。')
+  effort=reasoning_effort(dict(cfg,deepseek_options=False,reasoning_effort=cfg.get('reasoning_effort','high'))) if subscription or luna else reasoning_effort(cfg)
+  if luna and effort not in ('none','low','medium','high','xhigh','max'):raise ProviderError('Luna 生成支持 none/low/medium/high/xhigh/max。')
   if provider=='codex_subscription' and effort not in ('medium','high','xhigh','max'):raise ProviderError('Codex 兼容入口支持 medium/high/xhigh/max。')
-  self.cfg=dict(provider=provider,language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),parallel_region=bool(cfg.get('parallel_region',True)),jev_enabled=bool(cfg.get('jev_enabled',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=False if subscription else bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,max_transport_retries=retries,max_generation_attempts=max_attempts,task_timeout_seconds=task_timeout,cooldown=1.0 if not offline else .1)
+  self.cfg=dict(provider=provider,language=language,hybrid_content=bool(cfg.get('hybrid_content',True)),parallel_region=bool(cfg.get('parallel_region',True)),jev_enabled=bool(cfg.get('jev_enabled',True)),offline=offline,base_url=base,model=model,api_key=key,deepseek_options=False if subscription or luna else bool(cfg.get('deepseek_options',True)),reasoning_effort=effort,max_calls=limit,max_transport_retries=retries,max_generation_attempts=max_attempts,task_timeout_seconds=task_timeout,cooldown=1.0 if not offline else .1)
   self.audit.add_secret(key)
-  self.audit.emit('director.configured',offline=offline,model=model,reasoning_effort=effort,max_calls=limit,max_transport_retries=retries,max_generation_attempts=max_attempts,task_timeout_seconds=task_timeout,parallel_region=self.cfg['parallel_region'],jev_enabled=self.cfg['jev_enabled'])
+  self.audit.emit('director.configured',provider=provider,base_url=base,offline=offline,model=model,reasoning_effort=effort,max_calls=limit,max_transport_retries=retries,max_generation_attempts=max_attempts,task_timeout_seconds=task_timeout,parallel_region=self.cfg['parallel_region'],jev_enabled=self.cfg['jev_enabled'])
   self.world.reaction_needed=bool(self.world.state and self.world.state.get('director_reaction_pending',False))
   self.review_queue.cancel();self.review_targets.clear()
   self.generation+=1; self.failed.clear(); self.failures.clear(); self.failed_payloads.clear(); self.error=''; self.deferred=None; self.paused=False; self.wake.set()
@@ -639,7 +642,7 @@ class Director:
    if not job: return False
    ctx,cfg,generation=job; kind=ctx['kind']; target=ctx['target']; job_key=(ctx['epoch'],kind,target)
    if kind=='region' and not cfg['offline'] and self.world.state.get('adventure'):ctx['require_overworld_threats']=True
-   split_region=(kind=='region' and cfg.get('provider') in ('chatgpt_subscription','chat_completions') and cfg.get('parallel_region',True)
+   split_region=(kind=='region' and cfg.get('provider') in ('chatgpt_subscription','openai_api','chat_completions') and cfg.get('parallel_region',True)
                  and not cfg['offline'] and bool(ctx.get('chapter_plan') or ctx.get('content_contract') or ctx.get('require_overworld_threats'))
                  and not ctx.get('refresh')
                  and (self.calls+2<=cfg['max_calls'] or self.world.store.has_components(ctx['epoch'],target)))
@@ -819,7 +822,7 @@ class Director:
      if exc.usage: self.rejected+=1
      message=str(exc)
      retryable=(exc.diagnostics.get('retries_exhausted') or exc.diagnostics.get('category') in ('transient','rate_limit','timeout')
-                or message.startswith(('Model request failed or timed out.','Provider stream ended before completion.','ChatGPT stream ended before response.completed.'))
+                or message.startswith(('Model request failed or timed out.','Provider stream ended before completion.','Responses stream ended before response.completed.'))
                 or any(message.startswith('Provider HTTP '+str(code)+'.') for code in (408,429,500,502,503,504)))
      can_retry=retryable and attempt+1<max_attempts and not self.paused and self.calls<cfg['max_calls'] and time.monotonic()<self.task_metrics[job_key]['_deadline'] and self._current(ctx,generation)
      if can_retry:

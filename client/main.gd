@@ -388,6 +388,7 @@ func _build_home() -> void:
 	mode_select.add_item(L.t("其他兼容服务"),1)
 	mode_select.add_item(L.t("离线演示"),2)
 	mode_select.add_item(L.t("ChatGPT 订阅直连 · Luna"),3)
+	mode_select.add_item(L.t("OpenAI API · Luna"),4)
 	connection.add_child(mode_select)
 	mode_help = _label(connection,"",13,MUTED)
 	online_settings = _vbox(connection)
@@ -689,6 +690,8 @@ func _bar(parent: Node, fill: Color) -> ProgressBar:
 
 func _configuration() -> Dictionary:
 	var custom: bool = mode_select.selected == 1
+	if mode_select.selected==4:
+		return {"provider":"openai_api","language":L.language,"hybrid_content":hybrid_select.button_pressed,"parallel_region":true,"jev_enabled":jev_select.button_pressed,"offline":false,"base_url":"https://api.openai.com/v1","model":str(luna_model_select.get_item_metadata(luna_model_select.selected)),"api_key":key_input.text.strip_edges(),"deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
 	if mode_select.selected==3:
 		return {"provider":"chatgpt_subscription","language":L.language,"hybrid_content":hybrid_select.button_pressed,"parallel_region":true,"jev_enabled":jev_select.button_pressed,"offline":false,"base_url":"","model":str(luna_model_select.get_item_metadata(luna_model_select.selected)),"api_key":"","deepseek_options":false,"reasoning_effort":str(effort_select.get_item_metadata(effort_select.selected)),"max_calls":int(budget_input.value)}
 	return {"provider":"chat_completions","language":L.language,"hybrid_content":hybrid_select.button_pressed,"jev_enabled":jev_select.button_pressed,"offline": mode_select.selected == 2, "base_url": base_input.text.strip_edges() if custom else "https://api.deepseek.com", "model": model_input.text.strip_edges() if custom else "deepseek-flash", "api_key": key_input.text.strip_edges(), "deepseek_options": not custom, "reasoning_effort": str(effort_select.get_item_metadata(effort_select.selected)), "max_calls": int(budget_input.value)}
@@ -708,10 +711,10 @@ func _set_luna_model(model_name: String) -> void:
 	luna_model_select.select(0)
 
 func _mode_changed(index: int) -> void:
-	var previous: String = ("high" if index==3 else "low") if effort_select.item_count == 0 else str(effort_select.get_item_metadata(effort_select.selected))
+	var previous: String = ("high" if index in [3,4] else "low") if effort_select.item_count == 0 else str(effort_select.get_item_metadata(effort_select.selected))
 	effort_select.clear()
 	var efforts: Array = ["low", "high", "max", "none"] if index != 1 else ["low", "medium", "high", "xhigh", "max", "minimal", "none", "default"]
-	if index==3:
+	if index in [3,4]:
 		efforts=["none","low","medium","high","xhigh","max"]
 		if not previous in efforts:previous="high"
 	for effort in efforts:
@@ -722,9 +725,9 @@ func _mode_changed(index: int) -> void:
 	effort_help.text = L.t("默认 low；可随时调整思考等级，应用后用于后续生成。") if index != 1 else L.t("等级由接入服务支持；不接受此参数的服务请选择“服务默认”。")
 	online_settings.visible = index != 2
 	custom_fields.visible = index == 1
-	provider_summary.visible = index in [0,3]
-	provider_summary.text = "Luna · Responses SSE" if index==3 else "DeepSeek Flash"
-	luna_model_row.visible=index==3
+	provider_summary.visible = index in [0,3,4]
+	provider_summary.text = "Luna · Responses SSE" if index==3 else ("OpenAI API · Responses SSE" if index==4 else "DeepSeek Flash")
+	luna_model_row.visible=index in [3,4]
 	subscription_button.visible=index==3
 	subscription_label.visible=index==3
 	key_input.visible=index!=3
@@ -733,6 +736,10 @@ func _mode_changed(index: int) -> void:
 	mode_help.text = L.t("从一句设定开始，由模型生成世界并持续续写。") if index != 2 else L.t("仅检查地图、交互与存档功能。内容来自固定测试样例，不调用 LLM。")
 	key_input.placeholder_text = L.t("留空使用此服务已有的密钥")
 	if index == 0: key_input.placeholder_text = L.t("留空使用启动器加载的 DeepSeek 密钥")
+	if index==4:
+		key_input.placeholder_text=L.t("留空使用已保存的 OpenAI API Key")
+		mode_help.text=L.t("使用 OpenAI 官方 API Key 调用 Responses 流，按 API 用量计费。")
+		effort_help.text=L.t("默认 high。密钥、额度或模型不可用时停止，不自动切换其他服务。")
 	if index==3:
 		mode_help.text=L.t("直接使用 ChatGPT 订阅 Responses 流，不经过 Codex CLI。")
 		effort_help.text=L.t("默认 high。登录、额度或模型不可用时停止，不自动切换收费服务。")
@@ -759,9 +766,10 @@ func _sync_configuration() -> void:
 	jev_select.button_pressed = bool(cfg.get("jev_enabled",true))
 	var index: int = 2 if bool(cfg.get("offline", false)) else (0 if base_input.text == "https://api.deepseek.com" and model_input.text == "deepseek-flash" and bool(cfg.get("deepseek_options", true)) else 1)
 	if not bool(cfg.get("offline",false)) and cfg.get("provider","") in ["chatgpt_subscription","codex_subscription"]:index=3
+	if not bool(cfg.get("offline",false)) and cfg.get("provider","")=="openai_api":index=4
 	mode_select.select(index)
 	_mode_changed(index)
-	if index==3:_set_luna_model(str(cfg.get("model","gpt-6-luna")))
+	if index in [3,4]:_set_luna_model(str(cfg.get("model","gpt-6-luna")))
 	_set_effort(str(cfg.get("reasoning_effort", "low")))
 
 func _start_world() -> void:
@@ -1079,6 +1087,7 @@ func _render() -> void:
 	if mode == "not_configured": mode_text = L.t("尚未配置导演")
 	if mode == "live_llm": mode_text += L.t(" · 思考 ") + str(d.get("reasoning_effort", "low"))
 	if mode=="live_llm" and d.get("provider","") in ["chatgpt_subscription","codex_subscription"]:mode_text=L.t("订阅 · ")+str(d.get("model",""))+" · "+str(d.get("reasoning_effort","high"))
+	if mode=="live_llm" and d.get("provider","")=="openai_api":mode_text="OpenAI API · "+str(d.get("model",""))+" · "+str(d.get("reasoning_effort","high"))
 	var active_lines: Array[String] = []
 	for task in d.get("active_tasks", []):
 		var purpose: String = L.t("世界变化") if str(task.kind) == "reaction" else (L.t("更新草案") if str(task.get("source", "")) == "refresh" else L.t("自动预生成"))
