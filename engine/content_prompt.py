@@ -240,7 +240,7 @@ def model_context(context,kind,hybrid=False):
         return result
     keep=('content_version','item_policy','setting','world_title','target','target_depth','destination','refresh',
           'existing_destinations','visual_identity','planned_parent','story_revision','player','facts',
-          'lore','threads','known_locations','frontier','rejected_response','validation_errors','game_spec','chapter_plan','planned_routes','region_purpose','required_flag_writes','reserve_chapter_gate','content_contract','adventure_revision','reserve_director_gates','commission_ids')
+          'lore','threads','known_locations','frontier','rejected_response','validation_errors','game_spec','chapter_plan','planned_routes','region_purpose','required_flag_writes','required_item_grants','reserve_chapter_gate','content_contract','adventure_revision','reserve_director_gates','commission_ids')
     result={key:copy.deepcopy(context[key]) for key in keep if key in context}
     if result.get('chapter_plan'):
         chapter=result['chapter_plan'];rid=context['target']

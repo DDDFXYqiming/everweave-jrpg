@@ -11,7 +11,13 @@ The engine exhaustively searches the chapter graph: arriving at a region grants 
 its commissioned skills. The plan is rejected if no final ending (or, without one, the chapter completion) is reachable,
 if any planned region is never reachable, or if some reachable state can no longer finish (softlock: key only behind
 its own door, one-way trap, failable mission on the only path).
-For new online adventures use planning:"rolling": author only the next 2..4 regions, connected by 1..6 links.
+REAL LOCK REQUIRED: every way to the completion/final ending must pass at least one locked route: a link whose requires is
+false at chapter start, or a hidden link opened by discover. Its key (flag, item_sources item or newly taught skill) is earned
+elsewhere first. The engine deletes every initially open route and rejects the plan if the goal is still reachable.
+world_context.player_abilities lists skills the player ALREADY has; requiring them is not a lock, but later chapters may use
+them to open shortcuts. Each region later gets an exact in-region search: it must really produce its flag_sources values and
+item_sources items with reachable actions, and consuming them must never softlock the region.
+For new online adventures use planning:"rolling": author only the next 3..4 regions, connected by 2..6 links, so a lock fits.
 Include ending_brief: a PRIVATE eventual outcome direction, not a complete intermediate route. Keep the middle open
 for the global director to expand as the player makes choices. Plan a playable local arc and its continuation,
 with room for danger, negotiation and character scenes. Do not prewrite a whole campaign as a puzzle checklist.
@@ -56,6 +62,13 @@ Every required_flag_writes key MUST have a purposeful player action/hook writing
 {op:"chapter",key:FLAG,value:EXPRESSION}. Read shared flags with {get:"chapter.FLAG"} across this chapter.
 Every required_item_grants entry MUST be an items definition with exactly that id, obtainable here count times
 (chest or {op:"item",id,count}); chapter links and missions gate on it. Gate local rules on a learned skill with {has_ability:SKILL_ID}.
+A key produced by ANOTHER region is read with its canonical id {item:"PRODUCER_REGION:ITEM_ID"} (producer from chapter_plan.item_sources);
+never redefine it in region.items, because a local copy is a different item the player can never hold.
+The engine replays this region with the real interpreter over every reachable state (walking, talking, choices, actions,
+item uses, fights). It rejects the region unless each required flag value and item is actually reachable, a promised key is
+not only behind a lock that needs that same key, no reachable state loses the chance to obtain it (a consumed or burned key,
+an irreversible switch, a wall that seals the producer), and some open exit stays reachable. Foreign flags/items/skills the
+chapter can provide before arriving are assumed available; keep local puzzle states small (a few switches, not counters).
 Implement each producer in its assigned region. Explain clues without revealing hidden roads early.
 Example: power station switch writes power=true; archive scanner reads chapter.power. Do not substitute unrelated local vars.
 Respect game_spec.systems and resources. Omitted hp/mp/gold are disabled, not invisible spare resources.

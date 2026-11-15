@@ -103,6 +103,7 @@ class Normalizer:
             if isinstance(entry,dict) and isinstance(entry.get('id'),str):
                 self.existing['quests'].add(entry['id'])
         items = list(ctx.get('available_items', [])) + list(ctx.get('validation_items', []))
+        self.existing['items'].update(v['region']+':'+k for k, v in ctx.get('chapter_plan', {}).get('item_sources', {}).items())
         for item in items:
             if not isinstance(item, dict) or not isinstance(item.get('id'), str):
                 continue
@@ -354,8 +355,9 @@ class Normalizer:
         if scope=='items' and 'validation_items' in self.context and value not in self.maps[scope] and value not in self.existing[scope]:
             matches=self.local[scope].get(value,set())
             if len(matches)!=1:
-                self.error(path,'undefined item reference' if not matches else 'ambiguous item reference',value,
-                           f'define the new item in {self.expected}.items or use an exact existing canonical item ID')
+                source=self.context.get('chapter_plan',{}).get('item_sources',{}).get(value)
+                hint=f'chapter key item produced by {source["region"]}: reference it as {source["region"]}:{value}; do not redefine it here' if source and source['region']!=self.context.get('target') else f'define the new item in {self.expected}.items or use an exact existing canonical item ID'
+                self.error(path,'undefined item reference' if not matches else 'ambiguous item reference',value,hint)
         result = self.maps[scope].get(value, value)
         if scope=='objects' and 'validation_items' in self.context:
             known={'player','enemy','self'} | set(self.maps[scope]) | set(self.maps[scope].values())

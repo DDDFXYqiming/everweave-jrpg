@@ -44,7 +44,7 @@ def item_sources(raw,regions):
         out[ident(key)]=dict(region=v['region'],count=integer(v.get('count',1),1,9,'item source count'))
     return out
 
-def validate(raw,first=True,existing=None,corrections=None):
+def validate(raw,first=True,existing=None,corrections=None,abilities=()):
     from .schema import obj,arr,ident,text
     from .content import state_values,boolean
     if isinstance(raw,str):
@@ -101,7 +101,7 @@ def validate(raw,first=True,existing=None,corrections=None):
     if seen!=ids or not rolling and (len(pairs)<len(ids) or max(map(len,adj.values()))<3):raise InvalidPatch('chapter graph needs connected branches and at least one loop, not a linear chain')
     if max(map(len,adj.values()))>6:raise InvalidPatch('limit each location to six chapter routes')
     if any(sum(key in (e['a'],e['b']) for e in out['links'])>6 for key in ids):raise InvalidPatch('limit each location to six physical routes, including parallel routes')
-    opening=dict(flags=out['flags'],items={},abilities=set(),missions={k:'active' for k in scope['missions']})
+    opening=dict(flags=out['flags'],items={},abilities=set(abilities),missions={k:'active' for k in scope['missions']})
     if not any((start==e['a'] or start==e['b'] and not e['one_way']) and not e['hidden'] and satisfied(e['requires'],opening) for e in out['links']):raise InvalidPatch('arrival needs an initially usable visible route')
     out['milestones']=[];goal_ids=set()
     for m in arr(r['milestones'],'milestones',8,1):
@@ -114,9 +114,11 @@ def validate(raw,first=True,existing=None,corrections=None):
     c=obj(r['continuation'],'continuation',('from','hook'),('from','hook'))
     if not isinstance(c['from'],str) or c['from'] not in ids:raise InvalidPatch('continuation.from must be a chapter region')
     out['continuation']=dict(c,hook=text(c['hook'],'continuation hook',400))
-    from .progression import search
-    result=search(graph_from_plan(out,old))
+    from .progression import search,require_lock
+    graph=graph_from_plan(out,old,abilities)
+    result=search(graph)
     if set(result['regions'])!=ids:raise InvalidPatch('有地区在任何可达状态下都到不了：'+'、'.join(sorted(ids-set(result['regions'])))+'；检查单向路线、通行条件和隐藏路线的发现条件',category='gameplay')
+    require_lock(graph)
     return out
 
 def satisfied(conditions,facts):
@@ -135,13 +137,13 @@ def facts(state,c):
 def rename(conditions,missions):
     return [dict(c,mission=missions.get(c['mission'],c['mission'])) if 'mission' in c else c for c in conditions]
 
-def graph_from_plan(plan,existing):
+def graph_from_plan(plan,existing,abilities):
     adv=plan.get('adventure',{})
     missions={k:dict(kind=m['kind'],depends=m['depends'],when=[],fail_when=[],status=m['status'],frozen=True) for k,m in existing.get('missions',{}).items()}
     missions.update({m['id']:dict(kind=m['kind'],depends=m['depends'],when=m['when'],fail_when=m['fail_when'],status='active',frozen=False) for m in adv.get('missions',[])})
     return dict(start=plan['regions'][0]['id'],regions=[r['id'] for r in plan['regions']],
                 links=[dict(e,revealed=not e['hidden']) for e in plan['links']],flags=plan['flags'],flag_sources=plan['flag_sources'],flag_gates={},
-                items=plan['item_sources'],inventory={},granted=set(),abilities=set(),
+                items=plan['item_sources'],inventory={},granted=set(),abilities=set(abilities),
                 skills=[dict(id=j['id'],region=j['region'],skills=j['skills'],requires=j['requires']) for j in adv.get('commissions',[]) if j['skills']],
                 missions=missions,endings=list(existing.get('endings',{}).values())+adv.get('endings',[]),complete_when=plan['complete_when'])
 
@@ -158,6 +160,19 @@ def graph_from_state(state):
                 abilities=view['abilities'],skills=skills,
                 missions={k:dict(kind=m['kind'],depends=m['depends'],when=m['when'],fail_when=m['fail_when'],status=m['status'],frozen=m['chapter_id']!=cid) for k,m in adv.get('missions',{}).items()},
                 endings=list(adv.get('endings',{}).values()),complete_when=c['complete_when'])
+def promised_values(state,c):
+    adv=state.get('adventure') or {}
+    lists=[e[k] for e in c['links'] for k in ('requires','discover')]+[m['when'] for m in c['milestones']]+[c['complete_when']]
+    lists+=[m['when'] for m in adv.get('missions',{}).values() if m['chapter_id']==c['id']]
+    values={}
+    for conditions in lists:
+        for v in conditions:
+            if 'flag' in v and v['eq']!=c['flags'][v['flag']]:values.setdefault(v['flag'],set()).add(v['eq'])
+    return values
+
+def key_items(state,rid):
+    return {v['region']+':'+k:k for k,v in (chapter(state,rid) or {}).get('item_sources',{}).items()}
+
 def book(state):return state.get('campaign')
 def chapter(state,rid):
     node=state['topology'].get(rid,{})

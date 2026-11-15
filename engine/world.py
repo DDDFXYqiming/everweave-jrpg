@@ -111,7 +111,7 @@ class World:
    if previous:previous.pop('adventure',None)
    return dict(kind=kind,target=s['current'],epoch=s['epoch'],story_revision=s['story_revision'],content_version=2,
     setting=s['setting'],campaign_revision=b['revision'],chapter_number=len(b['chapters'])+1,game_spec=s.get('game_spec'),
-    previous_chapter=previous,adventure_memory=adventure.memory(self),recent_events=self.store.recent_events(12))
+    previous_chapter=previous,player_abilities=sorted(s['player'].get('abilities',[])),adventure_memory=adventure.memory(self),recent_events=self.store.recent_events(12))
   s=self.state; rid=target or s['current']; r=self.region(); n=s['topology'][rid]
   parent=self.region(n['parent']) if n['parent'] else None
   art=(parent or r or {}).get('visuals',{})
@@ -185,7 +185,7 @@ class World:
   current=self.region() or {}
   return dict(context,adventure_state=self.state.get('adventure'),validation_items=list(self.state['items'].values()),validation_quests=list(self.state['quests'].values()),validation_props=current.get('props',[]),validation_bindings=current.get('visuals',{}).get('bindings',{}),**({'validation_world':self} if context['kind']=='direction' else {}))
  def validate_patch(self,raw,context):
-  if context['kind']=='campaign':return dict(kind='campaign',campaign=campaign.validate(raw,not self.state.get('game_spec'),self.state.get('adventure')))
+  if context['kind']=='campaign':return dict(kind='campaign',campaign=campaign.validate(raw,not self.state.get('game_spec'),self.state.get('adventure'),abilities=self.state['player'].get('abilities',[])))
   if context['kind']=='direction':
    data=adventure.validate_direction(self,raw)
    from .storage import Store
@@ -292,10 +292,10 @@ class World:
     for pos in positions:
      if tuple(pos) not in reachable(preview['tiles'],preview['spawn']) or any(tuple(pos) in cells_from_bottom_left(e) for e in preview['entities']+preview['props']):raise InvalidPatch('director gate must reserve a free reachable cell')
   if p['kind']=='region' and 'scene' in p['region']:
-   from .playability import check_entry,check_progress
-   progress=check_progress(self,p['region'],context)
+   from .playability import check_entry
+   from .region_search import check_region
    check_entry(self,p,context)
-   p['_playability']=dict(entry='verified',progress=progress)
+   p['_playability']=dict(entry='verified',progress=check_region(self,p,context))
   if p['kind']=='reaction':
    from .storage import Store
    preview_store=Store(':memory:')

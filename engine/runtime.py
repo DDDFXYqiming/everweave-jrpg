@@ -83,7 +83,8 @@ class Runtime:
         raise RuleError('undefined object: ' + name)
 
     def item_id(self, key):
-        if key in self.s['items']: return key
+        from .campaign import key_items
+        if key in self.s['items'] or key in key_items(self.s, self.region['id']): return key
         matches = [k for k,item in self.s['items'].items() if item_local_id(item,self.region['id'])==key]
         if len(matches) == 1: return matches[0]
         raise RuleError('undefined/ambiguous item: ' + key)

@@ -9,8 +9,8 @@ GAMEPLAY_COMPONENT='''
 COMPONENT BUILD: Follow region_design for the exact region name, recurring cast and allowed sprite/surface slots.
 You may invent bounded local entities, landmarks and items, but every sprite field must use an allowed sprite slot.
 Bind every required recurring cast entry with its exact actor_id, name and sprite. Focus on playable scene geometry,
-dialogue/scenes, choices, program actions/hooks/objectives, combat and rewards. Include every planned route anchor and
-required flag write from world_context.
+dialogue/scenes, choices, program actions/hooks/objectives, combat and rewards. Include every planned route anchor,
+required flag write and required_item_grants item from world_context.
 Still return the ordinary complete kind=region envelope, but OMIT region.visuals and region.audio: the parallel
 audiovisual worker supplies them. Do not invent extra gameplay identities. Use every region_design surface at least
 once in a scene.paint surface/wall_surface/door_surface field so the visual work has an actual spatial role.

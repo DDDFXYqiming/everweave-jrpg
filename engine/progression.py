@@ -4,7 +4,7 @@ from .diagnostics import InvalidPatch, issue
 LIMIT = 100000
 
 
-def search(graph):
+def explore(graph):
     from .campaign import satisfied
     regions = set(graph['regions'])
     links = [e for e in graph['links'] if e['a'] in regions and e['b'] in regions]
@@ -121,12 +121,18 @@ def search(graph):
             steps.append(label)
         return steps[::-1]
 
+    return dict(target=target, order=order, edges=edges, path=path, goals=[s for s in order if goal(s)],
+                keys=(flag_keys, item_keys, mission_keys))
+
+
+def search(graph):
+    found = explore(graph)
+    order, goals, path, target = found['order'], found['goals'], found['path'], found['target']
     reached = sorted({s[0] for s in order})
-    goals = [s for s in order if goal(s)]
     if not goals:
         raise InvalidPatch(issues=[issue('campaign', f'从开局无法到达任何{target}（已穷举 {len(order)} 个状态，可到达地区：{"、".join(reached)}）；检查钥匙/道具/能力是否只产在需要它的门后、单向路线和任务依赖', category='gameplay')])
     incoming = {}
-    for state, nexts in edges.items():
+    for state, nexts in found['edges'].items():
         for nxt in nexts:
             incoming.setdefault(nxt, []).append(state)
     alive = set(goals)
@@ -138,8 +144,18 @@ def search(graph):
                 queue.append(prev)
     stuck = next((s for s in order if s not in alive), None)
     if stuck is not None:
-        raise InvalidPatch(issues=[issue('campaign', f'软锁：按以下步骤行动后再也无法到达{target}：{" → ".join(path(stuck))}。此时{describe(stuck, flag_keys, item_keys, mission_keys)}', category='gameplay')])
+        raise InvalidPatch(issues=[issue('campaign', f'软锁：按以下步骤行动后再也无法到达{target}：{" → ".join(path(stuck))}。此时{describe(stuck, *found["keys"])}', category='gameplay')])
     return dict(target=target, path=path(goals[0]), states=len(order), regions=reached)
+
+
+def require_lock(graph):
+    from .campaign import satisfied
+    opening = dict(flags=graph['flags'], items=graph['inventory'], abilities=set(graph['abilities']),
+                   missions={k: m['status'] for k, m in graph['missions'].items()})
+    free = [e for e in graph['links'] if (e['revealed'] or not e['hidden']) and satisfied(e['requires'], opening)]
+    found = explore(dict(graph, links=free))
+    if found['goals']:
+        raise InvalidPatch(issues=[issue('campaign', f'主线没有真实的锁/钥匙：不经过任何上锁或隐藏的路线也能到达{found["target"]}（{" → ".join(found["path"](found["goals"][0]))}）。至少让一条必经路线用 requires 或 hidden+discover 上锁，钥匙（道具、旗标或新能力）要先在别处取得；玩家已拥有的能力不算锁', category='gameplay')])
 
 
 def describe(state, flag_keys, item_keys, mission_keys):

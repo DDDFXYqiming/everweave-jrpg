@@ -75,9 +75,9 @@ class PacingTests(unittest.TestCase):
         self.assertEqual(self.w.state,before)
     def test_rolling_opening_can_leave_middle_undecided(self):
         p=adventure_plan();c=p['campaign'];c.pop('adventure');c['planning']='rolling';c['ending_brief']='最后决定是否把信交还失主'
-        c['regions']=c['regions'][:2];c['links']=c['links'][:1];c['flags']={'clue':False,'power':False};c['flag_sources']={'clue':'post','power':'station'}
-        c['milestones']=c['milestones'][:1];c['complete_when']=[dict(flag='power',eq=True)];c['continuation']['from']='station'
-        parsed=campaign.validate(p);self.assertEqual(len(parsed['regions']),2)
+        c['regions']=c['regions'][:3];c['links']=[c['links'][0],dict(c['links'][1],requires=[dict(flag='power',eq=True)])];c['flags']={'clue':False,'power':False,'secret':False};c['flag_sources']={'clue':'post','power':'station','secret':'archive'}
+        c['milestones']=c['milestones'][:1];c['complete_when']=[dict(flag='secret',eq=True)];c['continuation']['from']='archive'
+        parsed=campaign.validate(p);self.assertEqual(len(parsed['regions']),3)
     def test_misplaced_failure_mode_moves_only_when_unambiguous(self):
         p=adventure_plan();p['campaign']['failure_mode']='none';changes=[]
         parsed=campaign.validate(p,corrections=changes)

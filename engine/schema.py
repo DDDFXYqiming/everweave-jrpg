@@ -85,7 +85,7 @@ def unique_ids(values,name):
 def parse_patch(raw,expected,context=None,corrections=None):
  if expected=='campaign':
   from .campaign import validate
-  return dict(kind='campaign',campaign=validate(raw,not (context or {}).get('game_spec'),(context or {}).get('adventure_state'),corrections))
+  return dict(kind='campaign',campaign=validate(raw,not (context or {}).get('game_spec'),(context or {}).get('adventure_state'),corrections,(context or {}).get('player_abilities',[])))
  if expected=='direction':
   from .adventure import validate_direction
   return dict(kind='direction',direction=validate_direction((context or {})['validation_world'],raw))

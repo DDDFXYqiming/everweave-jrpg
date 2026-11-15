@@ -48,6 +48,9 @@ def transaction(world, operation):
 def definitions(world, region):
     install(region)
     items = dict(world.state['items'])
+    from .campaign import key_items
+    for key, local in key_items(world.state, region['id']).items():
+        items.setdefault(key, dict(id=key, local_id=local, origin=key.split(':')[0]))
     for item in region.get('plan', {}).get('items', []):
         key = region['id']+':'+item['id']
         items[key] = dict(item, id=key, local_id=item['id'], origin=region['id'])

@@ -23,26 +23,34 @@ def blocking_cells(region):
             for cell in cells_from_bottom_left(obj)}
 
 
-def walk_path(region, start, goals):
+def routes_from(region, start):
     blocked = blocking_cells(region)
     previous = {start: None}
     queue = deque([start])
     while queue:
-        point = queue.popleft()
-        if point in goals:
-            path = []
-            while previous[point] is not None:
-                path.append(point)
-                point = previous[point]
-            return path[::-1]
-        x, y = point
+        x, y = queue.popleft()
         for nxt in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
             nx, ny = nxt
             if (nxt not in previous and 0 <= nx < region['width'] and 0 <= ny < region['height']
                     and region['tiles'][ny][nx] not in C.BLOCKED and nxt not in blocked):
-                previous[nxt] = point
+                previous[nxt] = (x, y)
                 queue.append(nxt)
-    return None
+    return previous
+
+
+def path_to(previous, goals):
+    point = next((p for p in previous if p in goals), None)
+    if point is None:
+        return None
+    path = []
+    while previous[point] is not None:
+        path.append(point)
+        point = previous[point]
+    return path[::-1]
+
+
+def walk_path(region, start, goals):
+    return path_to(routes_from(region, start), goals)
 
 
 def solid_at(region, x, y, ignore=None):
