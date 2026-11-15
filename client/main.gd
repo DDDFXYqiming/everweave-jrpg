@@ -60,6 +60,9 @@ var blocked_move_until: int = 0
 var walk_path: Array = []
 var walk_interact: String = ""
 var walk_region: String = ""
+# 按住的方向只认游戏收到的按键事件；Web 版可能丢失松键事件，靠系统连发续期，超时视为已松开
+const MOVE_DIRECTIONS := {KEY_W: Vector2i.UP, KEY_UP: Vector2i.UP, KEY_S: Vector2i.DOWN, KEY_DOWN: Vector2i.DOWN, KEY_A: Vector2i.LEFT, KEY_LEFT: Vector2i.LEFT, KEY_D: Vector2i.RIGHT, KEY_RIGHT: Vector2i.RIGHT}
+var held_moves: Dictionary = {}
 var poll_busy: bool = false
 var action_route: String = ""
 var poll_clock: float = 0.0
@@ -533,7 +536,35 @@ func _toggle_fullscreen() -> void:
 	AudioPrefs.set_fullscreen(window.mode == Window.MODE_FULLSCREEN)
 	display_button.text = L.t("退出全屏 · Alt+Enter") if AudioPrefs.fullscreen else L.t("切换全屏 · Alt+Enter")
 
+func _notification(what: int) -> void:
+	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_WM_WINDOW_FOCUS_OUT]: held_moves.clear()
+
+func _move_direction(event: InputEventKey) -> Vector2i:
+	if MOVE_DIRECTIONS.has(event.keycode): return MOVE_DIRECTIONS[event.keycode]
+	if event.physical_keycode in [KEY_W, KEY_A, KEY_S, KEY_D]: return MOVE_DIRECTIONS[event.physical_keycode]
+	return Vector2i.ZERO
+
+func _track_move_key(event: InputEventKey) -> void:
+	var direction: Vector2i = _move_direction(event)
+	if direction == Vector2i.ZERO: return
+	if not event.pressed:
+		held_moves.erase(direction)
+		return
+	var focused: Control = get_viewport().gui_get_focus_owner()
+	if focused is LineEdit or focused is TextEdit or event.ctrl_pressed or event.alt_pressed: return
+	held_moves[direction] = {"at": Time.get_ticks_msec(), "repeating": event.echo}
+
+func _held_move() -> Vector2i:
+	var now: int = Time.get_ticks_msec()
+	for direction in [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]:
+		if not held_moves.has(direction): continue
+		var held: Dictionary = held_moves[direction]
+		if now - int(held.at) < (400 if bool(held.repeating) else 1100): return direction
+		held_moves.erase(direction)
+	return Vector2i.ZERO
+
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey: _track_move_key(event)
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_D and event.ctrl_pressed and bool(state.get("started",false)):
 			_toggle_diagnostics()
@@ -1307,17 +1338,11 @@ func _process(delta: float) -> void:
 	if _walking():
 		_walk_step()
 		return
-	if Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT): return
-	var dx: int = 0
-	var dy: int = 0
-	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): dy = -1
-	elif Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): dy = 1
-	elif Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): dx = -1
-	elif Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): dx = 1
-	if dx != 0 or dy != 0:
+	var direction: Vector2i = _held_move()
+	if direction != Vector2i.ZERO:
 		AudioPrefs.learn("move")
 		move_clock = 0.14
-		_send_action({"op": "move", "dx": dx, "dy": dy})
+		_send_action({"op": "move", "dx": direction.x, "dy": direction.y})
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo or not game.visible:
