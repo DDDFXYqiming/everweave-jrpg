@@ -56,6 +56,10 @@ var poll_http: HTTPRequest
 var action_busy: bool = false
 var pending_move: bool = false
 var blocked_move_until: int = 0
+# 鼠标点击寻路：每步仍走 /action move，规则与遇敌照常由服务端结算
+var walk_path: Array = []
+var walk_interact: String = ""
+var walk_region: String = ""
 var poll_busy: bool = false
 var action_route: String = ""
 var poll_clock: float = 0.0
@@ -1291,12 +1295,17 @@ func _process(delta: float) -> void:
 		poll_clock=0.0
 		_recover_connection()
 	move_clock = maxf(0, move_clock - delta)
+	if _walking() and (state.get("battle") is Dictionary or not state.get("ui", {}).is_empty() or not local_panel.is_empty() or str(state.get("region", {}).get("id", "")) != walk_region or (is_instance_valid(intent_panel) and intent_panel.visible)):
+		_walk_stop()
 	if is_instance_valid(intent_panel) and intent_panel.visible: return
 	var focused: Control = get_viewport().gui_get_focus_owner()
 	if focused is LineEdit or focused is TextEdit: return
 	if not is_instance_valid(game) or not game.visible or not connection_ready or action_busy or move_clock > 0:
 		return
 	if not bool(state.get("started", false)) or state.get("battle") is Dictionary or not state.get("ui", {}).is_empty() or not local_panel.is_empty():
+		return
+	if _walking():
+		_walk_step()
 		return
 	if Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT): return
 	var dx: int = 0
@@ -1317,6 +1326,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# scan code. Hotkeys follow the logical key; physical-only input still works.
 	var key: int = event.keycode if event.keycode != 0 else event.physical_keycode
 	if is_instance_valid(intent_panel) and intent_panel.visible: return
+	if _walking():_walk_stop()
 	if key == KEY_T:
 		_toggle_intent()
 		get_viewport().set_input_as_handled()
@@ -1379,6 +1389,112 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	elif key in [KEY_E, KEY_SPACE] and local_panel.is_empty():
 		_send_action({"op": "interact"})
 	get_viewport().set_input_as_handled()
+
+func _walking() -> bool:
+	return not walk_path.is_empty() or not walk_interact.is_empty()
+
+func _walk_stop() -> void:
+	walk_path.clear()
+	walk_interact = ""
+	if is_instance_valid(world_view): world_view.walk_goal = Vector2i(-1, -1)
+
+func _walk_ready() -> bool:
+	return bool(state.get("started", false)) and state.get("region") is Dictionary and not state.get("battle") is Dictionary and state.get("ui", {}).is_empty() and local_panel.is_empty()
+
+func _walk_here() -> Vector2i:
+	return Vector2i(int(state.player.x), int(state.player.y))
+
+func _cells(obj: Dictionary) -> Array:
+	var footprint: Array = obj.get("footprint", [1, 1])
+	var result: Array = []
+	for dy in int(footprint[1]):
+		for dx in int(footprint[0]):
+			result.append(Vector2i(int(obj.x) + dx, int(obj.y) - dy))
+	return result
+
+func _walk_route(goals: Dictionary, aim: Vector2i) -> Array:
+	"""与 tools/play_session.route 相同的通行判断；够不到目标时走到离它最近的可达格。"""
+	var region: Dictionary = state.region
+	var occupied: Dictionary = {}
+	for group in ["props", "entities"]:
+		for obj in region.get(group, []):
+			# 出口实体可以站上去，服务端 move 同样放行
+			if bool(obj.get("spent", false)) or str(obj.get("kind", "")) == "exit" or not bool(obj.get("solid", group == "entities")): continue
+			for cell in _cells(obj): occupied[cell] = true
+	var width: int = int(region.width)
+	var height: int = int(region.height)
+	var start: Vector2i = _walk_here()
+	var previous: Dictionary = {start: start}
+	var queue: Array = [start]
+	var best: Vector2i = start
+	var head: int = 0
+	while head < queue.size():
+		var point: Vector2i = queue[head]
+		head += 1
+		if goals.has(point):
+			best = point
+			break
+		var distance: int = absi(point.x - aim.x) + absi(point.y - aim.y)
+		if distance < absi(best.x - aim.x) + absi(best.y - aim.y): best = point
+		for step in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var next: Vector2i = point + step
+			if previous.has(next) or next.x < 0 or next.y < 0 or next.x >= width or next.y >= height: continue
+			if int(region.tiles[next.y][next.x]) in [2, 3] or occupied.has(next): continue
+			previous[next] = point
+			queue.append(next)
+	var path: Array = []
+	while best != start:
+		path.push_front(best)
+		best = previous[best]
+	return path
+
+func _walk_begin(path: Array, interact: String) -> void:
+	_walk_stop()
+	if path.is_empty() and interact.is_empty(): return
+	walk_path = path
+	walk_interact = interact
+	walk_region = str(state.region.id)
+	blocked_move_until = 0
+	if not path.is_empty(): world_view.walk_goal = path[-1]
+
+func _walk_to_cell(cell: Vector2i) -> void:
+	if not _walk_ready(): return
+	_walk_begin(_walk_route({cell: true}, cell), "")
+
+func _walk_to_entity(id: String) -> void:
+	if not _walk_ready(): return
+	var target: Dictionary = {}
+	for e in state.region.get("entities", []):
+		if str(e.id) == id: target = e
+	if target.is_empty(): return
+	var here: Vector2i = _walk_here()
+	var goals: Dictionary = {}
+	for cell in _cells(target):
+		for step in [Vector2i.ZERO, Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]: goals[cell + step] = true
+	if goals.has(here):
+		_walk_stop()
+		_send_action({"op":"interact","id":id})
+		return
+	var path: Array = _walk_route(goals, _cells(target)[0])
+	_walk_begin(path, id if not path.is_empty() and goals.has(path[-1]) else "")
+
+func _walk_step() -> void:
+	var here: Vector2i = _walk_here()
+	if not walk_path.is_empty() and here == walk_path[0]: walk_path.pop_front()
+	if blocked_move_until > Time.get_ticks_msec():
+		_walk_stop()
+		return
+	if walk_path.is_empty():
+		var id: String = walk_interact
+		_walk_stop()
+		if not id.is_empty(): _send_action({"op":"interact","id":id})
+		return
+	var step: Vector2i = walk_path[0] - here
+	if absi(step.x) + absi(step.y) != 1:
+		_walk_stop()
+		return
+	move_clock = 0.14
+	_send_action({"op": "move", "dx": step.x, "dy": step.y})
 
 func _apply_game_spec() -> void:
 	var value: Variant = state.get("game_spec")

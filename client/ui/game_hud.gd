@@ -37,7 +37,8 @@ func build(controller) -> void:
 	main.world_view = preload("res://client/world_view.gd").new()
 	add_child(main.world_view)
 	main.world_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	main.world_view.entity_clicked.connect(func(id: String) -> void: main._send_action({"op":"interact","id":id}))
+	main.world_view.entity_clicked.connect(main._walk_to_entity)
+	main.world_view.cell_clicked.connect(main._walk_to_cell)
 	main.world_view.map_requested.connect(func() -> void: main._toggle_panel("atlas"))
 	var margin: MarginContainer = main._margin(self, 16)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE

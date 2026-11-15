@@ -2,6 +2,7 @@ extends Control
 const L = preload("res://client/i18n.gd")
 
 signal entity_clicked(entity_id: String)
+signal cell_clicked(cell: Vector2i)
 signal map_requested()
 
 const TILE: float = 32.0
@@ -27,6 +28,7 @@ var elapsed: float = 0.0
 var walk_frame: int = 0
 var current_id: String = ""
 var moving: bool = false
+var walk_goal := Vector2i(-1, -1)
 var font: Font
 
 func _ready() -> void:
@@ -200,6 +202,8 @@ func _draw() -> void:
 			var marker := foot - Vector2(0, 64 + sin(elapsed * 2 + float(obj.x)) * 2)
 			draw_rect(Rect2(marker - Vector2(2, 7), Vector2(4, 8)), Color("f0d49c"))
 			draw_rect(Rect2(marker + Vector2(-2, 4), Vector2(4, 3)), Color("f0d49c"))
+	if walk_goal.x >= 0:
+		draw_rect(Rect2(Vector2(walk_goal) * TILE - camera + Vector2(3, 3), Vector2(TILE - 6, TILE - 6)), Color(0.94, 0.83, 0.61, 0.55 + 0.25 * sin(elapsed * 6)), false, 2.0)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var hour: float = fmod(float(snapshot.get("time", 480)), 1440.0) / 60.0
 	if hour >= 19.0 or hour < 6.0:
@@ -285,3 +289,6 @@ func _gui_input(event: InputEvent) -> void:
 				entity_clicked.emit(str(e.id))
 				accept_event()
 				return
+		if cell.x >= 0 and cell.y >= 0 and cell.x < float(region.get("width", 0)) and cell.y < float(region.get("height", 0)):
+			cell_clicked.emit(Vector2i(cell))
+			accept_event()
