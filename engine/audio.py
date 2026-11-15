@@ -1,4 +1,3 @@
-"""Declarative music and sound, library-first with bounded original synthesis."""
 import math
 from .diagnostics import InvalidPatch
 from .library import resolve

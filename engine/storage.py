@@ -1,4 +1,3 @@
-"""Atomic SQLite snapshots; maps are paged into a small runtime cache."""
 import json
 import sqlite3
 from pathlib import Path

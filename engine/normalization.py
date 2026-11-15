@@ -1,8 +1,3 @@
-"""Correct only unambiguous syntax, with scoped definition/reference maps.
-
-No gameplay fields are discarded. Existing canonical identities and prose are
-never globally rewritten, and ambiguous aliases remain validation errors.
-"""
 import copy
 import hashlib
 import json
@@ -42,7 +37,6 @@ def decode(raw):
 
 
 def compact_visual_polygons(visuals, root='visuals'):
-    """将只有一个多余顶点的绘图多边形压到既有的十点上限。"""
     changes=[]
     sprites=visuals.get('sprites') if isinstance(visuals,dict) else None
     if not isinstance(sprites,dict):return changes
@@ -514,7 +508,6 @@ class Normalizer:
                 art['scenery'] = [self.ref('sprites', value, f'{root}.visuals.scenery[{i}]') for i,value in enumerate(art['scenery'])]
 
     def boolean_state_defaults(self):
-        """A field only ever set true starts false; other missing values stay errors."""
         if self.expected!='region' or not isinstance(self.body,dict):return
         entities={e.get('id'):e for e in self.body.get('entities',[]) if isinstance(e,dict) and isinstance(e.get('id'),str)}
         writes=defaultdict(set)

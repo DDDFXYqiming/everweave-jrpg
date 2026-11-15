@@ -29,7 +29,6 @@ def visible_entities(snapshot):
 
 
 def observe(s):
-    """Explicit allowlist: no program, conditions, future scenes or cast state."""
     r = s.get('region') or {}; p = s.get('player', {}); ui = s.get('ui') or {}
     result = select(s, ('started', 'title', 'time', 'map_count', 'game_over'))
     result['location'] = select(r, ('id', 'name', 'description', 'weather', 'width', 'height'))
@@ -93,7 +92,6 @@ class LocalAPI:
 
 
 def route(s, target):
-    """Shortest physical route to interaction range; never inspect game rules."""
     r = s['region']; start = (s['player']['x'], s['player']['y'])
     occupied = set()
     for group in ('props', 'entities'):

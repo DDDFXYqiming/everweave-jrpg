@@ -1,4 +1,3 @@
-"""Derive a compact director contract, then build gameplay and AV in parallel."""
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import hashlib

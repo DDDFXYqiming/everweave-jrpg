@@ -1,4 +1,3 @@
-"""One model, at most two requests in flight; rolling two-hop horizon across every exit."""
 import copy
 import json
 import os
@@ -628,7 +627,6 @@ class Director:
   choices=[rid for rid,distance in w.prefetch_targets() if not w.reaction_needed and s['topology'][rid].get('needs_refresh') and available('region',rid)]
   return region_job(choices[0]) if choices else None
  def step(self):
-  """A single deterministic scheduler step, also used by tests."""
   with self.world.lock:
    if self.deferred:
     raw,ctx,source,generation=self.deferred

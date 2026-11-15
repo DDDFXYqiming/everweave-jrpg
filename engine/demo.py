@@ -1,4 +1,3 @@
-"""Deterministic offline demo author, explicitly labelled as NOT an LLM."""
 import random
 from .catalog import BIOMES,LAYOUTS,stable_seed
 

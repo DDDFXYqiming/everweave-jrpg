@@ -1,4 +1,3 @@
-"""Independent ChatGPT device OAuth and protected local credential storage."""
 from dataclasses import asdict,dataclass
 import base64
 import ctypes
@@ -159,15 +158,12 @@ class Store:
                 if os.name!='nt' or getattr(exc,'winerror',None)!=17:raise
                 # Some redirected Windows profile folders report cross-volume
                 # replacement even when both printed paths share a drive.
-                # The payload is already user-DPAPI encrypted; replace it with a
-                # flushed bounded write and let load() reject any interrupted file.
                 with self.path.open('wb') as stream:stream.write(data);stream.flush();os.fsync(stream.fileno())
         finally:temporary.unlink(missing_ok=True)
     def forget(self):self.path.unlink(missing_ok=True)
 
 
 class LoginManager:
-    """One background device flow; public state never contains OAuth tokens."""
     def __init__(self,store=None):
         self.store=store or Store();self.lock=threading.Lock();self.login=None;self.error='';self.thread=None
         try:self.phase='ready' if self.store.load() else 'required'

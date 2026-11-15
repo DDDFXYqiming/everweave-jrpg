@@ -1,4 +1,3 @@
-"""Connect executable content to the existing authoritative game loop."""
 import copy
 from .schema import InvalidPatch
 from .runtime import Runtime, RuleError, install, check_references, design_record
@@ -6,7 +5,6 @@ from .scene import paint, validate_space, cells_for
 
 
 def transaction(world, operation):
-    """Commit the action AND all generated effects once, or restore everything."""
     if getattr(world, '_batch', None) is not None:
         return operation()
     before = copy.deepcopy(world.state)

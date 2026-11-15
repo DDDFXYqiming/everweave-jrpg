@@ -1,8 +1,3 @@
-"""Codex app-server transport using an existing ChatGPT subscription login.
-
-No platform API keys, OAuth token extraction, model fallback or paid-provider
-fallback. Each game request uses an ephemeral, tool-disabled conversation.
-"""
 from collections import deque
 import json
 import os
@@ -178,20 +173,11 @@ def probe():
 
 def output_schema(kind):
     if kind not in ('campaign','direction','reaction'):return None
-    # Strict Structured Outputs cannot describe our evolving recursive DSL with
-    # an open object. Constrain a transport envelope, then validate the enclosed
-    # game JSON through the authoritative engine schema. Large region responses
-    # stay unwrapped so escaping does not inflate their output by thousands of
-    # characters; they still stream and pass close-container + engine checks.
+    # Strict Structured Outputs cannot describe a recursive DSL as an open object.
     return {'type':'object','properties':{'payload':{'type':'string'}},'required':['payload'],'additionalProperties':False}
 
 
 def close_json_containers(text):
-    """Close at most four omitted terminal containers; never invent JSON values.
-
-    Only accept a completed value followed by missing braces/brackets. Partial
-    strings, missing values and mismatched delimiters remain validation errors.
-    """
     try:json.loads(text);return text,0
     except ValueError:pass
     stack=[];quoted=False;escape=False

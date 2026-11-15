@@ -1,4 +1,3 @@
-"""Explicit gameplay vocabulary; the model cannot add executable code."""
 import hashlib
 BIOMES=('forest','coast','snow','desert','ruins','industrial','dream')
 LAYOUTS=('village','river','grove','ruins','islands','labyrinth')

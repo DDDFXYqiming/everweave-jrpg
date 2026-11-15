@@ -1,4 +1,3 @@
-"""Semantic plans become seeded, connected maps, not LLM-authored tile arrays."""
 import random
 from collections import deque
 from . import catalog as C

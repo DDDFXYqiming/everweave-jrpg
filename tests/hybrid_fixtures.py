@@ -1,4 +1,3 @@
-"""Reviewed test compositions, never a live fallback or hidden model substitute."""
 import copy
 from content_fixtures import authored_patch
 

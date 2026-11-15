@@ -1,4 +1,3 @@
-"""Bounded, structured diagnostics shared by model validation and the director."""
 import json
 
 
@@ -90,7 +89,6 @@ def unique_issues(entries, limit=20):
 
 
 def validation_report(error):
-    """JSON consumed by the repair prompt; do not truncate away field locations."""
     return json.dumps({'errors': unique_issues(as_issues(error)),
                        'instruction': 'Fix these fields in the supplied rejected_response; retain valid content.'},
                       ensure_ascii=False)

@@ -1,4 +1,3 @@
-"""Behavioral acceptance tests: no model service and no puzzle-specific engine code."""
 import copy
 import json
 from pathlib import Path

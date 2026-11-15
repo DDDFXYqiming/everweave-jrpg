@@ -1,8 +1,3 @@
-"""Executable content grammar, not a catalogue of ready-made quests.
-
-Everything here is data: bounded expressions, effects and event handlers. No Python,
-GDScript, filesystem access, imports, network calls or eval are exposed to a model.
-"""
 import copy
 import math
 import re

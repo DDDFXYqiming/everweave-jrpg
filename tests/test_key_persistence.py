@@ -1,4 +1,3 @@
-"""本机提供方密钥的保存范围和重启恢复。"""
 import json
 import os
 from pathlib import Path

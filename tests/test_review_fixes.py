@@ -1,4 +1,3 @@
-"""六项审查缺陷的故障注入、隔离执行和真实动作回归。"""
 import copy
 import json
 import tempfile
@@ -23,7 +22,6 @@ from test_region_pipeline import components
 
 
 def walk_to(world,entity):
-    """通过碰撞地图找路，并逐步执行正常移动。"""
     region=world.region();p=world.state['player'];start=(p['x'],p['y'])
     cells=cells_for(entity);parents={start:None};queue=deque([start]);end=None
     while queue:

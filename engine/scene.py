@@ -1,4 +1,3 @@
-"""Compile a model's spatial drawing, without substituting a canned map layout."""
 import copy
 import json
 import math
@@ -9,7 +8,6 @@ from .diagnostics import issue
 
 
 def cells_for(obj):
-    """Footprints extend right/up from a sprite's bottom-left logical cell."""
     w, h = obj.get('footprint', [1, 1])
     return [(obj['x'] + dx, obj['y'] - dy) for dy in range(h) for dx in range(w)]
 
@@ -60,7 +58,6 @@ def paint(region, commands):
 
 
 def dress(region):
-    """Seeded visual-only dressing. Never add collision, loot or gameplay rules."""
     if not region.get('scene') or not region.get('visuals'):return
     art=region['visuals'];explicit=[p for p in region.get('props',[]) if not p.get('scenery_auto')]
     sprites=art.get('sprites',{});choices=[k for k in art.get('scenery',[]) if k in sprites]
@@ -116,7 +113,6 @@ def dress(region):
 
 
 def validate_space(region, player=None, full=False):
-    """Geometry and escape checks, not a claim to prove arbitrary puzzles solvable."""
     from .pcg import reachable
     w, h = region['width'], region['height']
     for obj in region['entities'] + region.get('props', []):

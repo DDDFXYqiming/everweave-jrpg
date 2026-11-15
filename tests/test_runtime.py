@@ -1,4 +1,3 @@
-"""Executable contract tests, with a real local HTTP mock provider and no paid calls."""
 from __future__ import annotations
 from collections import deque
 import copy
@@ -38,7 +37,6 @@ def make_world(path=':memory:'):
 
 
 def at_entity(w, entity_id):
-    """Fixture placement only: actions under test still pass through World.action."""
     e = next(e for e in w.region()['entities'] if e.get('local_id') == entity_id or e['id'] == entity_id)
     for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0)):
         x, y = e['x']+dx, e['y']+dy
@@ -49,7 +47,6 @@ def at_entity(w, entity_id):
 
 
 def walk_to(w, e):
-    """Real keyboard-equivalent movement, avoiding occupants, to an interaction cell."""
     r = w.region()
     start = (w.state['player']['x'], w.state['player']['y'])
     occupied = {(x['x'], x['y']) for x in r['entities'] if not x['spent'] and x['kind'] != 'exit'}

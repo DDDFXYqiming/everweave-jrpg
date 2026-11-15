@@ -23,7 +23,6 @@ def digest(data):
 
 
 def encode_rgba(width, height, pixels):
-    """A canonical PNG: no filters, stored DEFLATE blocks, no encoder-dependent bits."""
     if not (8<=width<=96 and 8<=height<=96 and len(pixels)==width*height*4):
         raise ValueError('Invalid composed RGBA image')
     raw=b''.join(b'\x00'+pixels[y*width*4:(y+1)*width*4] for y in range(height))

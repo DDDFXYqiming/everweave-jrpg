@@ -1,6 +1,3 @@
-"""Generate the project's original pixel art and sound assets. Build-time only: Pillow.
-No downloaded art, no font files, and no image-model dependency at runtime.
-"""
 from __future__ import annotations
 import json
 import math

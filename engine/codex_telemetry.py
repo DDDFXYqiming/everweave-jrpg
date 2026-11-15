@@ -1,4 +1,3 @@
-"""Bounded transport diagnostics. Never stores prompts or reasoning text."""
 from collections import Counter
 import hashlib
 from pathlib import Path

@@ -1,4 +1,3 @@
-"""Tiny drawing fixtures for contract tests, never used by the live director."""
 from copy import deepcopy
 
 def visual_fixture():

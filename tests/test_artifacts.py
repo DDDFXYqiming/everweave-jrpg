@@ -1,4 +1,3 @@
-"""Static resource consistency checks, not a substitute for Godot's native parser."""
 from pathlib import Path
 import hashlib
 import json
@@ -44,10 +43,6 @@ class ArtifactTests(unittest.TestCase):
                 self.assertTrue((ROOT/reference.removeprefix('res://')).is_file(),f'{script}: {reference}')
 
     def test_only_pinned_fonts_ship_and_no_runtime_credentials(self):
-        """The client preloads two fonts, so a blanket font ban would be a lie.
-        Instead: every shipped .ttf is pinned by content in assets/fonts/manifest.json,
-        unmodified, and carries its own license. Nothing else may be a font, and no
-        credential or per-machine runtime file may ever be committed."""
         manifest=json.loads((ROOT/'assets/fonts/manifest.json').read_text(encoding='utf-8'))
         pinned={}
         for entry in manifest['fonts']:

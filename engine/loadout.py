@@ -1,4 +1,3 @@
-"""Opening possessions are authored once with the first region, not a global kit."""
 from .diagnostics import InvalidPatch, checked
 from .schema import obj, arr, reference
 from .content import integer

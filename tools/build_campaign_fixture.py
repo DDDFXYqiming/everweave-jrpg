@@ -1,4 +1,3 @@
-"""Generate review fixtures from the real campaign engine, with no model calls."""
 import json
 from pathlib import Path
 import sys

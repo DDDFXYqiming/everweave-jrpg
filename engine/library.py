@@ -1,4 +1,3 @@
-"""Pinned, local content catalog. The model receives IDs, never filesystem paths."""
 import copy
 from collections import Counter
 from functools import lru_cache
@@ -74,12 +73,6 @@ def _selection(context):
     return profile,family,recent,words
 
 def candidate_pool(context):
-    """Return the technically compatible visual recall pool before prompt truncation.
-
-    The ordinary catalog path still owns file integrity, perspective/family and
-    usage-history rules.  A semantic selector may rank this metadata, but it
-    never gets to introduce an unknown asset ID or bypass those rules.
-    """
     profile,family,recent,_=_selection(context)
     images=[]
     for key,entry in catalog().items():

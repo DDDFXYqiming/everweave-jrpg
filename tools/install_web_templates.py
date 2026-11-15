@@ -1,4 +1,3 @@
-"""从 Godot 官方发布包按需安装当前版本的单线程 Web 导出模板。"""
 from __future__ import annotations
 
 import io

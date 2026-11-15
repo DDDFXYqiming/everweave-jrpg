@@ -58,7 +58,6 @@ def _mission_status(keys, missions):
 
 
 def retrieve(world, rid=None):
-    """从权威状态派生有界上下文，较早未兑现目标保留独立名额。"""
     state = world.state or {}
     adventure = state.get('adventure', {})
     rid = rid or state.get('current')

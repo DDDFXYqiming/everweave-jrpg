@@ -1,4 +1,3 @@
-"""The live model authors an executable region, not a fixed quest template."""
 import copy
 from .visuals import VISUAL_PROMPT
 
@@ -233,7 +232,6 @@ def prompt(kind,hybrid=False):
 
 
 def model_context(context,kind,hybrid=False):
-    """Keep internal validation context complete; project only relevant model input."""
     if kind!='region' or context.get('content_version')!=2:
         result=copy.deepcopy(context)
         if hybrid:

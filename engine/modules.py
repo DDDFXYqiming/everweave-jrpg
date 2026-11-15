@@ -1,4 +1,3 @@
-"""Optional reviewed abilities expand to the same bounded DSL as authored rules."""
 import copy
 import hashlib
 import json
@@ -14,7 +13,6 @@ def menu():
     return [dict(id=k,description=v['description'],args=v['args'],actions=[a['id'].replace('@id','<id>') for a in v['program'].get('actions',[])]) for k,v in definitions().items()]
 
 def expand(raw,kind):
-    """Return independent data; never mutate the rejected response used for repair."""
     if not isinstance(raw,dict) or not isinstance(raw.get(kind),dict):return raw,[]
     result=copy.deepcopy(raw);body=result[kind];specs=body.pop('modules',[])
     if not isinstance(specs,list) or len(specs)>8:raise InvalidPatch('modules must have 0..8 entries',path=kind+'.modules')

@@ -1,4 +1,3 @@
-"""Native integration test with an isolated standard-library server, no cloud calls."""
 from pathlib import Path
 import json
 import secrets

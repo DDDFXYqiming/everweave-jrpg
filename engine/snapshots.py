@@ -1,4 +1,3 @@
-"""地区投影、只读条件与事务地区回滚的运行时边界。"""
 import copy
 import uuid
 from collections import OrderedDict

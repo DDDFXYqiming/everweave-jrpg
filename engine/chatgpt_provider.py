@@ -1,4 +1,3 @@
-"""Direct ChatGPT subscription Responses SSE transport for game JSON."""
 import json
 from collections import Counter
 import hashlib
@@ -72,7 +71,6 @@ def wait_retry(cancel,delay):
 
 
 def set_read_timeout(response,seconds):
-    """尽力让阻塞读取服从顶层任务的剩余时限。"""
     try:response.fp.raw._sock.settimeout(max(.1,min(180.0,seconds)))
     except (AttributeError,OSError):pass
 

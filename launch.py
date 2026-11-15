@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""Launch Godot and its local state helper, preparing missing local asset caches.
-ChatGPT subscription OAuth is stored outside saves; paid APIs are explicit options.
-The only command-line token is a per-launch local loopback session credential.
-"""
 from __future__ import annotations
 import argparse
 import json

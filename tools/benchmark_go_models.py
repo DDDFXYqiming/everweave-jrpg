@@ -1,4 +1,3 @@
-"""在隔离存档上比较 Go 模型的生成速度与游戏内容契约。"""
 from __future__ import annotations
 
 import argparse

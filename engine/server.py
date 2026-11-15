@@ -1,4 +1,3 @@
-"""Loopback-only authenticated bridge. This is a local helper, not a hosted service."""
 import argparse
 import hmac
 import json

@@ -1,4 +1,3 @@
-"""把自然语言限定为当前已有动作的单次选择，执行仍归权威世界所有。"""
 import copy
 import json
 import secrets

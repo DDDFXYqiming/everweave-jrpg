@@ -1,4 +1,3 @@
-"""Global creative definitions and work orders; all facts live in the world store."""
 import copy
 import hashlib
 import json
@@ -87,7 +86,6 @@ def validate(raw,scope,regions,existing=None):
     return out
 
 def check_mission_graph(out,old):
-    """规划期任务图硬规则：结局可通关的结构前提，违反时整份计划打回重写。"""
     from .diagnostics import issue
     missions={**old.get('missions',{}),**{m['id']:m for m in out['missions']}}
     finals=[e for e in list(old.get('endings',{}).values())+out['endings'] if e['final']]
@@ -137,7 +135,6 @@ def install(world,raw,mapping,cid,prefix):
     if changed:adv['revision']+=1
 
 def dependencies(world,ctx):
-    """Versions only for the identities and work this author actually consumes."""
     adv=state(world)
     if not adv:return None
     contract=ctx.get('content_contract',{})

@@ -1,8 +1,6 @@
-"""Player knowledge views, independent of LLM context windows and generation."""
 import copy
 
 def player_quests(world):
-    """Player knowledge, shared by HUD, journal, atlas and test observations."""
     from .adventure import visible
     s=world.state or {};adv=s.get('adventure');result=[];seen=set()
     if adv:

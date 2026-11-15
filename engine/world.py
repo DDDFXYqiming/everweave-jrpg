@@ -1,4 +1,3 @@
-"""Authoritative JRPG state machine. The model proposes content, never outcomes."""
 import copy
 import random
 import threading

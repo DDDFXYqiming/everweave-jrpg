@@ -1,4 +1,3 @@
-"""Versioned surface assemblies; placement variation costs no model tokens."""
 import hashlib
 import json
 from pathlib import Path

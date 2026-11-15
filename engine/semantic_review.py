@@ -1,4 +1,3 @@
-"""Extract reviewable promises from normalized executable content."""
 from __future__ import annotations
 
 import copy

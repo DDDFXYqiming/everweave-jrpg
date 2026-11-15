@@ -1,4 +1,3 @@
-"""Build native-client fixtures from actual Python actions; no cloud calls or saves."""
 import json
 from pathlib import Path
 import sys

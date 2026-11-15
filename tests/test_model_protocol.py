@@ -1,4 +1,3 @@
-"""Model-format tolerance must preserve identity, executable behavior and safety."""
 import copy
 import json
 import unittest

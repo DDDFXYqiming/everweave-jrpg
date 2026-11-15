@@ -1,4 +1,3 @@
-"""Web 包装层的同源边界、玩家投影与正常动作检查。"""
 import http.client
 import json
 from pathlib import Path

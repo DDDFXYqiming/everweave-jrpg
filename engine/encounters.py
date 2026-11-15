@@ -1,4 +1,3 @@
-"""Optional authored overworld threats, advanced by normal player turns."""
 from collections import deque
 from .catalog import BLOCKED
 from .scene import cells_for, solid_at

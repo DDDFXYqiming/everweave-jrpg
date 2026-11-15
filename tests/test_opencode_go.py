@@ -1,4 +1,3 @@
-"""验证本机 Go 凭据仅用于明确选择的官方端点。"""
 import os
 import io
 import json

@@ -1,8 +1,3 @@
-"""Gas-metered interpreter for model-authored game rules.
-
-Programs are JSON syntax trees, never host-language scripts. One caller-owned
-transaction encloses a player action, its hooks, timers and objective rewards.
-"""
 import copy
 import math
 from collections import deque
@@ -330,7 +325,6 @@ class Runtime:
             self.world.persist(self.region, event=event)
 
     def _resource_hint(self, condition):
-        """Explain only public inventory/stat shortages, never hidden puzzle state."""
         if not isinstance(condition,dict):return ''
         args=condition.get('args',[])
         if condition.get('op')=='and':
@@ -397,7 +391,6 @@ class Runtime:
 
 
 def check_references(region, items):
-    """Validate static references in definitions without executing gameplay rewards."""
     objects = {'player', 'enemy', 'self'}
     for e in region['entities']+region.get('props', []):
         if 'id' not in e: continue
@@ -441,7 +434,6 @@ def check_references(region, items):
 
 
 def design_record(plan):
-    """Store compact structural signatures; labels and colors do not fake novelty."""
     import hashlib
     import json
     def digest(value):

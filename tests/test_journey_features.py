@@ -1,4 +1,3 @@
-"""Player knowledge, authored possessions and durable history regressions."""
 import copy
 import json
 import tempfile

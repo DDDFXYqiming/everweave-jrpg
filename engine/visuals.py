@@ -1,4 +1,3 @@
-"""Bounded pixel drawing data. The model authors geometry, never executable code."""
 import re
 import copy
 

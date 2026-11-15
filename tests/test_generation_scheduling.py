@@ -1,4 +1,3 @@
-"""Real worker concurrency, causal invalidation and usable exit contracts."""
 import copy
 import json
 import threading

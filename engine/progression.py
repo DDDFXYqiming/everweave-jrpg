@@ -1,8 +1,3 @@
-"""章节抽象图上的精确进度搜索：证明能到达终点，并检查软锁。
-
-图由 campaign.graph_from_plan / graph_from_state 生成。地区内部如何兑现承诺不在这里证明，
-这里只把「到达地区即可兑现它承诺的旗标、道具、能力」当作公理。
-"""
 from collections import deque
 from .diagnostics import InvalidPatch, issue
 
@@ -17,13 +12,12 @@ def search(graph):
     item_keys = sorted(graph['items'])
     mission_keys = sorted(graph['missions'])
     missions = graph['missions']
-    # 生产地区可以把旗标写成任何被条件引用过的值，失败分支因此也会被搜索到
-    values = {k: {graph['flags'][k]} for k in flag_keys}
+    flag_domains = {k: {graph['flags'][k]} for k in flag_keys}
     for conditions in _condition_lists(graph):
         for c in conditions:
             if 'flag' in c:
-                values[c['flag']].add(c['eq'])
-    values = {k: sorted(v, key=repr) for k, v in values.items()}
+                flag_domains[c['flag']].add(c['eq'])
+    flag_domains = {k: sorted(v, key=repr) for k, v in flag_domains.items()}
     finals = [e for e in graph['endings'] if e['final']]
     local = [e for e in finals if all(not missions[m]['frozen'] or missions[m]['status'] == 'complete' for m in e['requires'])]
     target = '最终结局' if local else '本章完成条件'
@@ -34,7 +28,6 @@ def search(graph):
                     abilities=abilities, missions=dict(zip(mission_keys, statuses)))
 
     def settle(state):
-        """复刻运行时 refresh：任务完成/失败与隐藏路线揭示，直到不再变化。"""
         region, flags, items, abilities, statuses, granted, revealed = state
         notes = []
         while True:
@@ -83,7 +76,7 @@ def search(graph):
         for i, key in enumerate(flag_keys):
             if graph['flag_sources'][key] != region or not set(graph['flag_gates'].get(key, [])) <= complete:
                 continue
-            for value in values[key]:
+            for value in flag_domains[key]:
                 if value != flags[i]:
                     yield (region, flags[:i] + (value,) + flags[i + 1:], items, abilities, statuses, granted, revealed), f'在 {region} 把旗标 {key} 设为 {value!r}'
         for i, key in enumerate(item_keys):

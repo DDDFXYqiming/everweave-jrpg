@@ -1,4 +1,3 @@
-"""Test-authored programs. Never imported by live generation or used as fallback."""
 import copy
 from visual_fixtures import visual_fixture
 

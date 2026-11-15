@@ -1,9 +1,7 @@
-"""Validated worker output: portable skills, cast bindings and choice scenes."""
 import copy
 from .diagnostics import InvalidPatch
 
 def ability_contract_errors(body,kind,ctx):
-    """Independent checks also run when another part of the JSON is malformed."""
     from .diagnostics import issue
     if not isinstance(body,dict):return []
     skills=(ctx or {}).get('adventure_state',{} ) or {}

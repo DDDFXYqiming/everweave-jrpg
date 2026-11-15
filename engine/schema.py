@@ -1,4 +1,3 @@
-"""Untrusted JSON -> bounded, allow-listed data. No scripts, URLs or file access."""
 import copy
 import json
 import math
@@ -234,7 +233,6 @@ def _parse_patch(raw,expected,context=None):
  return out
 
 def _independent_errors(raw,expected,context=None):
- """Collect independent component failures without executing any content."""
  if not isinstance(raw,dict) or not isinstance(raw.get(expected),dict):return []
  from .content import program,scene,state_values,expression,effects,item_use
  from .visuals import validate_visuals

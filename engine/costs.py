@@ -1,4 +1,3 @@
-"""玩家主动支付的共同约定；环境伤害仍由原来的资源效果处理。"""
 from .diagnostics import InvalidPatch
 
 

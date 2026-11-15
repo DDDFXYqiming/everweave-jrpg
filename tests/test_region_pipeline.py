@@ -1,4 +1,3 @@
-"""The split pipeline shares one identity contract and really overlaps its workers."""
 import copy
 import json
 import threading

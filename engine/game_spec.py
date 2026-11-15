@@ -1,4 +1,3 @@
-"""An immutable per-world selection of systems and bounded player resources."""
 import copy
 from .diagnostics import InvalidPatch
 

@@ -1,4 +1,3 @@
-"""Rotating JSONL diagnostics. Never records credentials or full model prompts."""
 from datetime import datetime, timezone
 import json
 import logging

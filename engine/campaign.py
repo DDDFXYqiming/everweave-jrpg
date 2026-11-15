@@ -1,4 +1,3 @@
-"""Persistent chapter plans, shared story state, and real bidirectional world links."""
 import copy
 import json
 import hashlib
@@ -9,7 +8,6 @@ from . import game_spec
 STATUSES=('active','complete','failed')
 
 def conditions(raw,scope):
-    """scope 给出可引用的 flags（含类型）、items、skills、missions；条件之间只有 AND。"""
     from .schema import arr,obj,ident
     from .content import integer
     out=[]
@@ -122,7 +120,6 @@ def validate(raw,first=True,existing=None,corrections=None):
     return out
 
 def satisfied(conditions,facts):
-    """facts={flags,items,abilities,missions}；items 用本章道具 ID 计数，missions 为 ID→状态。"""
     def test(c):
         if 'flag' in c:return facts['flags'].get(c['flag'])==c['eq']
         if 'item' in c:return facts['items'].get(c['item'],0)>=c['count']
@@ -139,7 +136,6 @@ def rename(conditions,missions):
     return [dict(c,mission=missions.get(c['mission'],c['mission'])) if 'mission' in c else c for c in conditions]
 
 def graph_from_plan(plan,existing):
-    """规划期：本章任务从 active 开始搜索，旧章节任务冻结在现有状态。"""
     adv=plan.get('adventure',{})
     missions={k:dict(kind=m['kind'],depends=m['depends'],when=[],fail_when=[],status=m['status'],frozen=True) for k,m in existing.get('missions',{}).items()}
     missions.update({m['id']:dict(kind=m['kind'],depends=m['depends'],when=m['when'],fail_when=m['fail_when'],status='active',frozen=False) for m in adv.get('missions',[])})
@@ -150,7 +146,6 @@ def graph_from_plan(plan,existing):
                 missions=missions,endings=list(existing.get('endings',{}).values())+adv.get('endings',[]),complete_when=plan['complete_when'])
 
 def graph_from_state(state):
-    """运行期：从当前位置与真实状态出发，只搜索当前章节。"""
     cid=state['campaign']['active'];c=state['campaign']['chapters'][cid];adv=state.get('adventure') or {}
     regions=[r['id'] for r in c['regions']];view=facts(state,c)
     jobs=[j for j in adv.get('jobs',{}).values() if j['chapter_id']==cid]

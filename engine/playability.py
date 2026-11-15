@@ -1,4 +1,3 @@
-"""隔离执行与保守的进展检查。未知表达式不会被误判为无解。"""
 import copy
 import itertools
 from collections import OrderedDict
@@ -21,7 +20,6 @@ def clone(world):
 
 
 def check_entry(world,parsed,context):
-    """在真实解释器的独立存档中发布，并验证每个实际入口。"""
     from . import gameplay
     probe=clone(world)
     try:
@@ -44,7 +42,6 @@ def check_entry(world,parsed,context):
 
 
 def replay(world,actions,goal):
-    """只重放正常动作；目标由调用方传入，不授予状态或物品。"""
     if len(actions)>512:raise InvalidPatch('验收路线超过 512 个动作')
     probe=clone(world)
     try:
@@ -61,7 +58,6 @@ UNKNOWN=object()
 
 
 def check_progress(world,body,context):
-    """宽松固定点检查旗标、钥匙、资源与路线的确定死锁。"""
     from .campaign import chapter
     from .costs import requirements
     chapter_data=chapter(world.state,context['target'])

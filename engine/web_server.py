@@ -1,4 +1,3 @@
-"""用同一个 Godot 客户端的 Web 导出文件提供本机浏览器游戏。"""
 import base64
 import hashlib
 import hmac

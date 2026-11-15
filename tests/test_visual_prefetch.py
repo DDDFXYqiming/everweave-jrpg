@@ -1,4 +1,3 @@
-"""Visual authoring and proactive whole-frontier contracts."""
 import copy
 import unittest
 import threading

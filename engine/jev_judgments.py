@@ -1,10 +1,3 @@
-"""Narrow, optional judgments through TypeSafe's official Jev service.
-
-Code owns candidate recall, identifiers, thresholds and execution.  Jev only
-selects among supplied asset IDs and checks bounded semantic evidence.  Every
-public function is fail-open and returns an explicit status so an unavailable
-review can never be mistaken for a passing review.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +21,7 @@ _CACHE_LIMIT=128
 
 def capability():
     if not os.environ.get('TYPESAFE_API_KEY','').strip():return dict(ready=False,reason='missing_api_key')
-    try:import typesafe_sdk  # noqa: F401
+    try:import typesafe_sdk
     except ImportError:return dict(ready=False,reason='sdk_not_installed')
     return dict(ready=True,provider='TypeSafe official API',model=TYPESAFE_MODEL,base_url=TYPESAFE_BASE_URL)
 
@@ -110,7 +103,6 @@ def _asset_roles(slot):
 
 
 def rank_assets(context,region_design,fallback,cancel_event=None,deadline=None):
-    """Select a compact, slot-aware catalog while preserving a safe fallback."""
     base=copy.deepcopy(fallback or {});metrics=_request_metrics()
     available=capability()
     if not available['ready']:

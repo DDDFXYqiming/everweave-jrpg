@@ -1,6 +1,3 @@
-"""Render authoritative OFFLINE map data with the same atlas. Not a Godot screenshot.
-Optional developer utility; requires Pillow only when regenerating the preview.
-"""
 from pathlib import Path
 import json
 import sys

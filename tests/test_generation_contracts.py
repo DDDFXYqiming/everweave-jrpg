@@ -1,4 +1,3 @@
-"""Runtime contracts for content invented after the world has already started."""
 import copy
 import json
 import os

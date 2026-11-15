@@ -56,11 +56,10 @@ var poll_http: HTTPRequest
 var action_busy: bool = false
 var pending_move: bool = false
 var blocked_move_until: int = 0
-# 鼠标点击寻路：每步仍走 /action move，规则与遇敌照常由服务端结算
 var walk_path: Array = []
 var walk_interact: String = ""
 var walk_region: String = ""
-# 按住的方向只认游戏收到的按键事件；Web 版可能丢失松键事件，靠系统连发续期，超时视为已松开
+# Web 导出会丢失松键事件（Chrome 焦点切换、输入法），按住只能靠系统连发续期
 const MOVE_DIRECTIONS := {KEY_W: Vector2i.UP, KEY_UP: Vector2i.UP, KEY_S: Vector2i.DOWN, KEY_DOWN: Vector2i.DOWN, KEY_A: Vector2i.LEFT, KEY_LEFT: Vector2i.LEFT, KEY_D: Vector2i.RIGHT, KEY_RIGHT: Vector2i.RIGHT}
 var held_moves: Dictionary = {}
 var poll_busy: bool = false
@@ -1438,12 +1437,10 @@ func _cells(obj: Dictionary) -> Array:
 	return result
 
 func _walk_route(goals: Dictionary, aim: Vector2i) -> Array:
-	"""与 tools/play_session.route 相同的通行判断；够不到目标时走到离它最近的可达格。"""
 	var region: Dictionary = state.region
 	var occupied: Dictionary = {}
 	for group in ["props", "entities"]:
 		for obj in region.get(group, []):
-			# 出口实体可以站上去，服务端 move 同样放行
 			if bool(obj.get("spent", false)) or str(obj.get("kind", "")) == "exit" or not bool(obj.get("solid", group == "entities")): continue
 			for cell in _cells(obj): occupied[cell] = true
 	var width: int = int(region.width)
