@@ -102,6 +102,8 @@ var effort_select: OptionButton
 var effort_help: Label
 var start_button: Button
 var last_action_error: String = ""
+var action_body: Dictionary = {}
+const LOCKED_CUE := {"score": {"bpm": 480, "voices": [{"wave": "square", "gain": 0.22, "notes": [[45, 0.5], [0, 0.25], [42, 0.9]]}, {"wave": "noise", "gain": 0.12, "notes": [[60, 0.25], [0, 0.5], [60, 0.3]]}]}}
 var replace_dialog: ConfirmationDialog
 var pending_world_configuration: Dictionary = {}
 var budget_input: SpinBox
@@ -226,7 +228,7 @@ func _box(fill: Color, outline: Color, radius: int = 3) -> StyleBoxFlat:
 	return s
 
 static func pixel_size(requested: int) -> int:
-	if requested < 20: return 12
+	if requested < 15: return 12
 	if requested < 34: return 24
 	return 36 if requested < 44 else 48
 
@@ -243,7 +245,7 @@ func _label(parent: Node, text: String, font_size: int = 16, color: Color = Colo
 func _button(parent: Node, text: String, callback: Callable) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.add_theme_font_size_override("font_size",12)
+	button.add_theme_font_size_override("font_size",24)
 	button.custom_minimum_size.y = 38
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(callback)
@@ -892,6 +894,7 @@ func _post(route: String, body: Dictionary) -> void:
 	start_button.disabled = true
 	continue_button.disabled = true
 	action_route = route
+	action_body = body
 	action_instance_id = service_connection.expected_instance_id
 	var result: Error = action_http.request(backend_url + route, _headers(), HTTPClient.METHOD_POST, JSON.stringify(body))
 	if result != OK:
@@ -942,6 +945,9 @@ func _action_complete(result: int, code: int, _headers_unused: PackedStringArray
 	if data.has("error"):
 		last_action_error = str(data.error)
 		_connection_error(str(data.error))
+		if not transport_failed and action_route == "/action" and not was_move and is_instance_valid(world_view) and game.visible:
+			world_view.bark(L.system_text(str(data.error)), str(action_body.get("id", "")))
+			if is_instance_valid(soundscape): soundscape.play_cue(LOCKED_CUE, 1.0)
 		switch_after_action = false
 		start_button.disabled = not connection_ready
 		continue_button.disabled = not connection_ready or not bool(state.get("started", false))
@@ -1160,12 +1166,12 @@ func _render_failures(tasks: Array) -> void:
 		var row := VBoxContainer.new()
 		failure_list.add_child(row)
 		var kind: String = L.t("地区内容") if str(task.kind) == "region" else L.t("世界更新")
-		_label(row, L.t("%s · %s未完成") % [str(task.name), kind], 14, Color("e7a69d"))
+		_label(row, L.t("%s · %s未完成") % [str(task.name), kind], 24, Color("e7a69d"))
 		var attempts: int = int(task.get("attempts", 0))
 		if attempts > 1:
-			_label(row, L.t("自动尝试 %d 次后仍未完成。") % attempts, 12, MUTED)
+			_label(row, L.t("自动尝试 %d 次后仍未完成。") % attempts, 24, MUTED)
 		else:
-			_label(row, L.t("后台暂时没有完成这项内容。"), 12, MUTED)
+			_label(row, L.t("后台暂时没有完成这项内容。"), 24, MUTED)
 		var details: Array = task.get("issues", [])
 		var reason: String = str(task.get("message", L.t("生成未完成")))
 		if not details.is_empty():
@@ -1173,7 +1179,7 @@ func _render_failures(tasks: Array) -> void:
 			reason = (field_path + "\n" if field_path != "$" else "") + str(details[0].get("message", reason))
 			if details.size() > 1: reason += L.t("\n另有 %d 项问题，重试时一并修复。") % (details.size() - 1)
 		var friendly: Dictionary = {"format":L.t("部分内容需要调整。"), "reference":L.t("物品或人物信息还需核对。"), "gameplay":L.t("道路或交互需要修复。"), "provider":L.t("生成服务暂时没有完成请求。")}
-		var detail_label := _label(row, str(friendly.get(str(task.get("category","format")),L.t("内容准备未完成。"))), 12, MUTED)
+		var detail_label := _label(row, str(friendly.get(str(task.get("category","format")),L.t("内容准备未完成。"))), 24, MUTED)
 		detail_label.tooltip_text = reason + "\n" + JSON.stringify(details, "  ")
 
 func _clear_modal() -> void:
@@ -1186,6 +1192,12 @@ func _fit_modal() -> void:
 	if not is_instance_valid(modal_scroll) or not is_instance_valid(world_view): return
 	var available_height: float = maxf(160,world_view.size.y - 48)
 	modal_scroll.custom_minimum_size.y = clampf(modal_stack.get_combined_minimum_size().y + 8,100,minf(610,available_height))
+
+func _close_ui() -> void:
+	_send_action({"op": "close"})
+	if action_busy and action_body.get("op") == "close":
+		state["ui"] = {}
+		_render_modal()
 
 func _render_modal() -> void:
 	game.show_aux(local_panel)
@@ -1232,7 +1244,7 @@ func _render_modal() -> void:
 		var messages: Array[String] = []
 		var log_lines: Array = battle.get("log", [])
 		for i in range(maxi(0, log_lines.size() - 4), log_lines.size()): messages.append(str(log_lines[i]))
-		_label(modal_stack, "\n".join(messages), 14)
+		_label(modal_stack, "\n".join(messages), 24)
 		var buttons := HFlowContainer.new()
 		modal_stack.add_child(buttons)
 		var generated_actions: Array = state.get("available_actions", [])
@@ -1242,7 +1254,7 @@ func _render_modal() -> void:
 				var b := _button(buttons, str(index + 1) + " " + str(entry.label), _send_action.bind({"op":"combat","move":"rule:"+str(entry.id)}))
 				b.disabled = not bool(entry.enabled)
 				b.tooltip_text = str(entry.description)
-				if b.disabled: _label(modal_stack, str(entry.label) + "：" + L.system_text(str(entry.get("blocked_reason", entry.description))), 13, MUTED)
+				if b.disabled: _label(modal_stack, str(entry.label) + "：" + L.system_text(str(entry.get("blocked_reason", entry.description))), 24, MUTED)
 			_button(buttons, L.t("撤離 · Esc"), _send_action.bind({"op":"combat","move":"flee"}))
 			return
 		for entry in [[L.t("1 攻击"), "attack"], [L.t("2 星火术 · 5MP"), "skill"], [L.t("3 防御"), "defend"], [L.t("4 药剂"), "potion"], [L.t("5 撤离"), "flee"]]:
@@ -1259,7 +1271,7 @@ func _render_modal() -> void:
 			elif waiting_phase == "ready": explanation = L.t("地图已准备好，按 E 或点击下方按钮即可进入。")
 			_label(modal_stack, explanation, 18)
 			if waiting_phase == "ready": _button(modal_stack, L.t("进入 ") + str(ui.get("name", L.t("下一地区"))) + " · E", _send_action.bind({"op":"enter_exit"}))
-			_button(modal_stack, L.t("继续探索当前地区 · Esc"), _send_action.bind({"op":"close"}))
+			_button(modal_stack, L.t("继续探索当前地区 · Esc"), _close_ui)
 			return
 		var modal_title: String = str(ui.get("title",""))
 		_label(modal_stack,L.t(modal_title) if ui.get("system_title",false) else modal_title,24,GOLD)
@@ -1289,7 +1301,7 @@ func _render_modal() -> void:
 			b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			b.disabled = not bool(entry.enabled)
 			b.tooltip_text = str(entry.description)
-			if b.disabled: _label(modal_stack, L.system_text(str(entry.get("blocked_reason", entry.description))), 14, MUTED)
+			if b.disabled: _label(modal_stack, L.system_text(str(entry.get("blocked_reason", entry.description))), 24, MUTED)
 		for ch in ui.get("choices", []):
 			var choice_button := _button(modal_stack, str(ch.text), _send_action.bind({"op": "choice", "id": ch.id}))
 			choice_button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1297,7 +1309,7 @@ func _render_modal() -> void:
 			for item in ui.get("goods", []):
 				var b := _button(modal_stack, "%s  ·  %d G" % [str(item.name), int(item.price)], _send_action.bind({"op": "buy", "id": item.id}))
 				b.disabled = int(state.player.gold) < int(item.price)
-		_button(modal_stack, L.t("返回  ·  E / Esc"), _send_action.bind({"op": "close"}))
+		_button(modal_stack, L.t("返回  ·  E / Esc"), _close_ui)
 		return
 	if local_panel == "inventory":
 		Fieldbook.inventory(self,modal_stack)
@@ -1314,7 +1326,7 @@ func _auto_dismiss_message(signature_value: String) -> void:
 	if signature_value != modal_signature: return
 	var current: Variant = state.get("ui", {})
 	if current is Dictionary and not current.is_empty() and str(current.get("kind", "")) == "message":
-		_send_action({"op": "close"})
+		_close_ui()
 
 
 func _exit_wait_phase(ui: Dictionary) -> String:
@@ -1390,7 +1402,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if moves.has(key): _send_action({"op": "combat", "move": moves[key]})
 	elif not state.get("ui", {}).is_empty():
 		if key in [KEY_E, KEY_SPACE] and _exit_wait_phase(state.ui) == "ready": _send_action({"op":"enter_exit"})
-		elif key in [KEY_E, KEY_ESCAPE, KEY_SPACE]: _send_action({"op": "close"})
+		elif key in [KEY_E, KEY_ESCAPE, KEY_SPACE]: _close_ui()
 	elif key == KEY_ESCAPE:
 		if local_panel.is_empty():
 			_toggle_aux("pause")

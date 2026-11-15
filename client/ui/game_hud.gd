@@ -138,11 +138,12 @@ func build(controller) -> void:
 	main.hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	main.hint_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	status_button = main._button(footer,"",main._toggle_aux.bind("journey"))
-	status_button.add_theme_font_size_override("font_size",12)
+	status_button.add_theme_font_size_override("font_size",24)
 	status_button.add_theme_stylebox_override("normal",StyleBoxEmpty.new())
 	sound_button = icon_button(footer,"sound_on",L.t("声音 · M"),main._toggle_music)
 	sound_button.toggle_mode = true
 	main.panel_buttons.settings = icon_button(footer,"settings",L.t("菜单 · Esc"),main._toggle_aux.bind("pause"))
+	for passive in [header, footer]: _see_through(passive)
 
 	main.modal_overlay = Control.new()
 	map_stack.add_child(main.modal_overlay)
@@ -229,6 +230,11 @@ func build(controller) -> void:
 	pause_menu.hide()
 	AudioPrefs.changed.connect(sync_audio)
 	sync_audio()
+
+func _see_through(node: Node) -> void:
+	if node is BaseButton or node is LineEdit or node is TextEdit: return
+	if node is Control: node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for child in node.get_children(): _see_through(child)
 
 func sync_audio() -> void:
 	sound_button.set_pressed_no_signal(not AudioPrefs.master_muted)

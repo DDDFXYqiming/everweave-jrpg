@@ -2,7 +2,7 @@ extends RefCounted
 
 const NIGHT_WORDS: Array[String] = ["夜", "深宵", "午夜", "月光", "月下", "星空", "night", "midnight", "moon", "nocturn"]
 const DUSK_WORDS: Array[String] = ["黄昏", "暮", "夕", "晨雾", "破晓", "dusk", "twilight", "sunset", "dawn"]
-const INDOOR_WORDS: Array[String] = ["室内", "屋内", "殿内", "厅", "堂内", "地下", "地窖", "洞", "窟", "隧道", "墓", "舱", "indoor", "interior", "cellar", "cave", "crypt", "dungeon", "tunnel", "hall"]
+const INDOOR_WORDS: Array[String] = ["室内", "内室", "密室", "房间", "卧室", "书房", "库房", "厨房", "病房", "医务", "阁楼", "藏经阁", "礼拜堂", "教堂", "屋内", "殿内", "厅", "堂内", "地下", "地窖", "洞", "窟", "隧道", "墓", "舱", "indoor", "interior", "cellar", "cave", "crypt", "dungeon", "tunnel", "hall"]
 const GRIM_WORDS: Array[String] = ["写实", "阴", "冷", "湿", "暗", "悬疑", "废", "grim", "dark", "cold", "gloom", "realistic"]
 const WARM_WORDS: Array[String] = ["暖", "灯", "火", "烛", "炉", "warm", "lamp", "fire", "candle", "lantern"]
 
@@ -21,7 +21,7 @@ static func _clock_night(minutes: float) -> float:
 static func derive(region: Dictionary, minutes: float) -> Dictionary:
 	var visuals: Dictionary = region.get("visuals", {})
 	var palette: Dictionary = visuals.get("palette", {})
-	var text: String = (str(visuals.get("style", "")) + " " + str(region.get("biome", "")) + " " + str(region.get("name", ""))).to_lower()
+	var text: String = (str(visuals.get("style", "")) + " " + str(region.get("biome", "")) + " " + str(region.get("name", "")) + " " + str(region.get("layout", ""))).to_lower()
 	var weather: String = str(region.get("weather", "clear"))
 	var indoor: bool = _has(text, INDOOR_WORDS)
 	var mood: String = "night" if _has(text, NIGHT_WORDS) else ("dusk" if _has(text, DUSK_WORDS) else "day")

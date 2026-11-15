@@ -50,6 +50,7 @@ var overlay: Control
 var view_center := Vector2.ZERO
 var fade: float = 0.0
 var fade_tween: Tween
+var bubble: Dictionary = {}
 
 func _ready() -> void:
 	clip_contents = true
@@ -73,6 +74,7 @@ func _ready() -> void:
 	actors = Actors.new()
 	actors.sprite_for = _sprite
 	actors.recipe_for = _recipe
+	actors.animated_for = _animated
 	stage.add_child(actors)
 	camera = Camera2D.new()
 	stage.add_child(camera)
@@ -117,6 +119,13 @@ func _sprite(key: String, seconds: float) -> Texture2D:
 		atlas_cache[key] = texture
 	return atlas_cache[key]
 
+func _animated(key: String) -> bool:
+	return not generated.is_empty() and generated.get("__animations", {}).has(VisualCompiler.resolve(key, generated))
+
+func bark(text: String, entity_id: String = "") -> void:
+	bubble = {"text": text, "entity": entity_id, "start": elapsed, "until": elapsed + clampf(1.6 + text.length() * 0.12, 3.5, 8.0)}
+	actors.shake(entity_id)
+
 func _recipe(key: String) -> Dictionary:
 	if generated.is_empty(): return {}
 	return region.get("visuals", {}).get("sprites", {}).get(VisualCompiler.resolve(key, generated), {})
@@ -149,6 +158,7 @@ func update_world(data: Dictionary) -> void:
 	if entering:
 		print("ATMOSPHERE ", JSON.stringify({"region": region.get("id", ""), "name": region.get("name", "")}), " ", Atmosphere.summary(atmosphere))
 		if not current_id.is_empty(): _transition()
+		bubble = {}
 		current_id = str(region.get("id", ""))
 	shade.color = atmosphere.ambient
 	post.set_shader_parameter("grade", Vector3(atmosphere.grade.r, atmosphere.grade.g, atmosphere.grade.b))
@@ -206,6 +216,7 @@ func _draw_overlay() -> void:
 			overlay.draw_rect(Rect2(point.floor(), Vector2(3, 3)), Color(0.50, 0.78, 0.74, 0.35))
 		return
 	_draw_minimap()
+	_draw_bubble()
 	_draw_nearby_hint()
 
 func _draw_minimap() -> void:
@@ -232,8 +243,35 @@ func _draw_minimap() -> void:
 	overlay.draw_rect(Rect2((origin + Vector2(float(p.get("x", 0)), float(p.get("y", 0))) * map_scale - Vector2(2, 2)).floor(), Vector2(5, 5)), Color("f7e0a4"))
 	overlay.draw_string(font, origin + Vector2(3, 146), L.t("旅图 · G") if hovered else "G", HORIZONTAL_ALIGNMENT_LEFT, 120, 12, Color(Color("d7c59d"), opacity))
 
+func _screen(point: Vector2) -> Vector2:
+	return (viewport.canvas_transform * point) * float(pixel_scale)
+
+func _draw_bubble() -> void:
+	if bubble.is_empty(): return
+	if elapsed > float(bubble.until):
+		bubble = {}
+		return
+	var text: String = str(bubble.text)
+	var shown: String = text.left(int((elapsed - float(bubble.start)) * 40.0) + 1)
+	var width: float = minf(460.0, font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x + 2.0)
+	var lines: Vector2 = font.get_multiline_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, width, 24)
+	var box_size := Vector2(width + 32.0, lines.y + 24.0)
+	var anchor: Vector2 = _screen(actors.head_point("")).floor()
+	var at := Vector2(clampf(anchor.x - box_size.x * 0.5, 12.0, size.x - box_size.x - 12.0), maxf(12.0, anchor.y - box_size.y - 24.0)).floor()
+	var ink := Color("efe3c2")
+	var paper := Color(0.035, 0.05, 0.07, 0.96)
+	overlay.draw_rect(Rect2(at, box_size), paper)
+	overlay.draw_rect(Rect2(at, box_size).grow(-2), ink, false, 2.0)
+	var tail_x: float = clampf(anchor.x, at.x + 18.0, at.x + box_size.x - 18.0)
+	for row in range(4):
+		var half: float = float(3 - row) * 3.0 + 3.0
+		overlay.draw_rect(Rect2(Vector2(tail_x - half, at.y + box_size.y - 2.0 + row * 3.0), Vector2(half * 2.0, 3.0)), paper)
+		overlay.draw_rect(Rect2(Vector2(tail_x - half - 3.0, at.y + box_size.y - 2.0 + row * 3.0), Vector2(3.0, 3.0)), ink)
+		overlay.draw_rect(Rect2(Vector2(tail_x + half, at.y + box_size.y - 2.0 + row * 3.0), Vector2(3.0, 3.0)), ink)
+	overlay.draw_multiline_string(font, at + Vector2(16.0, 12.0 + font.get_ascent(24)), shown, HORIZONTAL_ALIGNMENT_LEFT, width, 24, -1, ink)
+
 func _draw_nearby_hint() -> void:
-	if not snapshot.get("ui", {}).is_empty() or snapshot.get("battle") is Dictionary: return
+	if not bubble.is_empty() or not snapshot.get("ui", {}).is_empty() or snapshot.get("battle") is Dictionary: return
 	var p: Dictionary = snapshot.get("player", {})
 	for e in region.get("entities", []):
 		if bool(e.get("spent", false)): continue

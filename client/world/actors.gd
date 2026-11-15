@@ -2,19 +2,19 @@ extends Node2D
 
 const Walking = preload("res://client/walking.gd")
 const Lighting = preload("res://client/world/lighting.gd")
+const Poses = preload("res://client/world/poses.gd")
 const TILE: float = 16.0
 const STEP_SECONDS: float = 0.14
+const POSED: Array[String] = ["player", "npc", "enemy"]
 
 var sprite_for: Callable
 var recipe_for: Callable
+var animated_for: Callable
 var atmosphere: Dictionary = {}
 var actors: Dictionary = {}
 var player: Node2D
-var player_body: Sprite2D
 var player_cell := Vector2.ZERO
-var player_facing := Vector2i(0, 1)
 var player_tween: Tween
-var step_until: float = 0.0
 var elapsed: float = 0.0
 var shadow_texture: Texture2D
 var ground: Node2D
@@ -50,7 +50,7 @@ func _ellipse() -> Texture2D:
 func foot(cell: Vector2, footprint: Array = [1, 1]) -> Vector2:
 	return (cell + Vector2(float(footprint[0]) * 0.5, 1.0)) * TILE
 
-func _make(key: String, footprint: Array, label: String = "") -> Node2D:
+func _make(key: String, kind: String, footprint: Array, label: String) -> Node2D:
 	var node := Node2D.new()
 	var shadow := Sprite2D.new()
 	shadow.name = "Shadow"
@@ -63,21 +63,39 @@ func _make(key: String, footprint: Array, label: String = "") -> Node2D:
 	body.centered = false
 	node.add_child(body)
 	node.set_meta("key", "")
+	node.set_meta("kind", kind)
+	node.set_meta("dir", "down")
+	node.set_meta("walk_until", 0.0)
 	add_child(node)
 	_skin(node, key, label)
 	return node
 
-func _skin(node: Node2D, key: String, label: String = "") -> void:
+func _skin(node: Node2D, key: String, label: String) -> void:
 	if str(node.get_meta("key")) == key: return
 	node.set_meta("key", key)
 	var body: Sprite2D = node.get_node("Body")
-	body.texture = sprite_for.call(key, elapsed)
-	body.offset = Vector2(-floorf(body.texture.get_width() / 2.0), -body.texture.get_height())
+	var texture: Texture2D = sprite_for.call(key, elapsed)
+	var posed: bool = str(node.get_meta("kind")) in POSED and not animated_for.call(key)
+	node.set_meta("frames", Poses.frames(texture) if posed else {})
+	_pose(node)
 	if node.has_node("Glow"): node.get_node("Glow").free()
-	var light: PointLight2D = Lighting.for_sprite(key + " " + label, recipe_for.call(key), body.texture, atmosphere)
+	var light: PointLight2D = Lighting.for_sprite(key + " " + label, recipe_for.call(key), texture, atmosphere)
 	if light != null:
 		light.name = "Glow"
 		node.add_child(light)
+
+func _pose(node: Node2D) -> void:
+	var body: Sprite2D = node.get_node("Body")
+	var frames: Dictionary = node.get_meta("frames")
+	if frames.is_empty():
+		body.texture = sprite_for.call(str(node.get_meta("key")), elapsed)
+		body.flip_h = str(node.get_meta("dir")) == "left"
+	else:
+		var walking: bool = float(node.get_meta("walk_until")) > elapsed
+		var cycle: Array = frames[str(node.get_meta("dir"))]
+		body.texture = cycle[int(elapsed * 8.0) % 4 if walking else 0]
+		body.flip_h = false
+	body.offset = Vector2(-floorf(body.texture.get_width() / 2.0), -body.texture.get_height())
 
 func sync(data: Dictionary, regenerate: bool) -> void:
 	var incoming: Dictionary = data.get("region", {})
@@ -121,7 +139,7 @@ func _place(id: String, key: String, cell: Vector2, footprint: Array, source: Di
 	var label: String = "" if kind in ["npc", "enemy"] else str(source.get("name", "")) + " " + str(source.get("id", "")) + " " + str(source.get("kind", ""))
 	var node: Node2D = actors.get(id)
 	if node == null:
-		node = _make(key, footprint, label)
+		node = _make(key, kind, footprint, label)
 		node.position = target
 		actors[id] = node
 	else:
@@ -130,12 +148,10 @@ func _place(id: String, key: String, cell: Vector2, footprint: Array, source: Di
 			if node.position.distance_to(target) > TILE * 1.6:
 				node.position = target
 			else:
-				var body: Sprite2D = node.get_node("Body")
-				if absf(target.x - node.position.x) > 0.5: body.flip_h = target.x < node.position.x
+				node.set_meta("dir", Poses.direction(target - node.position))
 				var tween: Tween = node.create_tween()
 				tween.tween_property(node, "position", target, STEP_SECONDS * 1.6)
-				node.set_meta("moving_until", elapsed + STEP_SECONDS * 1.6)
-	node.set_meta("kind", kind)
+				node.set_meta("walk_until", elapsed + STEP_SECONDS * 1.6 + 0.1)
 	node.set_meta("source", source)
 	node.set_meta("cell", cell)
 	node.set_meta("footprint", footprint)
@@ -146,11 +162,9 @@ func _sync_player(p: Dictionary, snap: bool) -> void:
 	var cell := Vector2(float(p.get("x", 0)), float(p.get("y", 0)))
 	var facing: Array = p.get("facing", [0, 1])
 	if player == null:
-		player = _make("hero_0", [1, 1])
+		player = _make("hero_0", "player", [1, 1], "")
 		player.name = "Player"
-		player_body = player.get_node("Body")
-		var lantern: PointLight2D = Lighting.lantern(atmosphere)
-		if lantern != null: player.add_child(lantern)
+		player.add_child(Lighting.lantern(atmosphere))
 		snap = true
 	if snap or cell.distance_to(player_cell) > 1.5:
 		if player_tween != null: player_tween.kill()
@@ -159,32 +173,42 @@ func _sync_player(p: Dictionary, snap: bool) -> void:
 		if player_tween != null: player_tween.kill()
 		player_tween = player.create_tween()
 		player_tween.tween_property(player, "position", foot(cell), STEP_SECONDS)
-		step_until = elapsed + STEP_SECONDS + 0.05
+		player.set_meta("walk_until", elapsed + STEP_SECONDS + 0.32)
 	player_cell = cell
-	player_facing = Vector2i(int(facing[0]), int(facing[1]))
-	if player_facing.x != 0: player_body.flip_h = player_facing.x < 0
+	player.set_meta("dir", Poses.direction(Vector2(float(facing[0]), float(facing[1]))))
 
 func player_point() -> Vector2:
 	return player.position if player != null else Vector2.ZERO
 
+func head_point(entity_id: String) -> Vector2:
+	var node: Node2D = player if entity_id.is_empty() else actors.get("entity:" + entity_id, player)
+	if node == null: return Vector2.ZERO
+	var body: Sprite2D = node.get_node("Body")
+	return node.position + Vector2(0, -body.texture.get_height())
+
+func shake(entity_id: String) -> void:
+	var node: Node2D = player if entity_id.is_empty() else actors.get("entity:" + entity_id, player)
+	if node != null: node.set_meta("shake_until", elapsed + 0.35)
+
+func _face_player(node: Node2D) -> void:
+	var cell: Vector2 = node.get_meta("cell")
+	var footprint: Array = node.get_meta("footprint")
+	var rect: Rect2i = Walking.rect_from_bottom_left({"x": cell.x, "y": cell.y, "footprint": footprint})
+	var dx: float = maxf(maxf(rect.position.x - player_cell.x, 0), player_cell.x - (rect.end.x - 1))
+	var dy: float = maxf(maxf(rect.position.y - player_cell.y, 0), player_cell.y - (rect.end.y - 1))
+	if dx + dy <= 1.0 and float(node.get_meta("walk_until")) <= elapsed:
+		node.set_meta("dir", Poses.direction(player_cell + Vector2(0.5, 0.5) - Vector2(rect.position) - Vector2(rect.size) / 2.0))
+
 func _process(delta: float) -> void:
 	elapsed += delta
 	if player != null:
-		var walking: bool = elapsed < step_until
-		var phase: int = int(elapsed * 10.0) % 2
-		player_body.position = Vector2(0, -1 if walking and phase == 1 else 0)
-		player_body.scale = Vector2(1.0, 1.0)
-		if walking: player_body.scale = Vector2(1.06, 0.94) if phase == 0 else Vector2(0.96, 1.04)
-		elif player_facing.y < 0: player_body.scale = Vector2(1.0, 0.97)
+		_pose(player)
+		_jolt(player)
 	for id in actors:
 		var node: Node2D = actors[id]
-		var key: String = str(node.get_meta("key"))
-		var body: Sprite2D = node.get_node("Body")
-		body.texture = sprite_for.call(key, elapsed)
-		if float(node.get_meta("moving_until", 0.0)) > elapsed:
-			body.position.y = -1 if int(elapsed * 9.0) % 2 == 1 else 0
-		else:
-			body.position.y = 0
+		if str(node.get_meta("kind")) == "npc" and player != null: _face_player(node)
+		_pose(node)
+		_jolt(node)
 	ground.queue_redraw()
 	marks.queue_redraw()
 
@@ -221,3 +245,7 @@ func _draw_marks() -> void:
 		var top: Vector2 = node.position + Vector2(0, -body.texture.get_height() - 3 + roundf(sin(elapsed * 2.0 + node.position.x) * 1.0))
 		if kind in ["npc", "object"]: _bang(top, Color("f0d49c"))
 		elif kind == "enemy" and bool(node.get_meta("source").get("alerted", false)): _bang(top, Color("f39579"))
+
+func _jolt(node: Node2D) -> void:
+	var body: Sprite2D = node.get_node("Body")
+	body.position.x = (1.0 if int(elapsed * 30.0) % 2 == 0 else -1.0) if float(node.get_meta("shake_until", 0.0)) > elapsed else 0.0
