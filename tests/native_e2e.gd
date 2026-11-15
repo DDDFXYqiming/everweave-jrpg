@@ -1,4 +1,5 @@
 extends SceneTree
+const Walking = preload("res://client/walking.gd")
 var main
 var steps: int = 0
 
@@ -28,33 +29,10 @@ func _entity(local_id: String) -> Dictionary:
 	return {}
 
 func _walk(e: Dictionary) -> void:
-	var r: Dictionary = main.state.region
 	var start := Vector2i(int(main.state.player.x), int(main.state.player.y))
-	var target := Vector2i(int(e.x), int(e.y))
-	var occupied: Dictionary = {}
-	for other in r.entities:
-		if not other.spent and other.kind != "exit": occupied[Vector2i(int(other.x), int(other.y))] = true
-	var queue: Array[Vector2i] = [start]
-	var parents: Dictionary = {start:start}
-	var end := start
-	var found := false
-	while not queue.is_empty():
-		var pos: Vector2i = queue.pop_front()
-		if absi(pos.x - target.x) + absi(pos.y - target.y) == 1:
-			end = pos
-			found = true
-			break
-		for delta in [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]:
-			var next: Vector2i = pos + delta
-			if parents.has(next) or occupied.has(next) or next.x < 0 or next.y < 0 or next.x >= int(r.width) or next.y >= int(r.height): continue
-			if int(r.tiles[next.y][next.x]) in [2, 3]: continue
-			parents[next] = pos
-			queue.append(next)
-	assert(found, "No traversable route to " + str(e.name))
-	var route: Array[Vector2i] = []
-	while end != start:
-		route.push_front(end)
-		end = parents[end]
+	var goals: Dictionary = Walking.interaction_cells(e)
+	var route: Array = Walking.walk_path(main.state.region, start, goals, Vector2i(int(e.x), int(e.y)))
+	assert(goals.has(route[-1] if not route.is_empty() else start), "No traversable route to " + str(e.name))
 	for pos in route:
 		await _act({"op":"move", "dx":pos.x-int(main.state.player.x), "dy":pos.y-int(main.state.player.y)})
 		assert(main.state.battle == null)

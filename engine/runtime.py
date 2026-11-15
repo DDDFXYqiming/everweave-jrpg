@@ -3,7 +3,7 @@ import math
 from collections import deque
 from .schema import InvalidPatch
 from .content import scalar, path
-from .scene import cells_for, solid_at, paint, validate_space
+from .scene import cells_from_bottom_left, solid_at, paint, validate_space
 from . import catalog as C
 from .normalization import item_local_id
 from .diagnostics import issue, category_for
@@ -362,7 +362,7 @@ class Runtime:
                     canonical = obj.get('id', 'player')
                     if target and target not in (canonical, a['target']): continue
                     if a['scope'] == 'explore' and obj is not p:
-                        if min(abs(x-p['x'])+abs(y-p['y']) for x, y in cells_for(obj)) > 1: continue
+                        if min(abs(x-p['x'])+abs(y-p['y']) for x, y in cells_from_bottom_left(obj)) > 1: continue
                     if a['scope'] == 'combat' and not self.s.get('battle'): continue
                     self.event=self.event_data('invoke',a['target'],action=a['id'])
                     enabled = bool(self.expr(a['when']))

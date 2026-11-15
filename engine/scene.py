@@ -1,22 +1,55 @@
 import copy
 import json
 import math
+from collections import deque
 from . import catalog as C
 from .schema import InvalidPatch
 from .content import paint_commands
 from .diagnostics import issue
 
 
-def cells_for(obj):
+def cells_from_bottom_left(obj):
     w, h = obj.get('footprint', [1, 1])
     return [(obj['x'] + dx, obj['y'] - dy) for dy in range(h) for dx in range(w)]
+
+
+def interaction_cells(obj):
+    return {(x + dx, y + dy) for x, y in cells_from_bottom_left(obj) for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1))}
+
+
+def blocking_cells(region):
+    return {cell for group in ('props', 'entities') for obj in region.get(group, [])
+            if not obj.get('spent') and obj.get('kind') != 'exit' and obj.get('solid', group == 'entities')
+            for cell in cells_from_bottom_left(obj)}
+
+
+def walk_path(region, start, goals):
+    blocked = blocking_cells(region)
+    previous = {start: None}
+    queue = deque([start])
+    while queue:
+        point = queue.popleft()
+        if point in goals:
+            path = []
+            while previous[point] is not None:
+                path.append(point)
+                point = previous[point]
+            return path[::-1]
+        x, y = point
+        for nxt in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            nx, ny = nxt
+            if (nxt not in previous and 0 <= nx < region['width'] and 0 <= ny < region['height']
+                    and region['tiles'][ny][nx] not in C.BLOCKED and nxt not in blocked):
+                previous[nxt] = point
+                queue.append(nxt)
+    return None
 
 
 def solid_at(region, x, y, ignore=None):
     for obj in region.get('props', []) + region.get('entities', []):
         if (ignore is not None and obj.get('id') == ignore) or obj.get('spent') or not obj.get('solid', False):
             continue
-        if (x, y) in cells_for(obj): return True
+        if (x, y) in cells_from_bottom_left(obj): return True
     return False
 
 
@@ -89,7 +122,7 @@ def dress(region):
         return tile==C.GROUND
     for e in objects+[dict(x=region['spawn'][0],y=region['spawn'][1])]:
         if e.get('spent'):continue
-        for x,y in cells_for(e):
+        for x,y in cells_from_bottom_left(e):
             reserved.update((x+dx,y+dy) for dy in range(-1,2) for dx in range(-1,2))
     for key,(x,y) in region.get('scene',{}).get('anchors',{}).items():
         if key.startswith(('link_','director_gate_')) or key=='chapter_gate':reserved.update((x+dx,y+dy) for dy in range(-1,2) for dx in range(-1,2))
@@ -117,7 +150,7 @@ def validate_space(region, player=None, full=False):
     w, h = region['width'], region['height']
     for obj in region['entities'] + region.get('props', []):
         if obj.get('spent'): continue
-        for x, y in cells_for(obj):
+        for x, y in cells_from_bottom_left(obj):
             if not 0 <= x < w or not 0 <= y < h:
                 raise InvalidPatch('object footprint is outside map: ' + obj.get('id', obj.get('kind', '?')))
     start = [player['x'], player['y']] if player else region['spawn']
@@ -131,7 +164,7 @@ def validate_space(region, player=None, full=False):
     if full:
         errors=[]
         for index,obj in enumerate(region['entities']):
-            footprint=set(cells_for(obj))
+            footprint=set(cells_from_bottom_left(obj))
             approach={(x+dx,y+dy) for x,y in footprint for dx,dy in ((1,0),(-1,0),(0,1),(0,-1))}-footprint
             if not obj.get('solid'):approach |= footprint
             if not area.intersection(approach):
@@ -140,7 +173,7 @@ def validate_space(region, player=None, full=False):
                     value={'anchor':[obj['x'],obj['y']],'footprint':obj.get('footprint',[1,1])},
                     expected='at least one reachable cell along the object footprint boundary'))
         for obj in region.get('props', []):
-            if obj.get('solid') and any((g['x'], g['y']) in cells_for(obj) for g in gates):
+            if obj.get('solid') and any((g['x'], g['y']) in cells_from_bottom_left(obj) for g in gates):
                 raise InvalidPatch('scenery covers an exit')
         if errors:raise InvalidPatch(issues=errors)
 

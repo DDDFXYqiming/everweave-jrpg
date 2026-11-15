@@ -1,5 +1,4 @@
 from __future__ import annotations
-from collections import deque
 import copy
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,6 +16,7 @@ from engine.demo import make_patch
 from engine.director import ChatProvider, Director, ProviderError, validate_url
 from engine.pcg import build_region, reachable
 from engine.schema import InvalidPatch, parse_patch
+from engine.scene import interaction_cells, walk_path
 from engine.server import GameServer
 from engine.storage import Store
 from engine.world import GameError, World
@@ -47,25 +47,10 @@ def at_entity(w, entity_id):
 
 
 def walk_to(w, e):
-    r = w.region()
-    start = (w.state['player']['x'], w.state['player']['y'])
-    occupied = {(x['x'], x['y']) for x in r['entities'] if not x['spent'] and x['kind'] != 'exit'}
-    targets = {(e['x']+dx, e['y']+dy) for dx,dy in ((0,1),(0,-1),(1,0),(-1,0))}
-    q = deque([start]); parents = {start: None}; end = None
-    while q:
-        pos = q.popleft()
-        if pos in targets:
-            end = pos
-            break
-        for dx,dy in ((0,1),(0,-1),(1,0),(-1,0)):
-            p = (pos[0]+dx, pos[1]+dy)
-            if p in parents or p in occupied or not (0 <= p[0] < r['width'] and 0 <= p[1] < r['height']): continue
-            if r['tiles'][p[1]][p[0]] in C.BLOCKED: continue
-            parents[p] = pos; q.append(p)
-    if end is None: raise AssertionError('interaction inaccessible with actual occupants')
-    path = []
-    while parents[end] is not None: path.append(end); end=parents[end]
-    for x,y in reversed(path):
+    p = w.state['player']
+    path = walk_path(w.region(), (p['x'], p['y']), interaction_cells(e))
+    if path is None: raise AssertionError('interaction inaccessible with actual occupants')
+    for x,y in path:
         p=w.state['player']; w.action({'op':'move','dx':x-p['x'],'dy':y-p['y']})
         assert w.state['battle'] is None
     w.action({'op':'interact','id':e['id']})

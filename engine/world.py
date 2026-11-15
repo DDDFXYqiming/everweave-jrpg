@@ -9,7 +9,7 @@ from .schema import InvalidPatch,parse_patch
 from .visuals import freeze_sprite,resolve_sprite
 from . import gameplay
 from .runtime import Runtime, install
-from .scene import solid_at, cells_for
+from .scene import solid_at, cells_from_bottom_left
 from . import campaign,game_spec,adventure
 from .snapshots import RegionSnapshots, SnapshotRead
 
@@ -285,12 +285,12 @@ class World:
    gameplay.definitions(self,preview)
    if context.get('reserve_chapter_gate'):
     pos=preview['scene']['anchors']['chapter_gate']
-    if tuple(pos) not in reachable(preview['tiles'],preview['spawn']) or any(tuple(pos) in cells_for(e) for e in preview['entities']+preview['props']):raise InvalidPatch('chapter_gate must reserve a free reachable cell')
+    if tuple(pos) not in reachable(preview['tiles'],preview['spawn']) or any(tuple(pos) in cells_from_bottom_left(e) for e in preview['entities']+preview['props']):raise InvalidPatch('chapter_gate must reserve a free reachable cell')
    if context.get('reserve_director_gates'):
     positions=[preview['scene']['anchors'][k] for k in ('director_gate_0','director_gate_1')]
     if positions[0]==positions[1]:raise InvalidPatch('director gates require distinct reserved cells')
     for pos in positions:
-     if tuple(pos) not in reachable(preview['tiles'],preview['spawn']) or any(tuple(pos) in cells_for(e) for e in preview['entities']+preview['props']):raise InvalidPatch('director gate must reserve a free reachable cell')
+     if tuple(pos) not in reachable(preview['tiles'],preview['spawn']) or any(tuple(pos) in cells_from_bottom_left(e) for e in preview['entities']+preview['props']):raise InvalidPatch('director gate must reserve a free reachable cell')
   if p['kind']=='region' and 'scene' in p['region']:
    from .playability import check_entry,check_progress
    progress=check_progress(self,p['region'],context)
@@ -485,7 +485,7 @@ class World:
    if type(dx) is not int or type(dy) is not int or abs(dx)+abs(dy)!=1: raise GameError('一次只能移动一格。')
    p['facing']=[dx,dy]; x,y=p['x']+dx,p['y']+dy
    if not(0<=x<r['width'] and 0<=y<r['height']) or r['tiles'][y][x] in C.BLOCKED: self.persist(); return
-   block=next((e for e in r['entities'] if (x,y) in cells_for(e) and not e['spent'] and e.get('solid',True)),None)
+   block=next((e for e in r['entities'] if (x,y) in cells_from_bottom_left(e) and not e['spent'] and e.get('solid',True)),None)
    if not block and solid_at(r,x,y):self.persist();return
    if block and block['kind']!='exit':
     if block['kind']=='enemy': self.interact(block)

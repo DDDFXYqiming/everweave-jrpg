@@ -2,6 +2,7 @@ extends Control
 const L = preload("res://client/i18n.gd")
 
 const WorldView = preload("res://client/world_view.gd")
+const Walking = preload("res://client/walking.gd")
 const BattleView = preload("res://client/battle_view.gd")
 const View = preload("res://client/presentation.gd")
 const Icons = preload("res://client/ui_icons.gd")
@@ -1338,10 +1339,7 @@ func _process(delta: float) -> void:
 		_walk_step()
 		return
 	var direction: Vector2i = _held_move()
-	if direction != Vector2i.ZERO:
-		AudioPrefs.learn("move")
-		move_clock = 0.14
-		_send_action({"op": "move", "dx": direction.x, "dy": direction.y})
+	if direction != Vector2i.ZERO: _step(direction)
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo or not game.visible:
@@ -1401,18 +1399,18 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_toggle_panel("atlas")
 	elif key == KEY_Q:
 		_toggle_panel("missions")
-	elif key in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_UP, KEY_LEFT, KEY_DOWN, KEY_RIGHT] and local_panel.is_empty():
+	elif MOVE_DIRECTIONS.has(key) and local_panel.is_empty():
 		# Handle the first tap as an event: a down/up pair can arrive within one
 		# frame and disappear before _process polls held keys.
-		if connection_ready and not action_busy and move_clock <= 0:
-			AudioPrefs.learn("move")
-			var dx: int = 1 if key in [KEY_D, KEY_RIGHT] else -1 if key in [KEY_A, KEY_LEFT] else 0
-			var dy: int = 1 if key in [KEY_S, KEY_DOWN] else -1 if key in [KEY_W, KEY_UP] else 0
-			move_clock = 0.14
-			_send_action({"op":"move","dx":dx,"dy":dy})
+		if connection_ready and not action_busy and move_clock <= 0: _step(MOVE_DIRECTIONS[key])
 	elif key in [KEY_E, KEY_SPACE] and local_panel.is_empty():
 		_send_action({"op": "interact"})
 	get_viewport().set_input_as_handled()
+
+func _step(direction: Vector2i) -> void:
+	AudioPrefs.learn("move")
+	move_clock = 0.14
+	_send_action({"op": "move", "dx": direction.x, "dy": direction.y})
 
 func _walking() -> bool:
 	return not walk_path.is_empty() or not walk_interact.is_empty()
@@ -1428,48 +1426,6 @@ func _walk_ready() -> bool:
 func _walk_here() -> Vector2i:
 	return Vector2i(int(state.player.x), int(state.player.y))
 
-func _cells(obj: Dictionary) -> Array:
-	var footprint: Array = obj.get("footprint", [1, 1])
-	var result: Array = []
-	for dy in int(footprint[1]):
-		for dx in int(footprint[0]):
-			result.append(Vector2i(int(obj.x) + dx, int(obj.y) - dy))
-	return result
-
-func _walk_route(goals: Dictionary, aim: Vector2i) -> Array:
-	var region: Dictionary = state.region
-	var occupied: Dictionary = {}
-	for group in ["props", "entities"]:
-		for obj in region.get(group, []):
-			if bool(obj.get("spent", false)) or str(obj.get("kind", "")) == "exit" or not bool(obj.get("solid", group == "entities")): continue
-			for cell in _cells(obj): occupied[cell] = true
-	var width: int = int(region.width)
-	var height: int = int(region.height)
-	var start: Vector2i = _walk_here()
-	var previous: Dictionary = {start: start}
-	var queue: Array = [start]
-	var best: Vector2i = start
-	var head: int = 0
-	while head < queue.size():
-		var point: Vector2i = queue[head]
-		head += 1
-		if goals.has(point):
-			best = point
-			break
-		var distance: int = absi(point.x - aim.x) + absi(point.y - aim.y)
-		if distance < absi(best.x - aim.x) + absi(best.y - aim.y): best = point
-		for step in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-			var next: Vector2i = point + step
-			if previous.has(next) or next.x < 0 or next.y < 0 or next.x >= width or next.y >= height: continue
-			if int(region.tiles[next.y][next.x]) in [2, 3] or occupied.has(next): continue
-			previous[next] = point
-			queue.append(next)
-	var path: Array = []
-	while best != start:
-		path.push_front(best)
-		best = previous[best]
-	return path
-
 func _walk_begin(path: Array, interact: String) -> void:
 	_walk_stop()
 	if path.is_empty() and interact.is_empty(): return
@@ -1481,7 +1437,7 @@ func _walk_begin(path: Array, interact: String) -> void:
 
 func _walk_to_cell(cell: Vector2i) -> void:
 	if not _walk_ready(): return
-	_walk_begin(_walk_route({cell: true}, cell), "")
+	_walk_begin(Walking.walk_path(state.region, _walk_here(), {cell: true}, cell), "")
 
 func _walk_to_entity(id: String) -> void:
 	if not _walk_ready(): return
@@ -1490,14 +1446,12 @@ func _walk_to_entity(id: String) -> void:
 		if str(e.id) == id: target = e
 	if target.is_empty(): return
 	var here: Vector2i = _walk_here()
-	var goals: Dictionary = {}
-	for cell in _cells(target):
-		for step in [Vector2i.ZERO, Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]: goals[cell + step] = true
+	var goals: Dictionary = Walking.interaction_cells(target)
 	if goals.has(here):
 		_walk_stop()
 		_send_action({"op":"interact","id":id})
 		return
-	var path: Array = _walk_route(goals, _cells(target)[0])
+	var path: Array = Walking.walk_path(state.region, here, goals, Walking.cells_from_bottom_left(target)[0])
 	_walk_begin(path, id if not path.is_empty() and goals.has(path[-1]) else "")
 
 func _walk_step() -> void:
@@ -1515,8 +1469,7 @@ func _walk_step() -> void:
 	if absi(step.x) + absi(step.y) != 1:
 		_walk_stop()
 		return
-	move_clock = 0.14
-	_send_action({"op": "move", "dx": step.x, "dy": step.y})
+	_step(step)
 
 func _apply_game_spec() -> void:
 	var value: Variant = state.get("game_spec")

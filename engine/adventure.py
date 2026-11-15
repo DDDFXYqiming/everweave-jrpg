@@ -299,10 +299,10 @@ def apply_direction(world,data,ctx):
             region=world.region(rid)
             if region and anchor not in region.get('scene',{}).get('anchors',{}):raise InvalidPatch('region has no reserved director gate '+rid)
             if region:
-                from .scene import cells_for
+                from .scene import cells_from_bottom_left
                 from .pcg import reachable
                 at=tuple(region['scene']['anchors'][anchor])
-                if any(not obj.get('spent') and at in cells_for(obj) for obj in region['entities']+region.get('props',[]) if obj.get('solid') or obj in region['entities']):
+                if any(not obj.get('spent') and at in cells_from_bottom_left(obj) for obj in region['entities']+region.get('props',[]) if obj.get('solid') or obj in region['entities']):
                     raise InvalidPatch('reserved director gate is now occupied: '+rid)
                 if at not in reachable(region['tiles'],region['spawn']):
                     raise InvalidPatch('reserved director gate is no longer structurally reachable: '+rid)

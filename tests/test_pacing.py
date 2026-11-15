@@ -114,6 +114,6 @@ class PacingTests(unittest.TestCase):
         e=self.enemy(at=(12,6),footprint=[2,2]);r=self.w.region()
         r['tiles'][6][11]=3
         self.w.action(dict(op='wait'))
-        for x,y in encounters.cells_for(e):self.assertNotEqual(r['tiles'][y][x],3)
+        for x,y in encounters.cells_from_bottom_left(e):self.assertNotEqual(r['tiles'][y][x],3)
 
 if __name__=='__main__':unittest.main()

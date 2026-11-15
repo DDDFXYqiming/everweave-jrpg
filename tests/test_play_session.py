@@ -6,7 +6,8 @@ import threading
 import unittest
 from engine.server import GameServer
 from adventure_fixtures import adventure_plan, authored_adventure_region
-from tools.play_session import LocalAPI, Session, observe, route
+from engine.scene import interaction_cells, walk_path
+from tools.play_session import LocalAPI, Session, observe
 
 
 class PlaySessionTests(unittest.TestCase):
@@ -67,7 +68,7 @@ class PlaySessionTests(unittest.TestCase):
         s = self.world.snapshot(); s['player'].update(x=10, y=5)
         target = dict(x=4, y=5, footprint=[1, 1])
         s['region']['props'].append(dict(x=8, y=6, footprint=[1, 3], solid=True))
-        path = route(s, target)
+        path = walk_path(s['region'], (s['player']['x'], s['player']['y']), interaction_cells(target))
         self.assertTrue(path); self.assertFalse({(8, 4), (8, 5), (8, 6)} & set(path))
         before = copy.deepcopy(self.world.state)
         with self.assertRaises(ValueError): self.session.act('choose', 'not_visible')

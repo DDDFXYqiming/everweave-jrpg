@@ -4,7 +4,6 @@ The caller chooses what to explore. This tool only observes, walks and acts;
 it never completes objectives, changes coordinates or configures cloud calls.
 """
 import argparse
-from collections import deque
 import json
 from pathlib import Path
 import sys
@@ -15,8 +14,7 @@ from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHand
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from engine.catalog import BLOCKED
-from engine.scene import cells_for
+from engine.scene import interaction_cells, walk_path
 
 
 def select(value, keys):
@@ -91,31 +89,6 @@ class LocalAPI:
     def action(self, data): return self.request('/action', data)
 
 
-def route(s, target):
-    r = s['region']; start = (s['player']['x'], s['player']['y'])
-    occupied = set()
-    for group in ('props', 'entities'):
-        for obj in r.get(group, []):
-            if not obj.get('spent') and obj.get('solid', group == 'entities'):
-                occupied.update(cells_for(obj))
-    goals = {point for x, y in cells_for(target) for point in ((x, y), (x-1, y), (x+1, y), (x, y-1), (x, y+1))}
-    queue = deque([start]); previous = {start: None}
-    while queue:
-        point = queue.popleft()
-        if point in goals:
-            path = []
-            while previous[point] is not None:
-                path.append(point); point = previous[point]
-            return list(reversed(path))
-        x, y = point
-        for nxt in ((x-1, y), (x+1, y), (x, y-1), (x, y+1)):
-            nx, ny = nxt
-            if (nxt not in previous and 0 <= nx < r['width'] and 0 <= ny < r['height']
-                    and r['tiles'][ny][nx] not in BLOCKED and nxt not in occupied):
-                previous[nxt] = point; queue.append(nxt)
-    return None
-
-
 def interruption(before, after):
     if after.get('game_over'): return 'game_over'
     if after.get('battle'): return 'battle'
@@ -144,7 +117,7 @@ class Session:
                 reason = 'finish_current_interaction'; break
             target = next((e for e in visible_entities(s) if e['id'] == key), None)
             if not target: reason = 'target_not_visible'; break
-            path = route(s, target)
+            path = walk_path(s['region'], (s['player']['x'], s['player']['y']), interaction_cells(target))
             if path is None: reason = 'no_walkable_route'; break
             if not path:
                 reason = 'arrived'

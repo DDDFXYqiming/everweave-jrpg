@@ -1,6 +1,6 @@
 import copy
 import unittest
-from engine.scene import paint,dress,cells_for
+from engine.scene import paint,dress,cells_from_bottom_left
 from engine.materials import validate,definitions
 from engine.schema import InvalidPatch
 from engine.storage import Store
@@ -49,7 +49,7 @@ class SceneDressingTests(unittest.TestCase):
         for p in props:
             self.assertFalse(p['solid']);self.assertEqual(r['tiles'][p['y']][p['x']],0)
             for e in r['entities']:
-                self.assertGreater(min(max(abs(p['x']-x),abs(p['y']-y)) for x,y in cells_for(e)),1)
+                self.assertGreater(min(max(abs(p['x']-x),abs(p['y']-y)) for x,y in cells_from_bottom_left(e)),1)
         clone=copy.deepcopy(r);clone.pop('dressing_signature');dress(clone)
         self.assertEqual(clone['props'],r['props'])
     def test_density_zero_and_live_repaint_remove_only_automatic_dressing(self):

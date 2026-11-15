@@ -3,7 +3,6 @@ import json
 import tempfile
 import threading
 import unittest
-from collections import deque
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,28 +14,18 @@ from engine.runtime import Runtime,RuleError
 from engine.region_pipeline import generate,contract,PipelineError
 from engine.chatgpt_provider import DirectError
 from engine.playability import replay,RegionEntryError
-from engine.scene import solid_at,cells_for
+from engine.scene import interaction_cells,walk_path
 from campaign_fixtures import chapter_patch,region_patch
 from content_fixtures import authored_patch
 from test_region_pipeline import components
 
 
 def walk_to(world,entity):
-    region=world.region();p=world.state['player'];start=(p['x'],p['y'])
-    cells=cells_for(entity);parents={start:None};queue=deque([start]);end=None
-    while queue:
-        at=queue.popleft()
-        if min(abs(at[0]-x)+abs(at[1]-y) for x,y in cells)<=1:end=at;break
-        for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)):
-            point=(at[0]+dx,at[1]+dy)
-            if point in parents or not (0<=point[0]<region['width'] and 0<=point[1]<region['height']):continue
-            if region['tiles'][point[1]][point[0]] in (2,3) or solid_at(region,*point):continue
-            parents[point]=at;queue.append(point)
-    if end is None:raise AssertionError('测试路线不可达')
+    p=world.state['player'];at=(p['x'],p['y'])
+    path=walk_path(world.region(),at,interaction_cells(entity))
+    if path is None:raise AssertionError('测试路线不可达')
     route=[]
-    while parents[end] is not None:
-        previous=parents[end];route.append(dict(op='move',dx=end[0]-previous[0],dy=end[1]-previous[1]));end=previous
-    route.reverse()
+    for point in path:route.append(dict(op='move',dx=point[0]-at[0],dy=point[1]-at[1]));at=point
     for action in route:world.action(action)
     return route
 

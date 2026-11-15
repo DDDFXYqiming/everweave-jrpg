@@ -1,7 +1,7 @@
 import copy
 from .schema import InvalidPatch
 from .runtime import Runtime, RuleError, install, check_references, design_record
-from .scene import paint, validate_space, cells_for
+from .scene import paint, validate_space, cells_from_bottom_left
 
 
 def transaction(world, operation):
@@ -119,7 +119,7 @@ def reaction(world, region, patch):
 
 
 def distance(entity, player):
-    return min(abs(x-player['x'])+abs(y-player['y']) for x, y in cells_for(entity))
+    return min(abs(x-player['x'])+abs(y-player['y']) for x, y in cells_from_bottom_left(entity))
 
 
 def item_local_dependency(node):

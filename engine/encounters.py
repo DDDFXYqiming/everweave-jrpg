@@ -1,6 +1,6 @@
 from collections import deque
 from .catalog import BLOCKED
-from .scene import cells_for, solid_at
+from .scene import cells_from_bottom_left, solid_at
 
 def validate(raw):
     from .schema import obj,enum,arr
@@ -16,7 +16,7 @@ def validate(raw):
     return result
 
 def distance(enemy,player):
-    return min(abs(x-player['x'])+abs(y-player['y']) for x,y in cells_for(enemy))
+    return min(abs(x-player['x'])+abs(y-player['y']) for x,y in cells_from_bottom_left(enemy))
 
 def line_of_sight(region,a,b):
     x,y=a;tx,ty=b;dx=abs(tx-x);dy=-abs(ty-y);sx=1 if x<tx else -1;sy=1 if y<ty else -1;error=dx+dy
@@ -29,7 +29,7 @@ def line_of_sight(region,a,b):
 
 def next_step(region,enemy,target,player):
     start=(enemy['x'],enemy['y']);queue=deque([start]);parents={start:None}
-    occupied={cell for obj in region['entities']+region.get('props',[]) if obj.get('id')!=enemy['id'] and not obj.get('spent') and (obj.get('solid') or obj.get('kind')=='exit') for cell in cells_for(obj)}
+    occupied={cell for obj in region['entities']+region.get('props',[]) if obj.get('id')!=enemy['id'] and not obj.get('spent') and (obj.get('solid') or obj.get('kind')=='exit') for cell in cells_from_bottom_left(obj)}
     occupied.add((player['x'],player['y']))
     while queue and len(parents)<384:
         at=queue.popleft()
@@ -39,7 +39,7 @@ def next_step(region,enemy,target,player):
         neighbors=sorted(((at[0]-1,at[1]),(at[0]+1,at[1]),(at[0],at[1]-1),(at[0],at[1]+1)),key=lambda p:abs(p[0]-target[0])+abs(p[1]-target[1]))
         for point in neighbors:
             if point in parents:continue
-            obj=dict(enemy,x=point[0],y=point[1]);cells=cells_for(obj)
+            obj=dict(enemy,x=point[0],y=point[1]);cells=cells_from_bottom_left(obj)
             if any(not(0<=x<region['width'] and 0<=y<region['height']) or region['tiles'][y][x] in BLOCKED or (x,y) in occupied for x,y in cells):continue
             parents[point]=at;queue.append(point)
     return start
@@ -59,7 +59,7 @@ def advance(world):
         vm.actor=enemy.get('local_id',enemy['id'])
         if not vm.expr(behavior['when']):enemy['alerted']=False;continue
         home=enemy.setdefault('home',[enemy['x'],enemy['y']])
-        d=distance(enemy,p);nearest=min(cells_for(enemy),key=lambda cell:abs(cell[0]-p['x'])+abs(cell[1]-p['y']))
+        d=distance(enemy,p);nearest=min(cells_from_bottom_left(enemy),key=lambda cell:abs(cell[0]-p['x'])+abs(cell[1]-p['y']))
         sees=d<=behavior['radius'] and line_of_sight(r,nearest,(p['x'],p['y']))
         enemy['alerted']=sees;enemy['intent']='追击' if sees and behavior['mode']!='guard' else '警戒' if sees else '巡逻' if behavior['mode']=='patrol' else '驻守'
         if sees and d<=behavior['engage_range']:

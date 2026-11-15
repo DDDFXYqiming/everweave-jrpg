@@ -8,6 +8,7 @@ signal map_requested()
 const TILE: float = 32.0
 const VisualCompiler = preload("res://client/visual_compiler.gd")
 const TerrainMaterials = preload("res://client/terrain_materials.gd")
+const Walking = preload("res://client/walking.gd")
 var materials = TerrainMaterials.new()
 var room_floor_keys: Dictionary = {}
 var terrain_grid: Array = []
@@ -194,7 +195,8 @@ func _draw() -> void:
 			if bool(obj.entity.get("alerted",false)):
 				draw_string(font,foot-Vector2(5,66),"!",HORIZONTAL_ALIGNMENT_LEFT,-1,24,Color("f39579"))
 			if int(footprint[0])>1 or int(footprint[1])>1:
-				var occupied := Rect2(Vector2(float(obj.x),float(obj.y)-float(footprint[1])+1)*TILE-camera,Vector2(float(footprint[0]),float(footprint[1]))*TILE)
+				var rect: Rect2i = Walking.rect_from_bottom_left(obj)
+				var occupied := Rect2(Vector2(rect.position)*TILE-camera,Vector2(rect.size)*TILE)
 				draw_rect(occupied,Color(0.91,0.49,0.50,0.35),false,1.0)
 		if obj.kind == "chest" and bool(obj.entity.get("spent", false)): tint = Color(.55, .55, .55, .7)
 		_draw_sprite(str(obj.sprite), foot, 2.0, tint)
@@ -270,9 +272,9 @@ func _draw_nearby_hint() -> void:
 			return
 
 func _distance_to_object(e: Dictionary, p: Vector2) -> float:
-	var footprint: Array = e.get("footprint",[1,1])
-	var dx: float = maxf(maxf(float(e.x)-p.x,0),p.x-(float(e.x)+float(footprint[0])-1))
-	var dy: float = maxf(maxf(float(e.y)-float(footprint[1])+1-p.y,0),p.y-float(e.y))
+	var rect: Rect2i = Walking.rect_from_bottom_left(e)
+	var dx: float = maxf(maxf(rect.position.x-p.x,0),p.x-(rect.end.x-1))
+	var dy: float = maxf(maxf(rect.position.y-p.y,0),p.y-(rect.end.y-1))
 	return dx+dy
 
 func _gui_input(event: InputEvent) -> void:
