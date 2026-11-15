@@ -1,9 +1,16 @@
 PROMPT='''Design one coherent CHAPTER of a continuing playable adventure, not a list of unrelated rooms.
 Return JSON {"kind":"campaign","campaign":{...}}. Write player-facing text in Chinese unless instructed otherwise.
 campaign fields: title, premise, goal (clear player objective, stakes and direction), flags:{bare_id:bool/int/string},
-flag_sources:{FLAG:REGION_ID}, regions:[{id,name,description,purpose}], links:[{id,a,b,hidden?:bool,
-discover?:[{flag,eq}],requires?:[{flag,eq}],blocked_reason?:text,one_way?:bool}], milestones:[{id,name,description,when:[{flag,eq}]}],
-complete_when:[{flag,eq}], continuation:{from:REGION_ID,hook:next chapter promise}.
+flag_sources:{FLAG:REGION_ID}, item_sources?:{ITEM_ID:{region:REGION_ID,count?:1..9}}, regions:[{id,name,description,purpose}],
+links:[{id,a,b,hidden?:bool,discover?:[COND],requires?:[COND],blocked_reason?:text,one_way?:bool}], milestones:[{id,name,description,when:[COND]}],
+complete_when:[COND], continuation:{from:REGION_ID,hook:next chapter promise}.
+COND is one of {flag,eq} | {item:ITEM_ID,count?} (player holds >=count of a chapter key item from item_sources)
+| {ability:SKILL_ID} (an adventure skill was learned) | {mission:MISSION_ID,status:"active"|"complete"|"failed"}.
+item_sources declares key items whose producer region must make them obtainable once; requires inventory.
+The engine exhaustively searches the chapter graph: arriving at a region grants its flag_sources/item_sources writes and
+its commissioned skills. The plan is rejected if no final ending (or, without one, the chapter completion) is reachable,
+if any planned region is never reachable, or if some reachable state can no longer finish (softlock: key only behind
+its own door, one-way trap, failable mission on the only path).
 For new online adventures use planning:"rolling": author only the next 2..4 regions, connected by 1..6 links.
 Include ending_brief: a PRIVATE eventual outcome direction, not a complete intermediate route. Keep the middle open
 for the global director to expand as the player makes choices. Plan a playable local arc and its continuation,
@@ -14,7 +21,7 @@ Every region must be structurally reachable from the first, respecting direction
 Region IDs <=20, link IDs <=40 lowercase snake_case. The FIRST region is the arrival; allow an initially open visible route from it.
 Include meaningful branches, optional encounters and a discoverable hidden shortcut when appropriate.
 Use clear cross-region dependencies: investigate A -> gain a shared clue/ability -> open a route or solve a goal in B.
-Conditions are AND lists; eq must match the flag's initial type. Every flag needs one producer region in flag_sources.
+Conditions are AND lists; flag eq must match the flag's initial type. Every flag needs one producer region in flag_sources.
 Assign each region a distinct role in THIS story, with NPC motives, danger or discovery and consequences.
 State which concrete player action writes each produced flag in that region's purpose. Do not put the only key behind its own locked route.
 Use goal and premise for the player's known problem and stakes; keep solutions and future revelations in private purposes.
@@ -47,6 +54,8 @@ If reserve_chapter_gate=true also reserve a free reachable scene.anchors.chapter
 Follow region_purpose: NPC motives, threats, clues and consequences must advance this chapter's goal.
 Every required_flag_writes key MUST have a purposeful player action/hook writing it with
 {op:"chapter",key:FLAG,value:EXPRESSION}. Read shared flags with {get:"chapter.FLAG"} across this chapter.
+Every required_item_grants entry MUST be an items definition with exactly that id, obtainable here count times
+(chest or {op:"item",id,count}); chapter links and missions gate on it. Gate local rules on a learned skill with {has_ability:SKILL_ID}.
 Implement each producer in its assigned region. Explain clues without revealing hidden roads early.
 Example: power station switch writes power=true; archive scanner reads chapter.power. Do not substitute unrelated local vars.
 Respect game_spec.systems and resources. Omitted hp/mp/gold are disabled, not invisible spare resources.

@@ -14,8 +14,8 @@ def visible(world,m):
     dependencies=all(adv['missions'][d]['status']=='complete' for d in m['depends'])
     revealed=dependencies and (world.state['topology'][m['region']]['visited'] or m['kind']=='main' and bool(m['depends']))
     if m.get('reveal_when'):
-        from .campaign import satisfied
-        revealed=dependencies and satisfied(m['reveal_when'],world.state['campaign']['chapters'][m['chapter_id']]['flags'])
+        from .campaign import satisfied,facts
+        revealed=dependencies and satisfied(m['reveal_when'],facts(world.state,world.state['campaign']['chapters'][m['chapter_id']]))
     return revealed
 
 def register_mission(world,m):
@@ -23,7 +23,7 @@ def register_mission(world,m):
         m['discovered']=True
         world.state['quests'][m['id']]=dict(id=m['id'],name=m['name'],description=m['brief'],goal='adventure',region=m['region'],status=m['status'],reward=0)
 
-def validate(raw,flags,regions,existing=None):
+def validate(raw,scope,regions,existing=None):
     from .schema import obj,arr,ident,text
     from .content import state_values,integer,boolean
     from .campaign import conditions
@@ -43,6 +43,7 @@ def validate(raw,flags,regions,existing=None):
     for m in arr(raw.get('missions',[]),'missions',10):
         if not isinstance(m,dict) or 'id' not in m:raise InvalidPatch('mission requires an id')
         mission_ids.add(ident(m['id']))
+    scope=dict(scope,skills={a['id'] for a in out['skills']}|set(old.get('skills',{})),missions=mission_ids|set(old.get('missions',{})))
     for mission in raw.get('missions',[]):
         obj(mission,'mission',('id','name','kind','region','brief','depends','when','fail_when','reveal_when'),('id','name','kind','region','brief','when'))
         if mission['kind'] not in ('main','side','encounter'):raise InvalidPatch('mission kind must be main/side/encounter')
@@ -50,9 +51,9 @@ def validate(raw,flags,regions,existing=None):
         if rid not in regions:raise InvalidPatch('unknown mission region '+rid)
         dependencies=[ident(x) for x in arr(mission.get('depends',[]),'mission dependencies',6)]
         if not set(dependencies)<=(mission_ids|set(old.get('missions',{}))):raise InvalidPatch('unknown mission dependency')
-        when=conditions(mission['when'],flags)
+        when=conditions(mission['when'],scope)
         if not when:raise InvalidPatch('mission needs a real completion condition')
-        out['missions'].append(dict(id=ident(mission['id']),name=text(mission['name'],'mission name',100),kind=mission['kind'],region=rid,brief=text(mission['brief'],'mission brief',450),depends=dependencies,when=when,fail_when=conditions(mission.get('fail_when',[]),flags),reveal_when=conditions(mission.get('reveal_when',[]),flags)))
+        out['missions'].append(dict(id=ident(mission['id']),name=text(mission['name'],'mission name',100),kind=mission['kind'],region=rid,brief=text(mission['brief'],'mission brief',450),depends=dependencies,when=when,fail_when=conditions(mission.get('fail_when',[]),scope),reveal_when=conditions(mission.get('reveal_when',[]),scope)))
     pending={m['id']:set(m['depends'])&mission_ids for m in out['missions']}
     while pending:
         roots={k for k,v in pending.items() if not v}
@@ -82,9 +83,34 @@ def validate(raw,flags,regions,existing=None):
         out['commissions'].append(entry)
     for group in ('cast','skills','missions','endings','commissions'):
         if len({v['id'] for v in out[group]})!=len(out[group]):raise InvalidPatch('duplicate '+group+' definition')
+    check_mission_graph(out,old)
     return out
 
+def check_mission_graph(out,old):
+    """规划期任务图硬规则：结局可通关的结构前提，违反时整份计划打回重写。"""
+    from .diagnostics import issue
+    missions={**old.get('missions',{}),**{m['id']:m for m in out['missions']}}
+    finals=[e for e in list(old.get('endings',{}).values())+out['endings'] if e['final']]
+    def chain(ending):
+        seen=set();stack=list(ending['requires'])
+        while stack:
+            key=stack.pop()
+            if key not in seen:seen.add(key);stack.extend(missions[key]['depends'])
+        return seen
+    chains={e['id']:chain(e) for e in finals}
+    errors=[] if finals else ['至少需要一个 final=true 的最终结局，否则整场冒险没有通关终点']
+    for e in finals:
+        for key in sorted(chains[e['id']]):
+            m=missions[key]
+            if m['kind']!='main':errors.append(f"最终结局 {e['id']} 的依赖链包含 {m['kind']} 任务 {key}；最终结局只能依赖 main 任务")
+            if m['fail_when'] and all(key in chains[o['id']] for o in finals):errors.append(f"最终结局 {e['id']} 依赖链上的任务 {key} 设有 fail_when，且没有绕开它的其他最终结局；它一旦失败就永远无法通关")
+    for key,m in missions.items():
+        for d in m['depends']:
+            if m['kind']=='main' and missions[d]['kind']=='side':errors.append(f'主线任务 {key} 依赖支线任务 {d}；主线不得依赖支线')
+    if errors:raise InvalidPatch(issues=[issue('adventure.missions',e,category='gameplay') for e in dict.fromkeys(errors)])
+
 def install(world,raw,mapping,cid,prefix):
+    from .campaign import rename
     adv=world.state.setdefault('adventure',dict(cast={},skills={},missions={},endings={},jobs={},economy={},revision=0,event_seq=0,reviewed_seq=0))
     changed=(any(a['id'] not in adv['cast'] for a in raw['cast']) or any(a['id'] not in adv['skills'] for a in raw['skills'])
              or any(raw[k] for k in ('missions','endings','commissions')) or any(k not in adv['economy'] for k in raw['economy']))
@@ -97,7 +123,8 @@ def install(world,raw,mapping,cid,prefix):
         adv['skills'].setdefault(skill['id'],copy.deepcopy(skill))
     mission_map={m['id']:prefix+'_'+m['id'] for m in raw['missions']}
     for m in raw['missions']:
-        entry=copy.deepcopy(m);entry.update(id=mission_map[m['id']],region=mapping[m['region']],chapter_id=cid,status='active',depends=[mission_map.get(x,x) for x in m['depends']])
+        entry=copy.deepcopy(m);entry.update(id=mission_map[m['id']],region=mapping[m['region']],chapter_id=cid,status='active',depends=[mission_map.get(x,x) for x in m['depends']],
+                                           **{k:rename(m[k],mission_map) for k in ('when','fail_when','reveal_when')})
         adv['missions'][entry['id']]=entry
     for entry in [adv['missions'][key] for key in mission_map.values()]:register_mission(world,entry)
     for ending in raw['endings']:
@@ -140,15 +167,15 @@ def context(world,rid):
         missions=recalled['missions'],causal_memory=recalled['causal_memory'],economy=copy.deepcopy(adv['economy'])))
 
 def refresh(world):
-    from .campaign import satisfied
+    from .campaign import satisfied,facts
     adv=state(world)
     if not adv:return
     for _ in range(len(adv['missions'])+1):
         changed=False
         for m in adv['missions'].values():
             if m['status']!='active':continue
-            flags=world.state['campaign']['chapters'][m['chapter_id']]['flags']
-            status='failed' if m['fail_when'] and satisfied(m['fail_when'],flags) else 'complete' if all(adv['missions'][d]['status']=='complete' for d in m['depends']) and satisfied(m['when'],flags) else 'active'
+            view=facts(world.state,world.state['campaign']['chapters'][m['chapter_id']])
+            status='failed' if m['fail_when'] and satisfied(m['fail_when'],view) else 'complete' if all(adv['missions'][d]['status']=='complete' for d in m['depends']) and satisfied(m['when'],view) else 'active'
             if status!='active':
                 m['status']=status;adv['event_seq']+=1;adv['important_seq']=adv['event_seq']
                 if visible(world,m):world.note(m['name'])
@@ -224,7 +251,8 @@ def validate_direction(world,raw):
         if not (type(entry['initial']) is bool and entry['initial'] is False or type(entry['initial']) is int and entry['initial']==0 or entry['initial']=='pending'):raise InvalidPatch('new flags start false, zero or pending; progress must be earned')
         flags[key]=entry['initial'];new_flags.append(copy.deepcopy(entry))
     if len(flags)>64:raise InvalidPatch('chapter flag capacity reached; continue in a new chapter')
-    additions=validate(d.get('additions',{}),flags,regions,adv)
+    additions=validate(d.get('additions',{}),dict(flags=flags,items=set(c['item_sources'])),regions,adv)
+    scope=dict(flags=flags,items=set(c['item_sources']),skills={a['id'] for a in additions['skills']}|set(adv['skills']),missions={m['id'] for m in additions['missions']}|set(adv['missions']))
     for flag in new_flags:
         producers=[j for j in additions['commissions'] if j['region']==flag['source']]
         if not producers:raise InvalidPatch('new flags need a matching content commission to implement them')
@@ -232,8 +260,8 @@ def validate_direction(world,raw):
     if additions['economy']:raise InvalidPatch('the global resource gain policy is fixed; do not change it mid-run')
     if len([j for j in adv['jobs'].values() if j['status']=='queued'])+len(additions['commissions'])>8:raise InvalidPatch('too many queued commissions')
     for m in additions['missions']:
-        from .campaign import satisfied
-        if satisfied(m['when'],flags):raise InvalidPatch('new missions must not retroactively claim completed conditions')
+        from .campaign import satisfied,facts
+        if satisfied(m['when'],dict(facts(s,c),flags=flags)):raise InvalidPatch('new missions must not retroactively claim completed conditions')
     briefs=[]
     for b in arr(d.get('region_briefs',[]),'region briefs',3):
         obj(b,'region brief',('region','purpose'),('region','purpose'));rid=b['region']
@@ -246,16 +274,10 @@ def validate_direction(world,raw):
         hidden=e.get('hidden',False)
         if type(hidden) is not bool:raise InvalidPatch('hidden must be boolean')
         if type(e.get('one_way',False)) is not bool:raise InvalidPatch('one_way must be boolean')
-        discover=conditions(e.get('discover',[]),flags)
+        discover=conditions(e.get('discover',[]),scope)
         if hidden and not discover:raise InvalidPatch('hidden route needs discovery conditions')
-        links.append(dict(id=ident(e['id']),a=e['a'],b=e['b'],hidden=hidden,one_way=e.get('one_way',False),discover=discover,requires=conditions(e.get('requires',[]),flags),blocked_reason=text(e.get('blocked_reason','道路尚未打通。'),'blocked reason',160)))
+        links.append(dict(id=ident(e['id']),a=e['a'],b=e['b'],hidden=hidden,one_way=e.get('one_way',False),discover=discover,requires=conditions(e.get('requires',[]),scope),blocked_reason=text(e.get('blocked_reason','道路尚未打通。'),'blocked reason',160)))
     if len({e['id'] for e in links})!=len(links):raise InvalidPatch('new route IDs must be unique')
-    reached=regions-{r['id'] for r in new_regions}
-    for _ in range(len(new_regions)+1):
-        for edge in links:
-            if edge['a'] in reached:reached.add(edge['b'])
-            if not edge['one_way'] and edge['b'] in reached:reached.add(edge['a'])
-    if reached!=regions:raise InvalidPatch('new locations need an actual outbound connection from the known chapter')
     return dict(reason=text(d['reason'],'director reasoning',600),additions=additions,region_briefs=briefs,links=links,new_flags=new_flags,new_regions=new_regions)
 
 def apply_direction(world,data,ctx):
@@ -271,7 +293,8 @@ def apply_direction(world,data,ctx):
         c['flags'][flag['id']]=flag['initial'];c['flag_sources'][flag['id']]=flag['source']
         node=s['topology'][flag['source']];node['generation_revision']=node.get('generation_revision',0)+1
     for e in data['links']:
-        entry=dict(e,id=prefix+'_'+e['id'],chapter_id=cid,revealed=not e['hidden'])
+        missions={m['id']:prefix+'_'+m['id'] for m in data['additions']['missions']}
+        entry=dict(e,id=prefix+'_'+e['id'],chapter_id=cid,revealed=not e['hidden'],requires=campaign.rename(e['requires'],missions),discover=campaign.rename(e['discover'],missions))
         for side in ('a','b'):
             rid=e[side];used={r['anchor'] for r in campaign.routes(s,rid)}
             anchor=('link_'+hashlib.sha256(entry['id'].encode()).hexdigest()[:12]) if rid in new_ids else next((f'director_gate_{i}' for i in range(2) if f'director_gate_{i}' not in used),None)

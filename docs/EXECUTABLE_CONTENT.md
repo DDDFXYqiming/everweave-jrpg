@@ -24,7 +24,7 @@
 
 准确协议在 `engine/content.py`（验证）、`runtime.py`（执行）和 `content_prompt.py`（给模型的完整说明）里，三者共同定义边界。模型不输出 Python、GDScript 或资源路径。
 
-`program` 含 `vars`、`actions`、`hooks`、`objectives`。章节世界额外支持读取 `{get:"chapter.FLAG"}` 和 `{get:"resources.ID"}`，使用 `{op:"chapter",key:FLAG,value:EXPRESSION}` 写共享旗标，使用 `{op:"resource",id:ID,delta:EXPRESSION}` 改资源。旗标须先在章节声明，资源须在游戏规格启用。
+`program` 含 `vars`、`actions`、`hooks`、`objectives`。章节世界额外支持读取 `{get:"chapter.FLAG"}` 和 `{get:"resources.ID"}`，使用 `{op:"chapter",key:FLAG,value:EXPRESSION}` 写共享旗标，使用 `{op:"resource",id:ID,delta:EXPRESSION}` 改资源。旗标须先在章节声明，资源须在游戏规格启用。`{has_ability:SKILL_ID}` 读取玩家是否已学会某个冒险技能，可用来做能力门；技能须已在冒险里声明。
 
 动作条件是表达式树，可以读取角色、当前战斗、区域变量、对象状态、物品数量、事实和最近位置历史；动作效果可以修改自定义状态、受限数值、物品、对象位置、形状、实心状态和地表，也可以发信号、设置行动计时器。多个条件和历史状态可以组成全新的谜题，而无需引擎包含该谜题的专用函数。
 

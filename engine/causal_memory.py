@@ -49,7 +49,7 @@ def _condition_evidence(conditions, chapter):
     return [dict(flag=condition['flag'], eq=condition['eq'],
                  known=condition['flag'] in flags, actual=flags.get(condition['flag']),
                  source=chapter.get('flag_sources', {}).get(condition['flag']))
-            for condition in conditions]
+            if 'flag' in condition else dict(condition) for condition in conditions]
 
 
 def _mission_status(keys, missions):
@@ -103,7 +103,7 @@ def retrieve(world, rid=None):
         chapter = chapters.get(mission['chapter_id'], {})
         related_regions += [chapter.get('flag_sources', {}).get(condition['flag'])
                             for field in ('when', 'fail_when', 'reveal_when')
-                            for condition in mission.get(field, [])]
+                            for condition in mission.get(field, []) if 'flag' in condition]
     _take(related_regions + list(reversed(topology)), topology, region_ids, _LIMITS['known_regions'])
 
     open_missions = []

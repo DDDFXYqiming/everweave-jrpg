@@ -110,6 +110,8 @@ class AdventureTests(unittest.TestCase):
         self.assertEqual(self.w.state['player']['resources']['focus'],before+1)
     def test_one_way_new_route_is_not_a_reverse_exit(self):
         self.generate();self.generate('c1_vault')
+        # 储藏室的出口需要电源；先通电，否则单向滑下去就是软锁，导演方案会被进度搜索拒绝
+        self.w.state['campaign']['chapters']['c1']['flags']['power']=True
         self.w.apply_patch(dict(kind='direction',direction=dict(reason='单向滑道',links=[dict(id='slide',a='r0',b='c1_vault',one_way=True)])),self.w.context(kind='direction'))
         self.assertIn('c1_vault',campaign.neighbors(self.w.state,'r0'))
         self.assertNotIn('r0',campaign.neighbors(self.w.state,'c1_vault'))

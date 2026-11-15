@@ -36,10 +36,19 @@ flowchart TD
 
 - `cast`：稳定 `id/name/role/motive/state`。`alive` 为布尔值，数值关系状态限定在 -100～100。人物已有名字和状态不会被再次声明覆盖。
 - `skills`：稳定 `id/name/description/scope`，是制作简报。地区作者另行提供可执行能力，学习之前不会自动出现按钮。
-- `missions`：`id/name/kind/region/brief/depends/when/fail_when`。类型为主线、支线或遭遇；完成与失败条件仍是章节旗标比较。依赖必须无环。支线在地点已到访且前置任务完成后才显示。
+- `missions`：`id/name/kind/region/brief/depends/when/fail_when`。类型为主线、支线或遭遇；完成与失败条件使用章节条件（旗标、道具、能力、任务状态，见 [章节条件](CAMPAIGNS.md#条件)）。依赖必须无环。支线在地点已到访且前置任务完成后才显示。
 - `endings`：`id/name/description/requires/final`。前置任务完成后，在安全交互点显示一次；`final=true` 结束本局，否则可继续冒险。
 - `economy`：每个资源在一次玩家事务内允许的正向收益总量。它约束规则收益，不自动发奖励，也不是完整经济模拟。新版冒险不再自动发旧战斗金币；启用成长时仍保留既有等级结算。
 - `commissions`：`id/kind/region/brief/cast/skills/missions/requires/limits`。`kind` 为 `scene/encounter/quest/ability`；可指定敌人生命、攻击和数量上限。定义尚未实现、已制作和任务已完成是不同状态。
+
+任务图硬规则（`adventure.check_mission_graph`，在章节规划和导演追加时都对「已有 + 新增」整体检查，违反即打回重写）：
+
+- 至少有一个 `final=true` 的结局；
+- 最终结局经 `requires` 与 `depends` 传递到的任务都必须是 `main`；
+- `main` 任务不得依赖 `side` 任务；
+- 最终结局依赖链上的任务不得带 `fail_when`，除非另有一个不经过它的最终结局。
+
+在此之上，章节与导演方案还要通过 [通关证明](CAMPAIGNS.md#通关证明engineprogressionpy)。
 
 开局一次规划可声明最多 8 名人物、6 个技能、10 个任务、4 个结局和 8 个委托。后续复盘可追加，待制作委托总数最多 8；模型上下文仅带有界摘要及当前相关内容。
 
@@ -71,4 +80,4 @@ flowchart TD
 
 这版提供持续人物身份与关系，没有完整的 NPC 行程或全世界唯一物理位置模拟。新增道路连接当前章节内已有或刚声明的地点，已生成地点仍受两个预留门口限制；跨章节走接续门。旧任务和委托不可随意取消或重写；失败的制作需要定向重试。
 
-任务和结局条件仍较简单，不能证明所有生成冒险均可解。战斗仍以健康值和回合为基础，技能与演出能力有明确边界。场景文本、任务重复和美术质量仍需实际审查；增加结构能力不等于所有生成结果都已经好玩。验证范围见 [本轮记录](ADVENTURE_VALIDATION.md)。
+任务图硬规则和章节层搜索只证明骨架可通关、无软锁；地区内容是否兑现承诺仍未精确证明。战斗仍以健康值和回合为基础，技能与演出能力有明确边界。场景文本、任务重复和美术质量仍需实际审查；增加结构能力不等于所有生成结果都已经好玩。验证范围见 [本轮记录](ADVENTURE_VALIDATION.md)。

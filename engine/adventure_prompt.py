@@ -14,12 +14,14 @@ cast:[{id,name,role,motive,state:{alive:true,trust:0,...bounded scalar fields}}]
 Persistent actors keep identity/state across locations. Existing cast IDs must not be renamed or reset.
 skills:[{id,name,description,scope:"explore"|"combat"}] (0..6) are PORTABLE abilities earned through play.
 missions:[{id,name,kind:"main"|"side"|"encounter",region:LOCAL_REGION,brief,depends:[MISSION_IDS],
-when:[{flag,eq}],fail_when?:[{flag,eq}],reveal_when?:[{flag,eq}]}] (0..10). Connect main goals, side characters, resource stakes and encounter consequences.
+when:[COND],fail_when?:[COND],reveal_when?:[COND]}] (0..10), COND as in chapter conditions. Connect main goals, side characters, resource stakes and encounter consequences.
 Define only the immediate 1-3 actionable missions. Every future main mission needs depends or reveal_when;
 do not disclose intermediate destinations or solution steps through mission names/briefs. The chapter goal is a
 player-known problem, not a walkthrough. Keep the eventual outcome direction in private ending_brief.
 endings:[{id,name,description,requires:[MISSION_IDS],final:bool}] (0..4). final=true ends the run;
-false concludes an arc while the adventure may continue. Give goals meaningful outcomes beyond flag labels.
+false concludes an arc while the adventure may continue. HARD RULES: the adventure always has at least one final ending;
+every mission a final ending requires (transitively via depends) is kind "main"; main never depends on side;
+a mission on a final ending's chain has no fail_when unless another final ending avoids that mission. Give goals meaningful outcomes beyond flag labels.
 economy:{RESOURCE_ID:MAX_POSITIVE_GAIN_PER_PLAYER_ACTION} is a fixed resource reward policy, not a grant.
 commissions:[{id,kind:"scene"|"encounter"|"quest"|"ability",region:LOCAL_REGION,brief,
 cast:[ACTOR_IDS],skills:[SKILL_IDS],missions:[MISSION_IDS],requires:[COMPLETED_MISSION_IDS],
@@ -39,7 +41,10 @@ new_flags?:[{id,initial:false|0|"pending",source:EXISTING_REGION_ID}],
 new_regions?:[{id:FRESH_CANONICAL_ID,name,description,purpose}],
 additions?:{cast:[],skills:[],missions:[],endings:[],commissions:[]},
 region_briefs?:[{region:EXISTING_CANONICAL_ID,purpose:REVISED_UNVISITED_BRIEF}],
-links?:[{id,a:EXISTING_REGION,b:EXISTING_REGION,hidden?:bool,discover?:[{flag,eq}],requires?:[{flag,eq}],blocked_reason?:text,one_way?:bool}]}}.
+links?:[{id,a:EXISTING_REGION,b:EXISTING_REGION,hidden?:bool,discover?:[COND],requires?:[COND],blocked_reason?:text,one_way?:bool}]}}.
+COND: {flag,eq} | {item:CHAPTER_ITEM_SOURCE_ID,count?} | {ability:SKILL_ID} | {mission:MISSION_ID,status}.
+The engine re-proves the whole current chapter from the player's real state after your change; reject-worthy changes
+include unreachable new locations and any softlock.
 Respond with no additions when the current plan is working. Max 3 brief updates, 2 new links;
 do not accumulate more than 8 pending work orders. New links consume reserved director gates.
 Add at most two new current-chapter locations when actual discoveries/choices justify them. Reference their exact

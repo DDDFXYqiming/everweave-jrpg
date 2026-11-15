@@ -87,6 +87,8 @@ def expression(value, depth=0):
         return {'item': target(value['item'])}
     if set(value) == {'fact'}:
         return {'fact': text(value['fact'], 'fact', 200)}
+    if set(value) == {'has_ability'}:
+        return {'has_ability': ident(value['has_ability'])}
     if set(value) == {'history', 'field'}:
         integer(value['history'], 0, 63, 'history offset')
         if value['field'] not in ('x', 'y'):

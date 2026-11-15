@@ -106,7 +106,7 @@ def check_progress(world,body,context):
         except (TypeError,ValueError):return UNKNOWN
     def possible(expr,owner):
         value=evaluate(expr,owner);return value is UNKNOWN or any(value)
-    def conditions(values):return all(flags.get(v['flag']) is UNKNOWN or v['eq'] in flags.get(v['flag'],set()) for v in values)
+    def conditions(values):return all('flag' not in v or flags.get(v['flag']) is UNKNOWN or v['eq'] in flags.get(v['flag'],set()) for v in values)
     def effects(commands,owner):
         for command in commands:
             op=command.get('op')
@@ -152,6 +152,6 @@ def check_progress(world,body,context):
         condition for m in chapter_data['milestones']
         if state['quests'].get(chapter_data['id']+':'+m['id'],{}).get('status','active')=='active' for condition in m['when']]
     errors=[{'path':'region.program','category':'gameplay','message':f"旗标 {c['flag']} 无法达到目标值；检查生产动作、钥匙、代价和路线的循环依赖"}
-            for c in needed if flags.get(c['flag']) is not UNKNOWN and c['eq'] not in flags.get(c['flag'],set())]
+            for c in needed if 'flag' in c and flags.get(c['flag']) is not UNKNOWN and c['eq'] not in flags.get(c['flag'],set())]
     if errors:raise InvalidPatch(issues=errors)
     return {'status':'unproven','reason':'relaxed_dependencies_passed'}

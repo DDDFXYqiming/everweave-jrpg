@@ -14,7 +14,8 @@ composition, silhouettes AND conditions/actions. Reuse identities of existing pe
 not a canned room layout or puzzle solution. Favor 1-2 coherent original mechanics over many weak ones.
 Runtime supports bounded JSON programs below. There is no eval, arbitrary script, filesystem or URL.
 Expressions are JSON scalars (numbers/bools/strings), {"get":"path"}, {"item":"item_id"} (quantity),
-{"fact":"canonical fact key"}, {"history":N,"field":"x" or "y"},
+{"fact":"canonical fact key"}, {"has_ability":"skill_id"} (true once the player learned that portable skill),
+{"history":N,"field":"x" or "y"},
 or {"op":OP,"args":[expressions]}. History 0 is the player's latest action position, 2 is two actions earlier.
 OP: add,sub,mul,div,mod,min,max,abs,eq,ne,lt,le,gt,ge,and,or,not,concat,inside.
 inside has [x,y,rect_x,rect_y,width,height]. Bounds: depth 10, numbers +/-1e6, strings <=400.
@@ -249,7 +250,7 @@ def model_context(context,kind,hybrid=False):
         chapter['regions']=[r for r in chapter.get('regions',[]) if r['id'] in neighbors]
         relevant=set(context.get('required_flag_writes',[]))
         for route in context.get('planned_routes',[]):
-            relevant.update(c['flag'] for c in route.get('requires',[])+route.get('discover',[]))
+            relevant.update(c['flag'] for c in route.get('requires',[])+route.get('discover',[]) if 'flag' in c)
         chapter['flag_sources']={k:v for k,v in chapter.get('flag_sources',{}).items() if k in relevant}
     if result.get('content_contract'):
         contract=result['content_contract'];rid=context['target']

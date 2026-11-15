@@ -7,7 +7,7 @@ def adventure_plan():
         cast=[dict(id='mira',name='米拉',role='同行调查员',motive='找到失踪的姐姐',state=dict(alive=True,trust=0))],
         skills=[dict(id='listen',name='集中聆听',description='花费一点专注辨别线索',scope='explore')],
         missions=[dict(id='meet',name='建立信任',kind='main',region='post',brief='与米拉决定如何合作',when=[dict(flag='clue',eq=True)]),
-                  dict(id='recover',name='共同取回信件',kind='side',region='vault',brief='用前面的线索取回信件',depends=['meet'],when=[dict(flag='letter',eq=True)])],
+                  dict(id='recover',name='共同取回信件',kind='main',region='vault',brief='用前面的线索取回信件',depends=['meet'],when=[dict(flag='letter',eq=True)])],
         endings=[dict(id='together',name='共同的旅途',description='米拉读完了信，决定与你同行。',requires=['recover'],final=True)],
         economy=dict(focus=2),
         commissions=[dict(id='welcome',kind='scene',region='post',brief='米拉提出合作并教会聆听，选择改变信任和进展',cast=['mira'],skills=['listen'],missions=['meet'])])

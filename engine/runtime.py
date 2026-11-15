@@ -131,6 +131,9 @@ class Runtime:
             return scalar(obj[key])
         if 'item' in value: return self.s['player']['inventory'].get(self.item_id(value['item']), 0)
         if 'fact' in value: return scalar(self.s['facts'].get(value['fact'], False))
+        if 'has_ability' in value:
+            if value['has_ability'] not in self.s.get('adventure',{}).get('skills',{}): raise RuleError('unknown portable skill: '+value['has_ability'])
+            return value['has_ability'] in self.s['player'].get('abilities',[])
         if 'history' in value:
             history = self.rt['history']
             p = history[max(0, len(history)-1-value['history'])] if history else self.s['player']

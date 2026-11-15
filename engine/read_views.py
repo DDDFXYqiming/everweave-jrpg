@@ -69,16 +69,16 @@ def atlas(world):
                           thumbnail=card.get('thumbnail'),tasks=quests.get(rid,[])))
     edges=[dict(a=a,b=b) for a,b in sorted(pairs)]
     if s.get('campaign'):
-        from .campaign import links,satisfied
+        from .campaign import links,satisfied,facts
         for e in edges:
             sources=[link for link in links(s,e['a'],True) if e['b'] in (link['a'],link['b'])]
-            e['locked']=all(not satisfied(source['requires'],s['campaign']['chapters'][source['chapter_id']]['flags']) for source in sources)
+            e['locked']=all(not satisfied(source['requires'],facts(s,s['campaign']['chapters'][source['chapter_id']])) for source in sources)
             e['blocked_reason']=' / '.join(source['blocked_reason'] for source in sources) if e['locked'] else ''
             origins=set();allowed=set()
             for source in sources:
                 directions={source['a']} if source.get('one_way') else {source['a'],source['b']}
                 origins.update(directions)
-                if satisfied(source['requires'],s['campaign']['chapters'][source['chapter_id']]['flags']):allowed.update(directions)
+                if satisfied(source['requires'],facts(s,s['campaign']['chapters'][source['chapter_id']])):allowed.update(directions)
             e.update(allowed_from=sorted(allowed),one_way=len(origins)==1,from_id=next(iter(origins)) if len(origins)==1 else '')
     return copy.deepcopy(dict(epoch=s['epoch'],current=s['current'],nodes=nodes,edges=edges))
 

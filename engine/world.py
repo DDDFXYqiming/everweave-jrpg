@@ -195,6 +195,10 @@ class World:
     regions=[self.region(rid) for rid,n in self.state['topology'].items() if n['ready']]
     store.commit(copy.deepcopy(self.state),copy.deepcopy([r for r in regions if r]))
     probe=World(store);adventure.apply_direction(probe,data,context)
+    from .progression import search
+    result=search(campaign.graph_from_state(probe.state))
+    missing={r['id'] for r in data['new_regions']}-set(result['regions'])
+    if missing:raise InvalidPatch('新地点在任何可达状态下都到不了：'+'、'.join(sorted(missing))+'；需要一条从已知地点出发、条件可满足的连接',category='gameplay')
    finally:store.close()
    return dict(kind='direction',direction=data)
   identities=self.validation_context(context)

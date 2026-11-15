@@ -53,7 +53,7 @@ flowchart TD
 
 ## 章节计划 `kind=campaign`
 
-外壳为 `{"kind":"campaign","campaign":{...}}`。章节包含 `title/premise/goal`、`flags`、`flag_sources`、`regions`、`links`、`milestones`、`complete_when` 和 `continuation`。
+外壳为 `{"kind":"campaign","campaign":{...}}`。章节包含 `title/premise/goal`、`flags`、`flag_sources`、可选的 `item_sources`、`regions`、`links`、`milestones`、`complete_when` 和 `continuation`。
 
 - 新在线默认 `planning:rolling`，先规划 2～4 个地区及私有 `ending_brief`，中段由导演追加。`planning:chapter` 保留原来的 4～8 地区整章模式。第一个地区是到达点。
 - 初始每章 4～14 条连接，默认双向，可设置 `one_way=true` 表示仅从 a 到 b。必须有回环和交汇点，沿允许方向从入口能够结构性到达所有地区。初始每个地点最多六条章内物理路线；跨章接续与后续导演预留门另计。
@@ -61,7 +61,21 @@ flowchart TD
 上述最少连接数、回环和交汇点要求适用于整章模式。滚动开局允许从一小段相连地点开始，所有初始地点仍须沿允许方向可达；后续扩展应形成分支和交汇，运行时不保证模型每次都设计出有趣的网络。
 - 地区 ID 最长 20 字符，连接 ID 最长 40 字符。引擎提供短而稳定的实际锚点名，模型照抄 `planned_routes[].anchor`，不自行推算。
 - `flags` 是本章共享标量；`flag_sources` 为每个标量指定负责产生它的地区。地区校验会检查是否包含对应写入效果，但不能证明该效果一定能触发。
-- `milestones` 是面向玩家的阶段目标；`complete_when` 决定章节完成。条件列表采用 AND，每条为 `{flag,eq}`，比较值与声明类型一致。
+- `item_sources` 声明本章关键道具：`{ITEM_ID:{region,count?}}`，`count` 为 1～9，默认 1，需要启用物品系统。产出地区在上下文里收到 `required_item_grants`，要用同名 `items` 定义让玩家拿到；运行时按 `地区ID:道具ID` 读背包。
+- `milestones` 是面向玩家的阶段目标；`complete_when` 决定章节完成。
+
+## 条件
+
+`links.requires/discover`、`milestones.when`、`complete_when` 以及任务的 `when/fail_when/reveal_when` 共用一种条件列表，条目之间只有 AND：
+
+| 写法 | 含义 |
+|---|---|
+| `{"flag":"power","eq":true}` | 本章旗标等于该值，类型须与声明一致 |
+| `{"item":"fuse","count":2}` | 背包里至少有 2 个本章 `item_sources` 声明的道具，`count` 默认 1 |
+| `{"ability":"listen"}` | 玩家已学会冒险技能 `listen` |
+| `{"mission":"meet","status":"complete"}` | 任务处于 `active/complete/failed` 之一 |
+
+运行时 `refresh`、门的 `sync_gates` 和旅图都按真实状态（旗标、背包、已学能力、任务状态）求值。章节和导演计划里的本地任务 ID 在安装时改写成带前缀的正式 ID。地区规则内要判断能力时用表达式 `{"has_ability":"listen"}`。
 
 例如电站的规则可以写入：
 
@@ -87,6 +101,20 @@ flowchart TD
 
 检索不再额外偏爱冒险者、史莱姆等名称；模块按系统过滤，例如没有魔力时不推荐依赖 MP 的 `duel_v1`。当前库仍以小镇/地下为主，分类仍是关键词和标签规则，不能保证理解所有混合题材。
 
+## 通关证明（`engine/progression.py`）
+
+章节计划通过结构校验后，引擎在章节抽象图上做穷举搜索。状态是（所在地区、旗标、道具计数、已学能力、任务状态，外加已兑现的产出与已揭示路线）。规则：
+
+- 到达地区即可兑现它承诺的产出：`flag_sources` 指向它的旗标可以写成任何被条件引用过的值（因此失败分支也会被搜到）；`item_sources` 的道具按声明数量各给一次；带 `skills` 的委托在其 `requires` 任务完成后可学会这些技能。导演追加旗标时，写入它的委托的 `requires` 同样是前提。
+- 路线按 `requires`、`hidden/discover`（揭示后不再隐藏）、`one_way` 行走；任务完成与失败、隐藏路线揭示按运行时 `refresh` 的顺序结算。
+- 终点：存在全部依赖都在本章（或已完成）的 `final` 结局时，以到达这样的结局为终点；否则以本章 `complete_when` 为终点，交给下一章接续。
+
+必须同时证明：从开局能到达终点（给出一条见证路径）；每个计划地区在某个可达状态下能到；任何可达状态都仍能到达终点，否则报出软锁状态和导致它的步骤。状态数上限 100000，超限直接拒绝。失败都以 `InvalidPatch` 返回，走原有的「原响应 + 具体错误交回模型修复」路径。
+
+导演 `direction` 先在探针世界里试装，再从玩家当前位置和真实状态重新证明当前章节；新地点必须在某个可达状态下能到。
+
+这一层只证明章节骨架。道具消耗在章节层没有声明数据，当前按只增不减处理；地区内部是否真的兑现承诺仍由地区层宽松检查 `playability.check_progress` 把关，不是精确证明。跨章节的旧任务在搜索中冻结为当前状态。
+
 ## 验证边界
 
-章节结构和共享状态有自动测试，实际模型也生成了医院计划及地区。完整实机跨区域通关、长时间章节接续和谜题平衡尚未完成，见 [交付记录](CAMPAIGN_VALIDATION.md)。不能把“存在回环、声明了旗标写入”当作整章必然可解、剧情必然精彩的证明。
+章节结构和共享状态有自动测试，实际模型也生成了医院计划及地区。章节骨架的可通关性由上面的搜索证明；地区内容是否兑现承诺、完整实机跨区域通关、长时间章节接续和谜题平衡尚未完成，见 [交付记录](CAMPAIGN_VALIDATION.md)。剧情是否精彩不在证明范围内。
