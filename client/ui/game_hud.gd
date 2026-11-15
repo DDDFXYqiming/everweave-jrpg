@@ -86,7 +86,7 @@ func build(controller) -> void:
 	var task_style := StyleBoxFlat.new()
 	task_style.bg_color = Color(0.035,0.075,0.13,0.73)
 	task_style.border_color = Color(Color("c1a9ef"),0.41)
-	task_style.set_border_width_all(1)
+	task_style.set_border_width_all(2)
 	main.task_button.add_theme_stylebox_override("normal",task_style)
 	var task_hover: StyleBoxFlat = task_style.duplicate() as StyleBoxFlat
 	task_hover.bg_color = Color(0.035,0.075,0.13,0.89)
@@ -138,8 +138,7 @@ func build(controller) -> void:
 	main.hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	main.hint_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	status_button = main._button(footer,"",main._toggle_aux.bind("journey"))
-	status_button.add_theme_font_override("font",preload("res://assets/fonts/LXGWWenKaiScreen.ttf"))
-	status_button.add_theme_font_size_override("font_size",16)
+	status_button.add_theme_font_size_override("font_size",12)
 	status_button.add_theme_stylebox_override("normal",StyleBoxEmpty.new())
 	sound_button = icon_button(footer,"sound_on",L.t("声音 · M"),main._toggle_music)
 	sound_button.toggle_mode = true

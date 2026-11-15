@@ -1,6 +1,5 @@
-[gd_resource type="Theme" load_steps=6 format=3]
+[gd_resource type="Theme" load_steps=5 format=3]
 
-[ext_resource type="FontFile" path="res://assets/fonts/LXGWWenKaiScreen.ttf" id="1"]
 [ext_resource type="FontFile" path="res://assets/fonts/FusionPixel.ttf" id="2"]
 [ext_resource type="Texture2D" path="res://client/ui/theme/frame.svg" id="3"]
 
@@ -25,8 +24,8 @@ content_margin_top = 8.0
 content_margin_bottom = 8.0
 
 [resource]
-default_font = ExtResource("1")
-default_font_size = 18
+default_font = ExtResource("2")
+default_font_size = 12
 Button/fonts/font = ExtResource("2")
 Button/font_sizes/font_size = 24
 Button/styles/normal = SubResource("Button")

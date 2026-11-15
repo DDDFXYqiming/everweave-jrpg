@@ -174,7 +174,7 @@ func _texture(id: String, thumbnail: Dictionary) -> Texture2D:
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO,size),Color("151f19"))
 	if nodes.is_empty():
-		draw_string(get_theme_default_font(),Vector2(24,48),L.t("到访第一处地点后，旅图会从这里展开。"),HORIZONTAL_ALIGNMENT_LEFT,-1,16,Color("b4bda8"))
+		draw_string(get_theme_default_font(),Vector2(24,48),L.t("到访第一处地点后，旅图会从这里展开。"),HORIZONTAL_ALIGNMENT_LEFT,-1,12,Color("b4bda8"))
 		return
 	draw_set_transform(pan,0,Vector2(zoom,zoom))
 	for edge in data.get("edges",[]):
@@ -203,10 +203,10 @@ func _draw() -> void:
 		draw_style_box(_style(Color("293729") if visited else Color("1b271f"),Color("e1c28c") if id == selected else Color("536249")),rect)
 		if node.get("thumbnail") is Dictionary:
 			draw_texture_rect(_texture(id,node.thumbnail),Rect2(rect.position+Vector2(12,27),Vector2(54,36)),false)
-		else: draw_string(font,rect.position+Vector2(30,60),"?",HORIZONTAL_ALIGNMENT_LEFT,-1,25,Color("8f9a7e"))
+		else: draw_string(font,rect.position+Vector2(30,60),"?",HORIZONTAL_ALIGNMENT_LEFT,-1,24,Color("8f9a7e"))
 		var title: String = str(node.name)
-		draw_string(font,rect.position+Vector2(77,31),title.left(9),HORIZONTAL_ALIGNMENT_LEFT,136,14,Color("e6d9bb"))
-		if title.length()>9: draw_string(font,rect.position+Vector2(77,52),title.substr(9,8)+("…" if title.length()>17 else ""),HORIZONTAL_ALIGNMENT_LEFT,136,14,Color("e6d9bb"))
+		draw_string(font,rect.position+Vector2(77,31),title.left(9),HORIZONTAL_ALIGNMENT_LEFT,136,12,Color("e6d9bb"))
+		if title.length()>9: draw_string(font,rect.position+Vector2(77,52),title.substr(9,8)+("…" if title.length()>17 else ""),HORIZONTAL_ALIGNMENT_LEFT,136,12,Color("e6d9bb"))
 		var status: String = L.t("你在这里") if id == str(data.current) else L.t("已到访") if visited else L.t("尚未到访")
 		if collapsed.has(id): status += L.t("  +%d处") % descend(id).size()
 		draw_string(font,rect.position+Vector2(77,81),status,HORIZONTAL_ALIGNMENT_LEFT,140,12,Color("b9ba98"))
@@ -218,8 +218,8 @@ func _style(fill: Color, border: Color) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = fill
 	style.border_color = border
-	style.set_border_width_all(1)
-	style.set_corner_radius_all(4)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(0)
 	return style
 
 func _gui_input(event: InputEvent) -> void:

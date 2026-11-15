@@ -25,7 +25,7 @@ func build(owner_node: Control) -> void:
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.035, 0.065, 0.055, 0.96)
 	style.border_color = Color(0.75, 0.66, 0.46, 0.75)
-	style.set_border_width_all(1)
+	style.set_border_width_all(2)
 	for edge in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]: style.set_content_margin(edge, 12)
 	panel.add_theme_stylebox_override("panel", style)
 	var stack := VBoxContainer.new()

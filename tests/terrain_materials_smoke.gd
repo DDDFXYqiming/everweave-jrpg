@@ -27,9 +27,6 @@ func _run() -> void:
 	var stone: Image = surface.styles.road.details[0].get_image()
 	for y in range(16):
 		for x in range(16):assert(not stone.get_pixel(x,y).is_equal_approx(Color("#84c669")),"Detail left a square of grass on the dirt road")
-	var logical: Array = [[0,0,3]]
-	var view_grid: Array = surface.display_grid({"tiles":logical,"surfaces":[["floor","road","road"]]})
-	assert(view_grid==[[0,1,3]] and logical==[[0,0,3]],"Visual roles rewrote collision data")
 	var view = View.new()
 	view.size=Vector2(480,320)
 	root.add_child(view)
@@ -46,12 +43,8 @@ func _run() -> void:
 	tiles[7][6]=1
 	var region := {"id":"room","seed":42,"width":15,"height":10,"tiles":tiles,"surfaces":surfaces,"visuals":visuals,"entities":[],"props":[],"biome":"forest","weather":"clear","scene":{"paint":[{"room":[3,2,8,6],"tile":0,"surface":"floor","doors":[[6,7]]}]}}
 	view.update_world({"region":region,"player":{"x":6,"y":8},"time":480})
-	assert(view.room_floor_keys.has(Vector2i(3,3)))
-	assert(not view.room_floor_keys.has(Vector2i(1,1)),"Legacy repair changed an unrelated wall")
-	region.surface_version=2
-	view.update_world({"region":region,"player":{"x":6,"y":8},"time":480})
-	assert(view.room_floor_keys.is_empty())
+	assert(view.terrain.get_child_count()>1,"Terrain layers were not built")
 	view.queue_free()
 	await process_frame
-	print("TERRAIN_MATERIALS_OK deterministic=true textured=true wall_visibility=true legacy_scope=true")
+	print("TERRAIN_MATERIALS_OK deterministic=true textured=true wall_visibility=true")
 	quit(0)

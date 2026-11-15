@@ -5,289 +5,265 @@ signal entity_clicked(entity_id: String)
 signal cell_clicked(cell: Vector2i)
 signal map_requested()
 
-const TILE: float = 32.0
+const TILE: float = 16.0
 const VisualCompiler = preload("res://client/visual_compiler.gd")
 const TerrainMaterials = preload("res://client/terrain_materials.gd")
 const Walking = preload("res://client/walking.gd")
-var materials = TerrainMaterials.new()
-var room_floor_keys: Dictionary = {}
-var terrain_grid: Array = []
-var generated: Dictionary = {}
-var visual_signature: String = ""
+const Atmosphere = preload("res://client/world/atmosphere.gd")
+const Lighting = preload("res://client/world/lighting.gd")
+const Terrain = preload("res://client/world/terrain.gd")
+const Actors = preload("res://client/world/actors.gd")
+const Weather = preload("res://client/world/weather.gd")
+const POST_SHADER = preload("res://client/world/shaders/post.gdshader")
 const BIOMES: Array[String] = ["forest", "coast", "snow", "desert", "ruins", "industrial", "dream"]
-var atlas: Texture2D = preload("res://assets/atlas.png")
-var tiles: Texture2D = preload("res://assets/tiles.png")
-var sprites: Dictionary = {}
+const MINIMAP := Rect2(-222, 76, 204, 158)
+
+var materials = TerrainMaterials.new()
+var generated: Dictionary = {}
 var snapshot: Dictionary = {}
 var region: Dictionary = {}
-var visual_player := Vector2.ZERO
-var target_player := Vector2.ZERO
-var camera := Vector2.ZERO
-var world_zoom: float = 1.0
+var atmosphere: Dictionary = {}
+var atlas: Texture2D = preload("res://assets/atlas.png")
+var tiles: Texture2D = preload("res://assets/tiles.png")
+var atlas_rects: Dictionary = {}
+var atlas_cache: Dictionary = {}
+var visual_signature: String = ""
 var terrain_token: String = ""
-var elapsed: float = 0.0
-var walk_frame: int = 0
 var current_id: String = ""
-var moving: bool = false
-var walk_goal := Vector2i(-1, -1)
+var walk_goal := Vector2i(-1, -1):
+	set(value):
+		walk_goal = value
+		if actors != null: actors.walk_goal = value
 var font: Font
+var pixel_scale: int = 3
+var elapsed: float = 0.0
+var viewport: SubViewport
+var display: TextureRect
+var post: ShaderMaterial
+var stage: Node2D
+var shade: CanvasModulate
+var terrain: Terrain
+var actors: Actors
+var weather: Weather
+var camera: Camera2D
+var overlay: Control
+var view_center := Vector2.ZERO
+var fade: float = 0.0
+var fade_tween: Tween
 
 func _ready() -> void:
 	clip_contents = true
-	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	mouse_default_cursor_shape = Control.CURSOR_ARROW
 	var parsed = JSON.parse_string(FileAccess.get_file_as_string("res://assets/atlas.json"))
-	if parsed is Dictionary:
-		sprites = parsed
+	if parsed is Dictionary: atlas_rects = parsed
 	font = get_theme_default_font()
+	viewport = SubViewport.new()
+	viewport.snap_2d_transforms_to_pixel = true
+	viewport.snap_2d_vertices_to_pixel = true
+	viewport.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.disable_3d = true
+	add_child(viewport)
+	stage = Node2D.new()
+	viewport.add_child(stage)
+	shade = CanvasModulate.new()
+	stage.add_child(shade)
+	terrain = Terrain.new()
+	stage.add_child(terrain)
+	actors = Actors.new()
+	actors.sprite_for = _sprite
+	actors.recipe_for = _recipe
+	stage.add_child(actors)
+	camera = Camera2D.new()
+	stage.add_child(camera)
+	camera.make_current()
+	weather = Weather.new()
+	viewport.add_child(weather)
+	display = TextureRect.new()
+	display.texture = viewport.get_texture()
+	display.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	display.stretch_mode = TextureRect.STRETCH_SCALE
+	display.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	display.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	post = ShaderMaterial.new()
+	post.shader = POST_SHADER
+	display.material = post
+	add_child(display)
+	overlay = Control.new()
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.draw.connect(_draw_overlay)
+	add_child(overlay)
+	resized.connect(_layout)
+	_layout()
+
+func _layout() -> void:
+	if viewport == null: return
+	pixel_scale = maxi(1, int(size.y / 240.0))
+	var pixels := Vector2i(ceili(maxf(size.x, 1.0) / pixel_scale), ceili(maxf(size.y, 1.0) / pixel_scale))
+	viewport.size = pixels
+	display.position = Vector2.ZERO
+	display.size = Vector2(pixels * pixel_scale)
+	post.set_shader_parameter("pixels", Vector2(pixels))
+	if not atmosphere.is_empty(): weather.configure(str(atmosphere.weather), Vector2(pixels))
+
+func _sprite(key: String, seconds: float) -> Texture2D:
+	if not generated.is_empty(): return VisualCompiler.texture(key, generated, seconds)
+	if not atlas_cache.has(key):
+		var rect: Array = atlas_rects.get(key, atlas_rects.get("chest", {"rect": [0, 0, 16, 16]})).rect
+		var texture := AtlasTexture.new()
+		texture.atlas = atlas
+		texture.region = Rect2(float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))
+		atlas_cache[key] = texture
+	return atlas_cache[key]
+
+func _recipe(key: String) -> Dictionary:
+	if generated.is_empty(): return {}
+	return region.get("visuals", {}).get("sprites", {}).get(VisualCompiler.resolve(key, generated), {})
 
 func update_world(data: Dictionary) -> void:
 	snapshot = data
 	var value = data.get("region")
 	if not value is Dictionary:
 		region = {}
-		queue_redraw()
+		stage.visible = false
+		overlay.queue_redraw()
 		return
 	region = value
+	stage.visible = true
+	var regenerate: bool = false
 	var token: String = str(data.get("region_static_token", ""))
 	if token.is_empty() or token != terrain_token:
-		_prepare_terrain()
+		var identity: String = JSON.stringify([region.get("seed", 0), region.get("visuals", {})])
+		if identity != visual_signature:
+			visual_signature = identity
+			generated = VisualCompiler.compile(region.visuals, int(region.seed)) if region.has("visuals") else {}
+			if region.has("visuals"): materials.configure(region.visuals)
+		terrain.sheet = tiles if generated.is_empty() else generated["__tiles"]
+		terrain.sheet_row = maxi(0, BIOMES.find(str(region.get("biome", "")))) if generated.is_empty() else 0
+		terrain.build(region, generated, materials)
 		terrain_token = token
-	var p: Dictionary = data.get("player", {})
-	target_player = Vector2(float(p.get("x", 0)), float(p.get("y", 0)))
-	if current_id != str(region.get("id", "")) or visual_player.distance_to(target_player) > 3.0:
-		visual_player = target_player
+		regenerate = true
+	atmosphere = Atmosphere.derive(region, float(data.get("time", 480)))
+	var entering: bool = str(region.get("id", "")) != current_id
+	if entering:
+		print("ATMOSPHERE ", JSON.stringify({"region": region.get("id", ""), "name": region.get("name", "")}), " ", Atmosphere.summary(atmosphere))
+		if not current_id.is_empty(): _transition()
 		current_id = str(region.get("id", ""))
-	_update_camera()
-	queue_redraw()
+	shade.color = atmosphere.ambient
+	post.set_shader_parameter("grade", Vector3(atmosphere.grade.r, atmosphere.grade.g, atmosphere.grade.b))
+	post.set_shader_parameter("grade_strength", atmosphere.grade_strength)
+	post.set_shader_parameter("saturation", atmosphere.saturation)
+	post.set_shader_parameter("wet", atmosphere.wet)
+	post.set_shader_parameter("vignette", 0.3 + 0.2 * float(atmosphere.night))
+	weather.configure(str(atmosphere.weather), Vector2(viewport.size))
+	actors.atmosphere = atmosphere
+	actors.has_visuals = not generated.is_empty()
+	actors.walk_goal = walk_goal
+	actors.sync(data, regenerate or entering)
+	_follow(1.0 if entering or regenerate else 0.0)
+	overlay.queue_redraw()
 
-func _prepare_terrain() -> void:
-	room_floor_keys.clear()
-	if int(region.get("surface_version",0))<2:
-		for command in region.get("scene",{}).get("paint",[]):
-			if not command.has("room") or not command.has("surface"):continue
-			var box: Array = command.room
-			for yy in range(int(box[1]),int(box[1]+box[3])):
-				for xx in range(int(box[0]),int(box[0]+box[2])):
-					if xx in [int(box[0]),int(box[0]+box[2]-1)] or yy in [int(box[1]),int(box[1]+box[3]-1)]:room_floor_keys[Vector2i(xx,yy)]=str(command.surface)
-	var identity: String = JSON.stringify([region.get("seed", 0), region.get("visuals", {})])
-	if identity != visual_signature:
-		visual_signature = identity
-		generated = VisualCompiler.compile(region.visuals, int(region.seed)) if region.has("visuals") else {}
-		if region.has("visuals"):materials.configure(region.visuals)
-	terrain_grid=materials.display_grid(region) if region.has("visuals") else region.tiles
+func _transition() -> void:
+	if fade_tween != null: fade_tween.kill()
+	fade = 1.0
+	fade_tween = create_tween()
+	fade_tween.tween_property(self, "fade", 0.0, 0.55).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+func _follow(weight: float) -> void:
+	if region.is_empty(): return
+	var world := Vector2(float(region.width), float(region.height)) * TILE
+	var half := Vector2(viewport.size) * 0.5
+	var wanted: Vector2 = actors.player_point() - Vector2(0, TILE * 0.5)
+	var target := Vector2(
+		world.x * 0.5 if world.x <= half.x * 2.0 else clampf(wanted.x, half.x, world.x - half.x),
+		world.y * 0.5 if world.y <= half.y * 2.0 else clampf(wanted.y, half.y, world.y - half.y))
+	view_center = view_center.lerp(target, weight)
+	camera.position = view_center.round()
 
 func _process(delta: float) -> void:
 	elapsed += delta
-	moving = visual_player.distance_to(target_player) > 0.025
-	visual_player = visual_player.move_toward(target_player, delta * 10.0)
-	walk_frame = (1 + int(elapsed * 9.0) % 2) if moving else 0
-	_update_camera()
-	queue_redraw()
-
-func _update_camera() -> void:
-	if region.is_empty() or size.x <= 0 or size.y <= 0: return
-	var world_size := Vector2(float(region.width), float(region.height)) * TILE
-	var framing := Vector2(minf(26.0, float(region.width)), minf(16.0, float(region.height))) * TILE
-	world_zoom = maxf(1.0, maxf(size.x / framing.x, size.y / framing.y))
-	world_zoom = minf(world_zoom, maxf(1.0, size.y / (10.0 * TILE)))
-	var visible_size := size / world_zoom
-	var wanted := (visual_player + Vector2(0.5, 0.5)) * TILE - visible_size * 0.5
-	camera = Vector2(clampf(wanted.x, 0.0, maxf(0.0, world_size.x - visible_size.x)), clampf(wanted.y, 0.0, maxf(0.0, world_size.y - visible_size.y)))
-	if world_size.x < visible_size.x: camera.x = (world_size.x - visible_size.x) * 0.5
-	if world_size.y < visible_size.y: camera.y = (world_size.y - visible_size.y) * 0.5
-
-func _draw_sprite(key: String, foot: Vector2, scale_factor: float = 2.0, tint: Color = Color.WHITE) -> void:
-	if not generated.is_empty():
-		var texture: Texture2D = VisualCompiler.texture(key, generated, elapsed)
-		var extent: Vector2 = texture.get_size() * scale_factor
-		draw_texture_rect(texture, Rect2((foot - Vector2(extent.x * .5, extent.y)).round(), extent), false, tint)
+	if region.is_empty():
+		overlay.queue_redraw()
 		return
-	if not sprites.has(key):
-		return
-	var rect: Array = sprites[key].rect
-	var source := Rect2(float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))
-	var extent := source.size * scale_factor
-	draw_texture_rect_region(atlas, Rect2((foot - Vector2(extent.x * 0.5, extent.y)).round(), extent), source, tint)
+	_follow(1.0 - exp(-delta * 7.0))
+	post.set_shader_parameter("fade", fade)
+	Lighting.refresh(get_tree(), atmosphere, elapsed)
+	overlay.queue_redraw()
 
-func _is_ready(target: String) -> bool:
-	for item in snapshot.get("frontier", []):
-		if str(item.id) == target:
-			return bool(item.ready)
-	return true
+func _cell_at(point: Vector2) -> Vector2:
+	var pixel: Vector2 = point / float(pixel_scale)
+	return ((viewport.canvas_transform.affine_inverse() * pixel) / TILE).floor()
 
-func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), Color("131d18"))
-	if region.is_empty() or sprites.is_empty():
+func _minimap_rect() -> Rect2:
+	return Rect2(Vector2(size.x + MINIMAP.position.x, MINIMAP.position.y), MINIMAP.size)
+
+func _draw_overlay() -> void:
+	if region.is_empty():
+		overlay.draw_rect(Rect2(Vector2.ZERO, size), Color("131d18"))
 		for i in range(34):
 			var point := Vector2(fmod(i * 53.0 + 19.0, maxf(size.x, 1.0)), fmod(i * 97.0 + elapsed * 6.0, maxf(size.y, 1.0)))
-			draw_rect(Rect2(point, Vector2(2, 2)), Color(0.50, 0.78, 0.74, 0.35))
+			overlay.draw_rect(Rect2(point.floor(), Vector2(3, 3)), Color(0.50, 0.78, 0.74, 0.35))
 		return
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE * world_zoom)
-	var visible_size := size / world_zoom
-	var biome_index: int = maxi(0, BIOMES.find(str(region.biome)))
-	var grid: Array = region.tiles
-	var x0: int = maxi(0, int(camera.x / TILE) - 1)
-	var y0: int = maxi(0, int(camera.y / TILE) - 1)
-	var x1: int = mini(int(region.width), int((camera.x + visible_size.x) / TILE) + 2)
-	var y1: int = mini(int(region.height), int((camera.y + visible_size.y) / TILE) + 2)
-	for y in range(y0, y1):
-		for x in range(x0, x1):
-			var typ: int = int(grid[y][x])
-			var variant: int = posmod(x * 7 + y * 13, 2)
-			if typ == 2:
-				variant = (variant + int(elapsed * 1.6)) % 2
-			var at := Vector2(x, y) * TILE - camera
-			var surfaces: Array = region.get("surfaces", [])
-			var painted: bool = false
-			if not generated.is_empty() and not surfaces.is_empty():
-				var surface: String = str(surfaces[y][x])
-				if typ==3 and not surface.is_empty() and room_floor_keys.get(Vector2i(x,y),"")==surface:surface=""
-				if not surface.is_empty() and generated.has(surface):
-					var texture: Texture2D = materials.texture(surface,typ,int(region.seed),x,y) if materials.styles.has(surface) else VisualCompiler.texture(surface,generated,elapsed)
-					if texture!=null:
-						draw_texture_rect(texture,Rect2(at.floor(),Vector2(TILE+1,TILE+1)),false)
-						painted=true
-			if not painted:
-				var terrain_texture: Texture2D = tiles if generated.is_empty() else generated["__tiles"]
-				draw_texture_rect_region(terrain_texture, Rect2(at.floor(), Vector2(TILE + 1, TILE + 1)), Rect2((typ * 2 + variant) * 16, biome_index * 16 if generated.is_empty() else 0, 16, 16))
-			if not generated.is_empty():materials.edges(self,terrain_grid,x,y,at.floor(),TILE)
-	var objects: Array = []
-	for prop in region.get("props", []):
-		if bool(prop.get("spent", false)): continue
-		if float(prop.x) * TILE < camera.x - 140 or float(prop.x) * TILE > camera.x + visible_size.x + 140:
-			continue
-		if float(prop.y) * TILE < camera.y - 100 or float(prop.y) * TILE > camera.y + visible_size.y + 140:
-			continue
-		objects.append({"y": float(prop.y), "x": float(prop.x), "footprint":prop.get("footprint",[1,1]), "sprite": str(prop.get("sprite", prop.kind)), "kind": "prop"})
-	for entity in region.get("entities", []):
-		var kind: String = str(entity.kind)
-		if bool(entity.get("spent", false)) and kind != "chest":
-			continue
-		var key: String = kind
-		if kind == "npc":
-			key = "npc_%d_0" % int(entity.get("appearance", 0))
-		elif kind == "enemy":
-			key = str(entity.get("monster", "slime"))
-		elif kind == "exit":
-			key = "portal" if _is_ready(str(entity.target)) else "portal_pending"
-		elif kind == "chest" and bool(entity.get("spent", false)):
-			key = "chest_open"
-		if not generated.is_empty() and entity.has("sprite"): key = str(entity.sprite)
-		objects.append({"y": float(entity.y), "x": float(entity.x), "footprint":entity.get("footprint",[1,1]), "sprite": key, "kind": kind, "entity": entity})
-	objects.append({"y": visual_player.y, "x": visual_player.x, "sprite": "hero_%d" % walk_frame, "kind": "player"})
-	objects.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.y) < float(b.y))
-	for obj in objects:
-		var footprint: Array = obj.get("footprint",[1,1])
-		var foot := (Vector2(float(obj.x), float(obj.y)) + Vector2(float(footprint[0])*.5, 1.0)) * TILE - camera
-		var tint := Color.WHITE
-		if generated.is_empty() and obj.kind == "prop" and obj.sprite in ["tree", "bush"]:
-			if region.biome == "snow":
-				tint = Color("c9deed")
-			elif region.biome == "dream":
-				tint = Color("cba8ed")
-			elif region.biome == "desert":
-				tint = Color("d8bc85")
-		if obj.kind in ["exit", "shrine"]:
-			draw_circle(foot - Vector2(0, 17), 24 + 2 * sin(elapsed * 2), Color(0.4, 0.85, 0.8, 0.06))
-		if obj.kind == "enemy":
-			draw_arc(foot - Vector2(0, 8), 19, 0, TAU, 20, Color(0.91, 0.49, 0.50, 0.65), 1.0)
-			if bool(obj.entity.get("alerted",false)):
-				draw_string(font,foot-Vector2(5,66),"!",HORIZONTAL_ALIGNMENT_LEFT,-1,24,Color("f39579"))
-			if int(footprint[0])>1 or int(footprint[1])>1:
-				var rect: Rect2i = Walking.rect_from_bottom_left(obj)
-				var occupied := Rect2(Vector2(rect.position)*TILE-camera,Vector2(rect.size)*TILE)
-				draw_rect(occupied,Color(0.91,0.49,0.50,0.35),false,1.0)
-		if obj.kind == "chest" and bool(obj.entity.get("spent", false)): tint = Color(.55, .55, .55, .7)
-		_draw_sprite(str(obj.sprite), foot, 2.0, tint)
-		if obj.kind in ["npc", "object"] and obj.has("entity"):
-			var marker := foot - Vector2(0, 64 + sin(elapsed * 2 + float(obj.x)) * 2)
-			draw_rect(Rect2(marker - Vector2(2, 7), Vector2(4, 8)), Color("f0d49c"))
-			draw_rect(Rect2(marker + Vector2(-2, 4), Vector2(4, 3)), Color("f0d49c"))
-	if walk_goal.x >= 0:
-		draw_rect(Rect2(Vector2(walk_goal) * TILE - camera + Vector2(3, 3), Vector2(TILE - 6, TILE - 6)), Color(0.94, 0.83, 0.61, 0.55 + 0.25 * sin(elapsed * 6)), false, 2.0)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	var hour: float = fmod(float(snapshot.get("time", 480)), 1440.0) / 60.0
-	if hour >= 19.0 or hour < 6.0:
-		draw_rect(Rect2(Vector2.ZERO, size), Color(0.035, 0.04, 0.16, 0.25))
-	_draw_weather(str(region.get("weather", "clear")))
-	for band in range(6):
-		var shade := Color(0.025, 0.04, 0.05, 0.62 * (1.0 - float(band) / 6.0))
-		draw_rect(Rect2(0, band * 12, size.x, 12), shade)
-		draw_rect(Rect2(0, size.y - (band + 1) * 12, size.x, 12), shade)
 	_draw_minimap()
 	_draw_nearby_hint()
 
-func _draw_weather(weather: String) -> void:
-	if weather == "rain":
-		draw_rect(Rect2(Vector2.ZERO, size), Color(0.05, 0.12, 0.24, 0.13))
-		for i in range(100):
-			var x := fmod(i * 83.7 - elapsed * 75.0, maxf(1.0, size.x + 40.0))
-			if x < 0: x += size.x + 40.0
-			var y := fmod(i * 47.3 + elapsed * 300.0, maxf(1.0, size.y + 40.0))
-			draw_line(Vector2(x, y), Vector2(x - 4, y + 13), Color(0.70, 0.84, 0.91, 0.32), 1.0)
-	elif weather == "snow" or weather == "fireflies":
-		for i in range(48):
-			var x := fmod(i * 79.7 + sin(elapsed * 0.6 + i) * 15 + size.x, maxf(1.0, size.x))
-			var y := fmod(i * 61.3 + elapsed * (19.0 if weather == "snow" else -6.0) + size.y * 50.0, maxf(1.0, size.y))
-			var tint := Color(0.84, 0.91, 0.92, 0.60) if weather == "snow" else Color(0.79, 0.94, 0.62, 0.25 + 0.35 * absf(sin(elapsed + i)))
-			draw_rect(Rect2(Vector2(x, y), Vector2(2, 2)), tint)
-	elif weather == "fog":
-		for i in range(7):
-			var top: float = fmod(i * 103.0 + elapsed * 5.0, maxf(1.0, size.y))
-			draw_rect(Rect2(0, top, size.x, 45), Color(0.62, 0.72, 0.80, 0.055))
-
 func _draw_minimap() -> void:
-	var origin := Vector2(size.x - 216.0, 82.0)
-	var hovered: bool = Rect2(origin - Vector2(6,6),Vector2(204,158)).has_point(get_local_mouse_position())
-	var opacity: float = 1.0 if hovered else .82
-	draw_rect(Rect2(origin - Vector2(6, 6), Vector2(204, 158)), Color(0.035, 0.075, 0.13, 0.89*opacity))
-	draw_rect(Rect2(origin - Vector2(6, 6), Vector2(204, 158)), Color(Color("c1a9ef"), .5 * opacity), false, 1.0)
+	var frame: Rect2 = _minimap_rect()
+	var origin: Vector2 = frame.position + Vector2(6, 6)
+	var hovered: bool = frame.has_point(get_local_mouse_position())
+	var opacity: float = 1.0 if hovered else .85
+	overlay.draw_rect(frame, Color(0.035, 0.06, 0.09, 0.92 * opacity))
+	overlay.draw_rect(frame.grow(-1), Color(Color("d7c59d"), .55 * opacity), false, 2.0)
 	var palette: Array[Color] = [Color("375e59"), Color("b29e75"), Color("356c7b"), Color("293844"), Color("bd9866")]
 	if region.has("visuals"):
 		palette.clear()
 		for key in ["ground", "path", "water", "wall", "path"]: palette.append(Color(str(region.visuals.palette[key])))
 	for i in range(palette.size()): palette[i].a = opacity
-	var map_scale: float = minf(192.0 / float(region.width), 134.0 / float(region.height))
+	var map_scale: float = floorf(minf(192.0 / float(region.width), 134.0 / float(region.height)) * 2.0) / 2.0
+	map_scale = maxf(map_scale, 1.0)
 	for y in range(int(region.height)):
 		for x in range(int(region.width)):
-			draw_rect(Rect2(origin + Vector2(x, y) * map_scale, Vector2.ONE * maxf(1.0, map_scale)), palette[int(region.tiles[y][x])])
+			overlay.draw_rect(Rect2(origin + Vector2(x, y) * map_scale, Vector2.ONE * map_scale), palette[int(region.tiles[y][x])])
 	for e in region.entities:
 		if e.kind == "exit":
-			draw_rect(Rect2(origin + Vector2(float(e.x), float(e.y)) * map_scale - Vector2.ONE, Vector2(3, 3)), Color("c1a9ef"))
-	draw_rect(Rect2(origin + target_player * map_scale - Vector2(2, 2), Vector2(5, 5)), Color("f7e0a4"))
-	draw_string(font,origin+Vector2(3,148),L.t("旅图 · G") if hovered else "G",HORIZONTAL_ALIGNMENT_LEFT,104,14,Color(Color("d7c59d"),opacity))
+			overlay.draw_rect(Rect2((origin + Vector2(float(e.x), float(e.y)) * map_scale - Vector2.ONE).floor(), Vector2(3, 3)), Color("c1a9ef"))
+	var p: Dictionary = snapshot.get("player", {})
+	overlay.draw_rect(Rect2((origin + Vector2(float(p.get("x", 0)), float(p.get("y", 0))) * map_scale - Vector2(2, 2)).floor(), Vector2(5, 5)), Color("f7e0a4"))
+	overlay.draw_string(font, origin + Vector2(3, 146), L.t("旅图 · G") if hovered else "G", HORIZONTAL_ALIGNMENT_LEFT, 120, 12, Color(Color("d7c59d"), opacity))
 
 func _draw_nearby_hint() -> void:
-	if not snapshot.get("ui",{}).is_empty() or snapshot.get("battle") is Dictionary: return
+	if not snapshot.get("ui", {}).is_empty() or snapshot.get("battle") is Dictionary: return
 	var p: Dictionary = snapshot.get("player", {})
 	for e in region.get("entities", []):
 		if bool(e.get("spent", false)): continue
-		if _distance_to_object(e,Vector2(float(p.get("x",0)),float(p.get("y",0)))) <= 1:
+		if _distance_to_object(e, Vector2(float(p.get("x", 0)), float(p.get("y", 0)))) <= 1:
 			var text: String = "E  ·  " + str(e.name)
-			var width: float = minf(size.x - 40, font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x + 28)
-			var at := Vector2((size.x - width) / 2, size.y - 96)
-			draw_rect(Rect2(at, Vector2(width, 34)), Color(0.035, 0.075, 0.13, 0.93))
-			draw_string(font, at + Vector2(14, 23), text, HORIZONTAL_ALIGNMENT_LEFT, width - 24, 16, Color("e6dcbf"))
+			var width: float = minf(size.x - 40, font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x + 32)
+			var at := Vector2(floorf((size.x - width) / 2), size.y - 100)
+			overlay.draw_rect(Rect2(at, Vector2(width, 40)), Color(0.035, 0.06, 0.09, 0.94))
+			overlay.draw_rect(Rect2(at, Vector2(width, 40)).grow(-1), Color("d7c59d"), false, 2.0)
+			overlay.draw_string(font, at + Vector2(16, 29), text, HORIZONTAL_ALIGNMENT_LEFT, width - 28, 24, Color("efe3c2"))
 			return
 
 func _distance_to_object(e: Dictionary, p: Vector2) -> float:
 	var rect: Rect2i = Walking.rect_from_bottom_left(e)
-	var dx: float = maxf(maxf(rect.position.x-p.x,0),p.x-(rect.end.x-1))
-	var dy: float = maxf(maxf(rect.position.y-p.y,0),p.y-(rect.end.y-1))
-	return dx+dy
+	var dx: float = maxf(maxf(rect.position.x - p.x, 0), p.x - (rect.end.x - 1))
+	var dy: float = maxf(maxf(rect.position.y - p.y, 0), p.y - (rect.end.y - 1))
+	return dx + dy
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
-		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if Rect2(Vector2(size.x-222,76),Vector2(204,158)).has_point(event.position) else Control.CURSOR_ARROW
+		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if _minimap_rect().has_point(event.position) else Control.CURSOR_ARROW
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if Rect2(Vector2(size.x-222,76),Vector2(204,158)).has_point(event.position):
+		if _minimap_rect().has_point(event.position):
 			map_requested.emit()
 			accept_event()
 			return
-		var cell: Vector2 = ((event.position / world_zoom + camera) / TILE).floor()
+		if region.is_empty(): return
+		var cell: Vector2 = _cell_at(event.position)
 		for e in region.get("entities", []):
-			if _distance_to_object(e,cell) == 0:
+			if _distance_to_object(e, cell) == 0:
 				entity_clicked.emit(str(e.id))
 				accept_event()
 				return

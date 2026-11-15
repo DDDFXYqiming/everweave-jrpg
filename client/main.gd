@@ -216,22 +216,25 @@ func _box(fill: Color, outline: Color, radius: int = 3) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
 	s.bg_color = fill
 	s.border_color = outline
-	s.set_border_width_all(1)
+	s.set_border_width_all(2)
 	s.set_corner_radius_all(0)
-	s.border_width_bottom = 2 if radius > 3 else 1
+	s.anti_aliasing = false
 	s.content_margin_left = 14
 	s.content_margin_right = 14
 	s.content_margin_top = 10
 	s.content_margin_bottom = 10
 	return s
 
+static func pixel_size(requested: int) -> int:
+	if requested < 20: return 12
+	if requested < 34: return 24
+	return 36 if requested < 44 else 48
+
 func _label(parent: Node, text: String, font_size: int = 16, color: Color = Color("e8e4d8")) -> Label:
 	var label := Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_font_size_override("font_size", pixel_size(font_size))
 	label.add_theme_color_override("font_color", color)
-	if font_size >= 24:
-		label.add_theme_font_override("font",preload("res://assets/fonts/FusionPixel.ttf"))
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(label)
@@ -240,8 +243,7 @@ func _label(parent: Node, text: String, font_size: int = 16, color: Color = Colo
 func _button(parent: Node, text: String, callback: Callable) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.add_theme_font_override("font",preload("res://assets/fonts/LXGWWenKaiScreen.ttf"))
-	button.add_theme_font_size_override("font_size",18)
+	button.add_theme_font_size_override("font_size",12)
 	button.custom_minimum_size.y = 38
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(callback)
