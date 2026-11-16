@@ -111,7 +111,7 @@ func _run() -> void:
 	var minimap_click := InputEventMouseButton.new()
 	minimap_click.button_index = MOUSE_BUTTON_LEFT
 	minimap_click.pressed = true
-	minimap_click.position = main.world_view.global_position + Vector2(main.world_view.size.x-80,40)
+	minimap_click.position = main.world_view.global_position + main.world_view._minimap_rect().get_center()
 	root.push_input(minimap_click,true)
 	var minimap_release := minimap_click.duplicate()
 	minimap_release.pressed = false

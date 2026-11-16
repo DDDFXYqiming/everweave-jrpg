@@ -14,7 +14,8 @@ class JevAssetTests(unittest.TestCase):
         object_id=next(v['id'] for v in pool['images'] if 'object' in v['roles'])
         design={'name':'云层观测站','description':'用终端读取风暴档案','visual_direction':'industrial science fiction',
                 'slot_briefs':{'focal':{'identity':'档案终端'},'enemy':{'identity':'风暴防卫体'}}}
-        def response(version,state,questions,cancel_event=None):
+        def response(version,state,questions,cancel_event=None,deadline=None,metrics=None):
+            metrics.update(requests=1)
             answers={}
             for key,question in questions.items():
                 options=list(question.criteria)
@@ -63,7 +64,8 @@ class JevSemanticTests(unittest.TestCase):
         state={'region_id':'r_test','units':[
             {'content_id':'pay','path':'region.program.actions[0]','kind':'action','player_text':{'label':'交一张票'},'blocked_hint':'需要一张票','when':{'item':'ticket'},'direct_effects':[{'op':'item','id':'ticket','count':-2}],'triggered_hooks':[],'objectives':[],'definitions':[]},
         ]}
-        def response(version,payload,questions,cancel_event=None):
+        def response(version,payload,questions,cancel_event=None,deadline=None,metrics=None):
+            metrics.update(requests=1)
             answers={key:{'choice':('contradicted' if key.startswith('effect') else 'insufficient'),'confidence':.8,
                           'probabilities':{'consistent':.1,'contradicted':.8 if key.startswith('effect') else .1,'insufficient':.1 if key.startswith('effect') else .8}}
                      for key in questions}

@@ -622,11 +622,10 @@ class Director:
    if w.reaction_needed and self.deferred is None and available('reaction',s['current']):
     w.reaction_needed=False
     return w.context(kind='reaction'),copy.deepcopy(self.cfg),self.generation
-   if adventure.review_due(w) and available('direction',s['current']) and not any(k[1]=='direction' for k in self.in_flight):return w.context(kind='direction'),copy.deepcopy(self.cfg),self.generation
-  if any(k[1]=='region' for k in self.in_flight):return None
   pending=[(rid,distance) for rid,distance in w.prefetch_targets() if not s['topology'][rid]['ready'] and available('region',rid)]
   if s.get('campaign'):pending.sort(key=lambda item:(item[1],s['topology'][item[0]].get('chapter_id')!=s['campaign']['active']))
   if pending:return region_job(pending[0][0])
+  if not s['battle'] and not s['ui'] and adventure.review_due(w) and available('direction',s['current']) and not any(k[1]=='direction' for k in self.in_flight):return w.context(kind='direction'),copy.deepcopy(self.cfg),self.generation
   choices=[rid for rid,distance in w.prefetch_targets() if not w.reaction_needed and s['topology'][rid].get('needs_refresh') and available('region',rid)]
   return region_job(choices[0]) if choices else None
  def step(self):

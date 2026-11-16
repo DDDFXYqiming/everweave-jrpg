@@ -27,7 +27,7 @@ class GenerationSchedulingTests(unittest.TestCase):
         self.w.apply_patch(two_exits(),self.w.context())
         self.targets=list(self.w.state['topology']['r0']['children'])
         self.d=Director(self.w)
-        self.d.configure(dict(offline=False,api_key='mock-only',max_calls=2));self.d.cfg['cooldown']=0
+        self.d.configure(dict(offline=False,api_key='mock-only',max_calls=2,parallel_region=False));self.d.cfg['cooldown']=0
 
     def tearDown(self):self.d.stop();self.w.store.close()
 

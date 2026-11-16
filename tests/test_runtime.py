@@ -340,7 +340,9 @@ class PersistenceTests(unittest.TestCase):
             e=at_entity(w,'cache');w.action({'op':'interact','id':e['id']});w.action({'op':'close'})
             e=at_entity(w,'watcher');w.action({'op':'interact','id':e['id']});w.action({'op':'combat','move':'attack'})
             before=w.snapshot();w.store.close()
-            new=World(Store(path));self.assertEqual(before,new.snapshot());new.store.close()
+            new=World(Store(path));after=new.snapshot()
+            self.assertNotEqual(before.pop('region_static_token'),after.pop('region_static_token'))
+            self.assertEqual(before,after);new.store.close()
 
     def test_sqlite_never_contains_api_key(self):
         with tempfile.TemporaryDirectory() as td:

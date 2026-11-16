@@ -81,7 +81,7 @@ class PrefetchTests(unittest.TestCase):
     def test_two_workers_prepare_distinct_regions_with_bounded_concurrency(self):
         self.w.state['topology']['r0a']['ready']=False
         self.w.state['topology']['r0b']['ready']=False
-        self.d.configure({'offline':False,'api_key':'test','max_calls':2});self.d.cfg['cooldown']=0
+        self.d.configure({'offline':False,'api_key':'test','max_calls':2,'parallel_region':False});self.d.cfg['cooldown']=0
         both=threading.Event();release=threading.Event();mutex=threading.Lock();targets=[]
         def answer(context,kind,repair=''):
             with mutex:

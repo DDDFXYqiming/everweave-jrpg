@@ -59,10 +59,12 @@ class RegionSnapshots:
         entry = self.entries.get(rid)
         if entry is None or entry[0] is not region or entry[1] != epoch or rid in self.dirty:
             definition = {key: value for key, value in region.items() if key in STATIC_REGION_FIELDS}
-            if entry is None or entry[0] is not region or entry[1] != epoch or definition != entry[2]:
+            if entry is None or entry[1] != epoch or definition != entry[2]:
                 self.sequence += 1
                 entry = (region, epoch, _freeze(definition), epoch + ':' + self.instance + ':' + str(self.sequence))
-                self.entries[rid] = entry
+            else:
+                entry = (region, epoch, entry[2], entry[3])
+            self.entries[rid] = entry
             self.dirty.discard(rid)
         self.entries.move_to_end(rid)
         while len(self.entries) > 6:

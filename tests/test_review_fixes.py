@@ -197,7 +197,7 @@ class PipelineRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.context={'destination':{'name':'回声藏书馆','description':'test'},'region_purpose':'test'}
         self.game,self.av=components(contract(self.context));self.calls=[]
-        self.cfg={'hybrid_content':False,'jev_enabled':False,'_request_meta':{'kind':'region','target':'r0','call':1},
+        self.cfg={'provider':'chatgpt_subscription','hybrid_content':False,'jev_enabled':False,'_request_meta':{'kind':'region','target':'r0','call':1},
                   '_region_subrequest':lambda component:2,'_region_can_repair':lambda:True}
     def generate(self):return generate(self.context,'system',json.dumps({'world_context':self.context}),self.cfg)
     def test_successful_component_and_usage_survive_sibling_failure_and_restart(self):

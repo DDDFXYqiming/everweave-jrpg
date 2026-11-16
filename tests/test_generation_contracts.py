@@ -144,7 +144,10 @@ class GenerationContracts(unittest.TestCase):
                 w.apply_patch(expansion(),w.context(kind='reaction'));before=w.snapshot()
             finally:w.store.close()
             restored=World(Store(path))
-            try:self.assertEqual(before,restored.snapshot())
+            try:
+                after=restored.snapshot()
+                self.assertNotEqual(before.pop('region_static_token'),after.pop('region_static_token'))
+                self.assertEqual(before,after)
             finally:restored.store.close()
 
 

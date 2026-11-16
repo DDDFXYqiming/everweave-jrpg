@@ -28,7 +28,7 @@ class PlaySessionTests(unittest.TestCase):
         self.world.store.close(); self.folder.cleanup()
 
     def test_player_projection_excludes_solutions_and_unrevealed_content(self):
-        snap = self.world.snapshot()
+        snap = json.loads(json.dumps(self.world.snapshot()))
         snap['region']['program']['secret_answer'] = 'UNSEEN_RULE'
         snap['region']['entities'].append(dict(id='UNSEEN_EXIT', spent=True, hidden=True))
         snap['region']['scenes'] = [dict(text='UNSEEN_SCENE')]

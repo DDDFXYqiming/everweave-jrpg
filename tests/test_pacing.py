@@ -17,7 +17,7 @@ class PacingTests(unittest.TestCase):
     def tearDown(self):self.w.store.close()
     def generate(self,rid):self.w.apply_patch(authored_adventure_region(self.w,rid),self.w.context(rid))
     def director(self):
-        d=Director(self.w);d.configure(dict(offline=False,api_key='test',base_url='https://example.test',model='test',max_calls=4));d.cfg['cooldown']=0;return d
+        d=Director(self.w);d.configure(dict(offline=False,api_key='test',base_url='https://example.test',model='test',max_calls=4,parallel_region=False));d.cfg['cooldown']=0;return d
     def test_no_change_review_does_not_cancel_inflight_region(self):
         ctx=self.w.context('c1_station');revision=self.w.state['adventure']['revision']
         self.w.apply_patch(dict(kind='direction',direction=dict(reason='保持当前计划')),self.w.context(kind='direction'))

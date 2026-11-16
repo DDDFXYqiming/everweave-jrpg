@@ -56,7 +56,7 @@ class RegionPipelineTests(unittest.TestCase):
             if not entered.wait(2):raise AssertionError('component workers did not overlap')
             value=game if cfg['_request_meta']['component']=='gameplay' else audiovisual
             return json.dumps(value),{'input_tokens':20,'output_tokens':7,'reasoning_tokens':3,'reasoning_observed':True}
-        cfg={'hybrid_content':False,'_request_meta':{'kind':'region','target':'r0','call':1},'_region_subrequest':lambda component:reserved.append(component) or 2}
+        cfg={'provider':'chatgpt_subscription','hybrid_content':False,'_request_meta':{'kind':'region','target':'r0','call':1},'_region_subrequest':lambda component:reserved.append(component) or 2}
         with patch('engine.chatgpt_provider.generate',side_effect=request):raw,usage=generate(context,'region system',json.dumps({'world_context':context}),cfg)
         result=json.loads(raw)
         self.assertEqual(set(branches),{'gameplay','audiovisual'});self.assertEqual(reserved,['audiovisual'])
@@ -75,7 +75,7 @@ class RegionPipelineTests(unittest.TestCase):
         def rank_assets(region_context,region_design,fallback,cancel_event):
             self.assertTrue(gameplay_started.wait(2),'gameplay must start before semantic asset selection finishes')
             return fallback,{'status':'ranked','requests':1,'usage':{'input_tokens':10,'output_tokens':2},'gaps':[]}
-        cfg={'hybrid_content':True,'jev_enabled':True,'_request_meta':{'kind':'region','target':'r0','call':1},
+        cfg={'provider':'chatgpt_subscription','hybrid_content':True,'jev_enabled':True,'_request_meta':{'kind':'region','target':'r0','call':1},
              '_region_subrequest':lambda component:2,'_jev_event':lambda stage,report:events.append((stage,report['status']))}
         with patch('engine.chatgpt_provider.generate',side_effect=request),patch('engine.jev_judgments.rank_assets',side_effect=rank_assets):
             raw,_=generate(context,'region system',json.dumps({'world_context':context}),cfg)
@@ -89,7 +89,7 @@ class RegionPipelineTests(unittest.TestCase):
             component=cfg['_request_meta']['component']
             if component=='gameplay':return json.dumps(game),{}
             av_calls.append(1);return json.dumps(bad if len(av_calls)==1 else audiovisual),{}
-        cfg={'hybrid_content':False,'_request_meta':{'kind':'region','target':'r0','call':1},
+        cfg={'provider':'chatgpt_subscription','hybrid_content':False,'_request_meta':{'kind':'region','target':'r0','call':1},
              '_region_subrequest':lambda component:reserved.append(component) or len(reserved)+1,'_region_can_repair':lambda:True}
         with patch('engine.chatgpt_provider.generate',side_effect=request):raw,usage=generate(context,'region system',json.dumps({'world_context':context}),cfg)
         self.assertEqual((len(av_calls),reserved,usage['pipeline_requests']),(2,['audiovisual','audiovisual'],3))
@@ -163,8 +163,15 @@ class DirectorPipelineTests(unittest.TestCase):
             return json.dumps(authored_adventure_region(self.world,context['target'])),{'input_tokens':30,'output_tokens':20,'pipeline_requests':2}
         report={'status':'reviewed','requests':1,'model':'jev-1.13.0','usage':{'input_tokens':80,'output_tokens':12},
                 'concerns':[{'path':'region.program.actions[0]','verdict':'insufficient'}]}
+        reviewed=threading.Event()
+        def on_report(result,identity):
+            director._review_finished(result,identity)
+            reviewed.set()
+        director.review_queue.on_report=on_report
         with patch('engine.region_pipeline.generate',side_effect=pipeline),patch('engine.semantic_review.review',return_value=report):
             self.assertTrue(director.step())
+            self.assertTrue(reviewed.wait(3),'semantic review must finish and record its usage')
+        director.stop()
         self.assertEqual((director.calls,director.accepted),(2,1))
         self.assertEqual((director.jev_requests,director.jev_tokens_in,director.jev_tokens_out,director.jev_concerns),(1,80,12,1))
         self.assertEqual(director.status()['jev_reports'][-1]['stage'],'content_review')
