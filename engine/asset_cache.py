@@ -66,7 +66,8 @@ def fetch(url, sha):
         raise ValueError('Asset manifests require a public HTTPS download URL')
     if url.startswith('https://kenney.nl/download-link/'):
         request = urllib.request.Request(url, headers={
-            'User-Agent': 'Everweave-Asset-Cache/1.0', 'Cache-Control': 'no-cache'})
+            'User-Agent': 'Everweave-Asset-Cache/1.0', 'Cache-Control': 'no-cache',
+            'Referer': 'https://kenney.nl/'})
         with urllib.request.urlopen(request, timeout=45) as response:
             if not response.url.startswith('https://kenney.nl/download-link/'):
                 raise ValueError('Kenney download-link endpoint redirected unexpectedly')
