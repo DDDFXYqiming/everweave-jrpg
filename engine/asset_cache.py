@@ -64,6 +64,18 @@ def atomic_write(path, data):
 def fetch(url, sha):
     if not isinstance(url, str) or not url.startswith('https://'):
         raise ValueError('Asset manifests require a public HTTPS download URL')
+    if url.startswith('https://kenney.nl/download-link/'):
+        request = urllib.request.Request(url, headers={
+            'User-Agent': 'Everweave-Asset-Cache/1.0', 'Cache-Control': 'no-cache'})
+        with urllib.request.urlopen(request, timeout=45) as response:
+            if not response.url.startswith('https://kenney.nl/download-link/'):
+                raise ValueError('Kenney download-link endpoint redirected unexpectedly')
+            metadata = response.read(16_385)
+        if len(metadata) > 16_384:
+            raise ValueError('Kenney download-link response exceeds size limit')
+        url = json.loads(metadata)['url']
+        if not isinstance(url, str) or not url.startswith('https://kenney.nl/download/'):
+            raise ValueError('Kenney download-link response has no official HTTPS download URL')
     request = urllib.request.Request(url, headers={'User-Agent': 'Everweave-Asset-Cache/1.0'})
     with urllib.request.urlopen(request, timeout=45) as response:
         if not response.url.startswith('https://'):

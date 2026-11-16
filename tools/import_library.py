@@ -10,12 +10,11 @@ import json
 from pathlib import Path
 import re
 import sys
-import urllib.request
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-from engine.asset_cache import encode_rgba
+from engine.asset_cache import encode_rgba, fetch
 LIB=ROOT/'assets/library'
 CACHE=ROOT/'userdata/library-ingest'
 
@@ -71,10 +70,7 @@ def main():
         file=CACHE/(source+spec['extension'])
         if not file.exists():
             if not args.download:raise SystemExit('Missing source cache: '+str(file)+'; use --download')
-            req=urllib.request.Request(spec['download'],headers={'User-Agent':'Everweave-Asset-Importer/1.0'})
-            with urllib.request.urlopen(req,timeout=45) as response:data=response.read(20_000_001)
-            assert len(data)<=20_000_000,'package size limit'
-            assert digest(data)==spec['sha256'],source+' source revision changed'
+            data=fetch(spec['download'],spec['sha256'])
             file.write_bytes(data)
         data=file.read_bytes();assert digest(data)==spec['sha256'],source
         if spec['extension']=='.zip':
